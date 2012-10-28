@@ -2,8 +2,8 @@
 AC_INIT([isolator],
         m4_esyscmd([./git-version-gen | tr -d '\n']),
         [dcjones@cs.washington.edu])
-AC_INIT_AUTOMAKE([foreign -Wall -Werror])
-m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes]))
+AM_INIT_AUTOMAKE([foreign -Wall -Werror])
+m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 AC_CONFIG_MACRO_DIR([m4])
 
@@ -11,6 +11,7 @@ AM_PROG_AR
 AC_PROG_CC
 AM_PROG_CC_C_O
 AC_PROG_CXX
+LT_INIT
 
 # Check for SIMD instruction sets.
 AX_EXT
@@ -51,8 +52,8 @@ AC_CHECK_LIB([gsl],[gsl_blas_dgemm])
 AX_PATH_GSL
 
 # Configure option to disable compliler optimization.
-opt_CFLAGS="-std=gnu99 -Wall -Wextra -pedantic -g -O3 -DNDEBUG"
-dbg_CFLAGS="-std=gnu99 -Wall -Wextra -pedantic -g -O0"
+opt_CFLAGS="-Wall -Wextra -pedantic -g -O3 -DNDEBUG"
+dbg_CFLAGS="-Wall -Wextra -pedantic -g -O0"
 
 AC_ARG_ENABLE([debug],
               [AS_HELP_STRING([--enable-debug],
@@ -63,6 +64,8 @@ AS_IF([test "x$enable_debug" = xyes],
       [CFLAGS="$dbg_CFLAGS"],
       [CFLAGS="$opt_CFLAGS"])
 
+CXXFLAGS=$CFLAGS
+CFLAGS="$CFLAGS -std=gnu99"
 
 # Don't crash on >4GB files.
 AC_DEFINE([_FILE_OFFSET_BITS], [64],
@@ -72,8 +75,10 @@ AC_DEFINE([_FILE_OFFSET_BITS], [64],
 AC_DEFINE([GSL_RANGE_CHECK_OFF], [],
           [Make some GSL functions a tiny bit faster.])
 
-AC_CONFIG_FILES([Makefile,
-                 src/Makefile])
+AC_CONFIG_FILES([Makefile
+                 src/Makefile
+                 src/hat-trie/Makefile
+                 src/samtools/Makefile])
 
 AM_CONFIG_HEADER([src/config.h])
 
