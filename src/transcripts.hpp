@@ -73,6 +73,9 @@ class TranscriptSet
          */
         void read_gtf(FILE* f);
 
+        /* Number of transcripts held in the set. */
+        size_t size() const;
+
     private:
         /* Transcripts ordered by position. */
         std::set<Transcript> transcripts;

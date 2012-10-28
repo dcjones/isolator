@@ -72,6 +72,12 @@ TranscriptSet::TranscriptSet()
 }
 
 
+size_t TranscriptSet::size() const
+{
+    return transcripts.size();
+}
+
+
 void TranscriptSet::read_gtf(FILE* f)
 {
     gtf_file_t* gtf_file = gtf_file_alloc(f);
@@ -130,9 +136,8 @@ void TranscriptSet::read_gtf(FILE* f)
     for (TrieMapIterator<Transcript> t(ts);
          t != TrieMapIterator<Transcript>();
          ++t) {
-       transcripts.insert(t->second); 
+        transcripts.insert(*t->second);
     }
-
 }
 
 

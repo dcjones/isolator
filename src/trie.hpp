@@ -4,6 +4,7 @@
 
 #include <cstring>
 #include <boost/iterator/iterator_facade.hpp>
+//#include <boost/tuple.hpp>
 
 #include "hat-trie/hat-trie.h"
 
@@ -74,9 +75,13 @@ class TrieSetIterator :
 
         bool equal(TrieSetIterator const& other) const
         {
-            return ((it == NULL || hattrie_iter_finished(it)) &&
-                    (other.it == NULL || hattrie_iter_finished(other.it))) ||
-                   hattrie_iter_equal(it, other.it);
+            if (it == NULL || hattrie_iter_finished(it)) {
+                return other.it == NULL || hattrie_iter_finished(other.it);
+            }
+            else if (other.it == NULL || hattrie_iter_finished(other.it)) {
+                return false;
+            }
+            else return hattrie_iter_equal(it, other.it);
         }
 
         const char* dereference() const
@@ -106,7 +111,7 @@ class TrieMap
 
         bool has(const char* key)
         {
-            hattrie_tryget(t, key, strlen(key)) != NULL;
+            return hattrie_tryget(t, key, strlen(key)) != NULL;
         }
 
         T& operator [] (const char* key)
@@ -131,11 +136,10 @@ class TrieMap
 template <typename T>
 class TrieMapIterator :
     public boost::iterator_facade<TrieMapIterator<T>,
-                                  const std::pair<const char*, T&>,
+                                  const std::pair<const char*, T*>,
                                   boost::forward_traversal_tag>
 {
     public:
-
         TrieMapIterator()
             : it(NULL)
         {
@@ -144,6 +148,11 @@ class TrieMapIterator :
         TrieMapIterator(TrieMap<T>& s)
         {
             it = hattrie_iter_begin(s.t, false);
+            if (!hattrie_iter_finished(it)) {
+                x.first = hattrie_iter_key(it, NULL);
+                T** slot = reinterpret_cast<T**>(hattrie_iter_val(it));
+                x.second = *slot;
+            }
         }
 
         ~TrieMapIterator()
@@ -158,24 +167,33 @@ class TrieMapIterator :
         void increment()
         {
             hattrie_iter_next(it);
+            if (!hattrie_iter_finished(it)) {
+                x.first = hattrie_iter_key(it, NULL);
+                T** slot = reinterpret_cast<T**>(hattrie_iter_val(it));
+                x.second = *slot;
+            }
         }
 
         bool equal(TrieMapIterator<T> const& other) const
         {
-            return ((it == NULL || hattrie_iter_finished(it)) &&
-                    (other.it == NULL || hattrie_iter_finished(other.it))) ||
-                   hattrie_iter_equal(it, other.it);
+            if (it == NULL || hattrie_iter_finished(it)) {
+                return other.it == NULL || hattrie_iter_finished(other.it);
+            }
+            else if (other.it == NULL || hattrie_iter_finished(other.it)) {
+                return false;
+            }
+            else return hattrie_iter_equal(it, other.it);
         }
 
-        const std::pair<const char*, T&> dereference() const
+        const std::pair<const char*, T*>& dereference() const
         {
-            size_t len;
-            const char* key = hattrie_iter_key(it, &len);
-            T** slot = reinterpret_cast<T**>(hattrie_iter_val(it));
-            return std::pair<const char*, T&>(key, **slot);
+            return x;
         }
 
         hattrie_iter_t* it;
+
+        /* key value at the current position. */
+        std::pair<const char*, T*> x;
 };
 
 
