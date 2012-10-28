@@ -1,0 +1,18 @@
+#!/bin/sh
+
+if test -d .git
+then
+    desc=`git describe | sed 's/^v//'`
+    branch=`git symbolic-ref HEAD | grep -o '[[:alpha:]]\+$'`
+    if [ "$branch" != "master" ]
+    then
+        V=$desc-$branch
+    else
+        V=$desc
+    fi
+else
+    V="unknown"
+fi
+
+echo $V
+
