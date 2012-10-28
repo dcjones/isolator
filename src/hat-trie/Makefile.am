@@ -1,5 +1,5 @@
 
-noinst_LTLIBRARIES=libhat-trie.la
+noinst_LTLIBRARIES = libhat-trie.la
 
 libhat_trie_la_SOURCES = hat-trie.h    hat-trie.c \
                          ahtable.h     ahtable.c \

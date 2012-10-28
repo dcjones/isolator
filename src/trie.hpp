@@ -131,7 +131,7 @@ class TrieMap
 template <typename T>
 class TrieMapIterator :
     public boost::iterator_facade<TrieMapIterator<T>,
-                                  std::pair<const char*, T&>,
+                                  const std::pair<const char*, T&>,
                                   boost::forward_traversal_tag>
 {
     public:
@@ -143,7 +143,7 @@ class TrieMapIterator :
 
         TrieMapIterator(TrieMap<T>& s)
         {
-            it = hattrie_iter_begin(s.t);
+            it = hattrie_iter_begin(s.t, false);
         }
 
         ~TrieMapIterator()
@@ -167,7 +167,7 @@ class TrieMapIterator :
                    hattrie_iter_equal(it, other.it);
         }
 
-        std::pair<const char*, T&> dereference() const
+        const std::pair<const char*, T&> dereference() const
         {
             size_t len;
             const char* key = hattrie_iter_key(it, &len);

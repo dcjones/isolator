@@ -77,6 +77,7 @@ AC_DEFINE([GSL_RANGE_CHECK_OFF], [],
 
 AC_CONFIG_FILES([Makefile
                  src/Makefile
+                 src/gtf/Makefile
                  src/hat-trie/Makefile
                  src/samtools/Makefile])
 
