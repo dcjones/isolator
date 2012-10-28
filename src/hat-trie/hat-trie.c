@@ -415,6 +415,14 @@ struct hattrie_iter_t_
 };
 
 
+bool hattrie_iter_equal(const hattrie_iter_t* a, const hattrie_iter_t* b)
+{
+    return a->T      == b->T &&
+           a->sorted == b->sorted &&
+           a->i      == b->i;
+}
+
+
 static void hattrie_iter_pushchar(hattrie_iter_t* i, size_t level, char c)
 {
     if (i->keysize < level) {

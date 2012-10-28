@@ -57,6 +57,8 @@ bool            hattrie_iter_finished  (hattrie_iter_t*);
 void            hattrie_iter_free      (hattrie_iter_t*);
 const char*     hattrie_iter_key       (hattrie_iter_t*, size_t* len);
 value_t*        hattrie_iter_val       (hattrie_iter_t*);
+bool            hattrie_iter_equal     (const hattrie_iter_t* a,
+                                        const hattrie_iter_t* b);
 
 #ifdef __cplusplus
 }
