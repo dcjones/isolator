@@ -1,5 +1,5 @@
 
-SUBDIRS = gtf hat-trie samtools
+SUBDIRS = gtf hat-trie samtools sqlite3
 
 bin_PROGRAMS = isolator
 
@@ -13,6 +13,7 @@ isolator_SOURCES = isolator.cpp \
 isolator_LDADD = gtf/libgtf.la \
                  hat-trie/libhat-trie.la \
                  samtools/libbam.la \
+                 sqlite3/libsqlite3.la \
                  -lz \
                  -lgsl \
                  -lgslcblas \

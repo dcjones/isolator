@@ -80,7 +80,8 @@ AC_CONFIG_FILES([Makefile
                  src/Makefile
                  src/gtf/Makefile
                  src/hat-trie/Makefile
-                 src/samtools/Makefile])
+                 src/samtools/Makefile
+                 src/sqlite3/Makefile])
 
 AM_CONFIG_HEADER([src/config.h])
 
