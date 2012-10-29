@@ -2,6 +2,7 @@
 #include "gtf/gtf_parse.h"
 #include "transcripts.hpp"
 #include "trie.hpp"
+#include "logger.hpp"
 
 
 Exon::Exon()
@@ -80,6 +81,17 @@ size_t TranscriptSet::size() const
 
 void TranscriptSet::read_gtf(FILE* f)
 {
+    const char* task_name = "Parsing GTF";
+
+    long fsize = 0;
+    if (fseek(f, 0, SEEK_END) == 0) {
+        fsize = ftell(f);
+        rewind(f);
+    }
+
+    Logger::push_task(task_name, fsize / 1e6);
+
+
     gtf_file_t* gtf_file = gtf_file_alloc(f);
     gtf_row_t* row = gtf_row_alloc();
 
@@ -89,7 +101,14 @@ void TranscriptSet::read_gtf(FILE* f)
     /* Transcripts indexed by transcript_id. */
     TrieMap<Transcript> ts;
 
+    long fpos_mark = 1e6;
+
     while (gtf_next(gtf_file, row)) {
+        if (fsize > 0 && ftell(f) > fpos_mark) {
+            Logger::get_task(task_name).inc();
+            fpos_mark += 1e6;
+        }
+
         ++count;
 
         if (strcmp("exon",        row->feature->s) != 0 &&
