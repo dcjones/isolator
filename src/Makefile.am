@@ -5,6 +5,7 @@ bin_PROGRAMS = isolator
 
 isolator_SOURCES = isolator.cpp \
                    common.hpp common.cpp \
+                   constants.hpp constants.cpp \
                    logger.hpp logger.cpp \
                    transcripts.hpp transcripts.cpp \
                    trie.hpp
@@ -17,4 +18,5 @@ isolator_LDADD = gtf/libgtf.la \
                  -lgslcblas \
                  $(BOOST_THREAD_LIBS) \
                  $(BOOST_SYSTEM_LIBS) \
-				 $(BOOST_TIMER_LIBS)
+                 $(BOOST_TIMER_LIBS)
+

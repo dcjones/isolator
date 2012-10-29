@@ -157,6 +157,9 @@ void TranscriptSet::read_gtf(FILE* f)
          ++t) {
         transcripts.insert(*t->second);
     }
+
+    Logger::pop_task(task_name);
+    Logger::info("Read %lu transcripts.", (unsigned long) size());
 }
 
 
