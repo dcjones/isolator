@@ -2,6 +2,9 @@
 #ifndef ISOLATOR_COMMON_HPP
 #define ISOLATOR_COMMON_HPP
 
+#include <boost/flyweight.hpp>
+#include <string>
+
 /* A genomic position. */
 typedef long pos_t;
 
@@ -16,6 +19,15 @@ typedef enum {
 /* Like strcmp but impart a more natural ordering on sequence names. */
 int seqname_compare(const char* u, const char* v);
 
+/* Define types for string interning using boost::flyweight. */
+struct gene_id_tag {};
+typedef boost::flyweight<std::string, boost::flyweights::tag<gene_id_tag> > GeneID;
+
+struct transcript_id_tag {};
+typedef boost::flyweight<std::string, boost::flyweights::tag<transcript_id_tag> > TranscriptID;
+
+struct seq_name_tag {};
+typedef boost::flyweight<std::string, boost::flyweights::tag<transcript_id_tag> > SeqName;
 
 #endif
 

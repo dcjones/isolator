@@ -39,14 +39,9 @@ class Transcript : public std::set<Exon>
         void add(pos_t start, pos_t end);
 
     private:
-        struct gene_id_tag {};
-        boost::flyweight<std::string, boost::flyweights::tag<gene_id_tag> > gene_id;
-
-        struct transcript_id_tag {};
-        boost::flyweight<std::string, boost::flyweights::tag<transcript_id_tag> > transcript_id;
-
-        struct seq_name_tag {};
-        boost::flyweight<std::string, boost::flyweights::tag<seq_name_tag> > seq_name;
+        GeneID gene_id;
+        TranscriptID transcript_id;
+        SeqName seq_name;
 
         strand_t strand;
 

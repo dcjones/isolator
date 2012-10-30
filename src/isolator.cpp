@@ -6,6 +6,7 @@
 #include "config.h"
 #include "constants.hpp"
 #include "logger.hpp"
+#include "sample_db.hpp"
 #include "transcripts.hpp"
 
 const char* isolator_logo =
@@ -61,15 +62,13 @@ int quantify(int argc, char* argv[])
 
     const char* seq_fn  = NULL;
     const char* out_fn = "isolator.db";
-    std::set<std::string> tran_id_whitelist;
-    std::set<std::string> gene_id_whitelist;
     constants::num_threads = boost::thread::hardware_concurrency();
 
     int opt;
     int opt_idx;
 
     while (true) {
-        opt = getopt_long(argc, argv, "ho:p:T:G:g:", long_options, &opt_idx);
+        opt = getopt_long(argc, argv, "ho:p:g:", long_options, &opt_idx);
 
         if (opt == -1) break;
 
@@ -84,16 +83,6 @@ int quantify(int argc, char* argv[])
 
             case 'p':
                 constants::num_threads = std::max(1, atoi(optarg));
-                break;
-
-            case 'T':
-                // TODO
-                //read_whitelist(optarg, tran_id_whitelist);
-                break;
-
-            case 'G':
-                // TODO
-                //read_whitelist(optarg, gene_id_whitelist);
                 break;
 
             case 'g':
@@ -146,6 +135,7 @@ int quantify(int argc, char* argv[])
     fclose(gtf_f);
 
     /* Prepare output database. */
+    SampleDB db(out_fn, true);
     /* TODO */
 
     /* Initialize the sampler. */

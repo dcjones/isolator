@@ -65,7 +65,7 @@ AS_IF([test "x$enable_debug" = xyes],
       [CFLAGS="$dbg_CFLAGS"],
       [CFLAGS="$opt_CFLAGS"])
 
-CXXFLAGS=$CFLAGS
+CXXFLAGS="$CFLAGS -std=c++0x"
 CFLAGS="$CFLAGS -std=gnu99"
 
 # Don't crash on >4GB files.

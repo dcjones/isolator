@@ -2,6 +2,7 @@
 #define BAM_SAM_H
 
 #include "bam.h"
+#include "samtools_extra.h"
 
 /*!
   @header

@@ -173,7 +173,7 @@ void Logger::print_loop()
     while (!finished)
     {
         if (!suspended) flush();
-        boost::this_thread::sleep(boost::posix_time::milliseconds(500));
+        boost::this_thread::sleep(boost::posix_time::milliseconds(100));
     }
 }
 

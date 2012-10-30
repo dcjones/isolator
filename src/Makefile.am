@@ -7,6 +7,8 @@ isolator_SOURCES = isolator.cpp \
                    common.hpp common.cpp \
                    constants.hpp constants.cpp \
                    logger.hpp logger.cpp \
+                   sam_scan.hpp sam_scan.cpp \
+                   sample_db.hpp sample_db.cpp \
                    transcripts.hpp transcripts.cpp \
                    trie.hpp
 
