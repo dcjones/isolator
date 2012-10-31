@@ -136,6 +136,8 @@ int quantify(int argc, char* argv[])
 
     /* Prepare output database. */
     SampleDB db(out_fn, true);
+
+    /* Initialize the fragment model. */
     /* TODO */
 
     /* Initialize the sampler. */

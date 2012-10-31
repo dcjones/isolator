@@ -6,7 +6,11 @@ bin_PROGRAMS = isolator
 isolator_SOURCES = isolator.cpp \
                    common.hpp common.cpp \
                    constants.hpp constants.cpp \
+                   fragment_model.hpp fragment_model.cpp \
+                   intervals.hpp intervals.cpp \
                    logger.hpp logger.cpp \
+                   queue.hpp \
+                   read_set.hpp read_set.cpp \
                    sam_scan.hpp sam_scan.cpp \
                    sample_db.hpp sample_db.cpp \
                    transcripts.hpp transcripts.cpp \

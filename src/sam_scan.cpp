@@ -5,6 +5,7 @@
 extern "C" {
 #include "samtools/khash.h"
 #include "samtools/sam.h"
+#include "samtools/faidx.h"
 KHASH_MAP_INIT_STR(s, int)
 }
 
@@ -53,6 +54,21 @@ SamScanInterval::SamScanInterval()
 }
 
 
+SamScanInterval::SamScanInterval(const Interval& interval)
+    : seqname(interval.seqname)
+    , start(interval.start)
+    , end(interval.end)
+    , strand(interval.strand)
+{
+}
+
+
+void SamScanInterval::add_alignment(const bam1_t* b)
+{
+    rs.add_alignment(b);
+}
+
+
 bool SamScanInterval::operator < (const SamScanInterval& other) const
 {
     if      (tid != other.tid)     return tid < other.tid;
@@ -70,7 +86,12 @@ void sam_scan(std::vector<SamScanInterval*>& intervals,
         bam_f = samopen(bam_fn, "r", NULL);
     }
     if (bam_f == NULL) {
-        Logger::abort("Can't open SAM/BAM file [%s].\n", bam_fn);
+        Logger::abort("Can't open SAM/BAM file %s.\n", bam_fn);
+    }
+
+    faidx_t* fa_f = fai_load(fa_fn);
+    if (fa_f == NULL) {
+        Logger::abort("Can't open reference genome sequence in %s.", fa_fn);
     }
 
     /* Sort the intervals in the same order as the BAM file. */
@@ -86,6 +107,10 @@ void sam_scan(std::vector<SamScanInterval*>& intervals,
     }
 
     sort(intervals.begin(), intervals.end());
+
+    /* First interval which the current read may be contained in. */
+    size_t j, j0 = 0;
+    size_t n = intervals.size();
 
     /* Read the reads. */
     bam1_t* b = bam_init1();
@@ -115,12 +140,32 @@ void sam_scan(std::vector<SamScanInterval*>& intervals,
         }
 
         /* Add reads to intervals in which they are contained. */
-        /* TODO */
+        for (j = j0; j < n; ++j) {
+            if (b->core.tid < intervals[j]->tid) break;
+            if (b->core.tid > intervals[j]->tid) {
+                assert(j == j0);
+                intervals[j0++]->finish();
+                continue;
+            }
+
+            if (b->core.pos < intervals[j]->start) break;
+            if (b->core.pos > intervals[j]->end) {
+                if (j == j0) {
+                    intervals[j0++]->finish();
+                }
+                continue;
+            }
+
+            pos_t b_end = (pos_t) bam_calend(&b->core, bam1_cigar(b)) - 1;
+            if (b_end <= intervals[j]->end) {
+                intervals[j]->add_alignment(b);
+            }
+        }
     }
 
+    fai_destroy(fa_f);
     bam_destroy1(b);
     samclose(bam_f);
 }
-
 
 

@@ -6,6 +6,9 @@
 
 #include "common.hpp"
 #include "hat-trie/hat-trie.h"
+#include "read_set.hpp"
+#include "samtools/sam.h"
+#include "intervals.hpp"
 
 typedef std::pair<unsigned int, unsigned int> MateCount;
 
@@ -44,6 +47,8 @@ class SamScanInterval
 {
     public:
         SamScanInterval();
+        SamScanInterval(const Interval& interval);
+        void add_alignment(const bam1_t*);
         virtual void finish() = 0;
 
         /* Comparison based on genomic position. */
@@ -53,6 +58,8 @@ class SamScanInterval
         SeqName seqname;
         strand_t strand;
         pos_t start, end;
+
+        ReadSet rs;
 
         /* A the sequence ID assigned by the BAM file, so we can arrange
          * intervals in the same order. */

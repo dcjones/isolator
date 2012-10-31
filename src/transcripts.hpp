@@ -8,6 +8,7 @@
 #include <string>
 
 #include "common.hpp"
+#include "intervals.hpp"
 
 /* An exon, relative to some transcript. */
 struct Exon
@@ -41,7 +42,7 @@ class Transcript : public std::set<Exon>
     private:
         GeneID gene_id;
         TranscriptID transcript_id;
-        SeqName seq_name;
+        SeqName seqname;
 
         strand_t strand;
 
@@ -70,6 +71,15 @@ class TranscriptSet
 
         /* Number of transcripts held in the set. */
         size_t size() const;
+
+        /* Fill a vector with all genomic regions which for every trancsript are
+         * either entirely exonic or non-overlapping. */
+        void get_consensus_exonic(std::vector<Interval>&);
+
+        /* Fill a vector with intergenic regions, including those at the very
+         * beginnings or ends of chromosomes. */
+        void get_intergenic(std::vector<Interval>&);
+
 
     private:
         /* Transcripts ordered by position. */
