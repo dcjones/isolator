@@ -67,23 +67,14 @@ AlignedRead::~AlignedRead()
 
 
 ReadSet::ReadSet()
+    : rs(NULL)
 {
-    rs = hattrie_create();
 }
 
 
 ReadSet::~ReadSet()
 {
-    hattrie_iter_t* i;
-    for (i = hattrie_iter_begin(rs, false);
-         !hattrie_iter_finished(i);
-         hattrie_iter_next(i)) {
-        AlignedRead** r = reinterpret_cast<AlignedRead**>(hattrie_iter_val(i));
-        delete *r;
-    }
-
-    hattrie_iter_free(i);
-    hattrie_free(rs);
+    clear();
 
     std::vector<Alignment*>::iterator j;
     for (j = as.begin(); j != as.end(); ++j) {
@@ -94,6 +85,8 @@ ReadSet::~ReadSet()
 
 void ReadSet::add_alignment(const bam1_t* b)
 {
+    if (rs == NULL) rs = hattrie_create();
+
     AlignedRead** rp = reinterpret_cast<AlignedRead**>(
             hattrie_get(rs, bam1_qname(b), b->core.l_qname - 1));
 
@@ -111,5 +104,24 @@ void ReadSet::add_alignment(const bam1_t* b)
     if (r->start == -1 || r->start < a->start) r->start = a->start;
     if (r->end   == -1 || r->end   < a->end)   r->end    = a->end;
 }
+
+
+void ReadSet::clear()
+{
+    if (rs == NULL) return;
+
+    hattrie_iter_t* i;
+    for (i = hattrie_iter_begin(rs, false);
+         !hattrie_iter_finished(i);
+         hattrie_iter_next(i)) {
+        AlignedRead** r = reinterpret_cast<AlignedRead**>(hattrie_iter_val(i));
+        delete *r;
+    }
+
+    hattrie_iter_free(i);
+    hattrie_free(rs);
+    rs = NULL;
+}
+
 
 

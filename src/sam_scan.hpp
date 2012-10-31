@@ -54,10 +54,13 @@ class SamScanInterval
         /* Comparison based on genomic position. */
         bool operator < (const SamScanInterval& other) const;
 
+        /* Clear used memory. */
+        void clear();
+
     private:
         SeqName seqname;
-        strand_t strand;
         pos_t start, end;
+        strand_t strand;
 
         ReadSet rs;
 
@@ -66,7 +69,7 @@ class SamScanInterval
         int32_t tid;
 
         friend void sam_scan(std::vector<SamScanInterval*>& intervals,
-                             AlnCountTrie& T, const char* bam_fn, const char* fa_fn);
+                             AlnCountTrie& T, const char* bam_fn);
 };
 
 
@@ -79,11 +82,9 @@ class SamScanInterval
  * Args:
  *   T: Count mate alignments for every read in the given trie.
  *   bam_fn: Filename of a SAM/BAM file.
- *   fa_fn: Filename of a reference genome in fasta format.
- *          If NULL, no bias correction is performed.
  * */
 void sam_scan(std::vector<SamScanInterval*>& intervals,
-              AlnCountTrie& T, const char* bam_fn, const char* fa_fn);
+              AlnCountTrie& T, const char* bam_fn);
 
 #endif
 

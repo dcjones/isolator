@@ -81,6 +81,7 @@ AC_CONFIG_FILES([Makefile
                  src/gtf/Makefile
                  src/hat-trie/Makefile
                  src/samtools/Makefile
+                 src/seqbias/Makefile
                  src/sqlite3/Makefile])
 
 AM_CONFIG_HEADER([src/config.h])

@@ -50,6 +50,9 @@ class ReadSet
         /* Add an alignment to the read set. */
         void add_alignment(const bam1_t* b);
 
+        /* Make the set empty. Free memory. */
+        void clear();
+
     private:
         /* Map of read ids to a AligneRead objects. */
         hattrie_t* rs;

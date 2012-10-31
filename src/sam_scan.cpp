@@ -46,9 +46,9 @@ MateCount AlnCountTrie::get(const char* id) const
 
 
 SamScanInterval::SamScanInterval()
-    : strand(strand_na)
-    , start(-1)
+    : start(-1)
     , end(-1)
+    , strand(strand_na)
     , tid(-1)
 {
 }
@@ -77,8 +77,14 @@ bool SamScanInterval::operator < (const SamScanInterval& other) const
 }
 
 
+void SamScanInterval::clear()
+{
+    rs.clear();
+}
+
+
 void sam_scan(std::vector<SamScanInterval*>& intervals,
-              AlnCountTrie& T, const char* bam_fn, const char* fa_fn)
+              AlnCountTrie& T, const char* bam_fn)
 {
     samfile_t* bam_f;
     bam_f = samopen(bam_fn, "rb", NULL);
@@ -87,11 +93,6 @@ void sam_scan(std::vector<SamScanInterval*>& intervals,
     }
     if (bam_f == NULL) {
         Logger::abort("Can't open SAM/BAM file %s.\n", bam_fn);
-    }
-
-    faidx_t* fa_f = fai_load(fa_fn);
-    if (fa_f == NULL) {
-        Logger::abort("Can't open reference genome sequence in %s.", fa_fn);
     }
 
     /* Sort the intervals in the same order as the BAM file. */
@@ -131,14 +132,6 @@ void sam_scan(std::vector<SamScanInterval*>& intervals,
         if (b->core.flag & BAM_FREAD2) T.inc_mate2(bam1_qname(b));
         else                           T.inc_mate1(bam1_qname(b));
 
-        /* Load sequences as we go. */
-        if (b->core.tid != last_tid) {
-            /* TODO: load sequence */
-
-            last_tid = b->core.tid;
-            last_pos = -1;
-        }
-
         /* Add reads to intervals in which they are contained. */
         for (j = j0; j < n; ++j) {
             if (b->core.tid < intervals[j]->tid) break;
@@ -163,7 +156,6 @@ void sam_scan(std::vector<SamScanInterval*>& intervals,
         }
     }
 
-    fai_destroy(fa_f);
     bam_destroy1(b);
     samclose(bam_f);
 }

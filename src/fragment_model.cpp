@@ -5,6 +5,9 @@
 #include "queue.hpp"
 
 
+static const char* param_est_task_name = "Estimating model parameters.";
+
+
 /* An interval used for fragment model parameter estimation. */
 class FragmentModelInterval : public SamScanInterval
 {
@@ -36,6 +39,72 @@ class FragmentModelInterval : public SamScanInterval
 };
 
 
+/* A thread used to accumulate statistics to estimate the parameters of
+ * the fragment model. */
+class FragmentModelThread
+{
+    public:
+        FragmentModelThread(Queue<FragmentModelInterval*>& q)
+            : q(q), t(NULL)
+        {
+        }
+
+        ~FragmentModelThread()
+        {
+            delete t;
+        }
+
+        void run()
+        {
+            FragmentModelInterval* interval;
+
+            while (true) {
+                interval = q.pop();
+                if (interval == NULL) break;
+
+                /* dispatch! */
+                switch (interval->type) {
+                    case FragmentModelInterval::INTERGENIC:
+                        /* TODO: measure additive noise */
+                        break;
+
+                    case FragmentModelInterval::EXONIC:
+                        /* TODO:
+                         * measure_fragment_lengths
+                         * measure_strand_bias
+                         * */
+
+                        /* TODO:
+                         * we need to reword the bias correction stuff to be
+                         * able to train it here.
+                         */
+                        break;
+                }
+
+                interval->clear();
+                Logger::get_task(param_est_task_name).inc();
+            }
+        }
+
+        void start()
+        {
+            if (t != NULL) return;
+            t = new boost::thread(boost::bind(&FragmentModelThread::run, this));
+        }
+
+        void join()
+        {
+            t->join();
+            delete t;
+            t = NULL;
+        }
+
+    private:
+        Queue<FragmentModelInterval*>& q;
+        boost::thread* t;
+};
+
+
 FragmentModel::FragmentModel()
 {
 }
@@ -50,7 +119,9 @@ void FragmentModel::estimate(TranscriptSet& ts,
                              const char* bam_fn,
                              const char* fa_fn)
 {
-    const char* task_name = "Estimating model parameters.";
+    if (fa_fn != NULL) {
+        /* TODO: train seqbias */
+    }
 
     Queue<FragmentModelInterval*> q(constants::max_estimate_queue_size);
 
@@ -73,15 +144,26 @@ void FragmentModel::estimate(TranscriptSet& ts,
                             *interval, FragmentModelInterval::INTERGENIC, q));
     }
 
-    Logger::push_task(task_name, intervals.size());
+    Logger::push_task(param_est_task_name, intervals.size());
 
-    /* TODO: start up a bunch of threads to read from q */
+    std::vector<FragmentModelThread*> threads(constants::num_threads);
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        threads.push_back(new FragmentModelThread(q));
+        threads.back()->start();
+    }
 
-    sam_scan(intervals, alncnt, bam_fn, fa_fn);
+    sam_scan(intervals, alncnt, bam_fn);
 
-    /* TODO: use the collected data to estimate some things. */
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        q.push(NULL);
+    }
 
-    Logger::pop_task(task_name);
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        threads[i]->join();
+        delete threads[i];
+    }
+
+    Logger::pop_task(param_est_task_name);
 }
 
 

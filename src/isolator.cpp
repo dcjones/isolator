@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "constants.hpp"
+#include "fragment_model.hpp"
 #include "logger.hpp"
 #include "sample_db.hpp"
 #include "transcripts.hpp"
@@ -60,7 +61,7 @@ int quantify(int argc, char* argv[])
         {0, 0, 0, 0}
     };
 
-    const char* seq_fn  = NULL;
+    const char* fa_fn  = NULL;
     const char* out_fn = "isolator.db";
     constants::num_threads = boost::thread::hardware_concurrency();
 
@@ -86,7 +87,7 @@ int quantify(int argc, char* argv[])
                 break;
 
             case 'g':
-                seq_fn = optarg;
+                fa_fn = optarg;
                 break;
 
             case '?':
@@ -126,19 +127,20 @@ int quantify(int argc, char* argv[])
     const char* bam_fn = argv[optind + 1];
 
     /* Read transcripts. */
-    TranscriptSet T;
+    TranscriptSet ts;
     FILE* gtf_f = fopen(gtf_fn, "rb");
     if (gtf_f == NULL) {
         Logger::abort("Can't open file %s for reading.", gtf_fn);
     }
-    T.read_gtf(gtf_f);
+    ts.read_gtf(gtf_f);
     fclose(gtf_f);
 
     /* Prepare output database. */
     SampleDB db(out_fn, true);
 
     /* Initialize the fragment model. */
-    /* TODO */
+    FragmentModel fragmod;
+    fragmod.estimate(ts, bam_fn, fa_fn);
 
     /* Initialize the sampler. */
     /* TODO */
