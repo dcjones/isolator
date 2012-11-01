@@ -1,11 +1,13 @@
 
+#include <boost/unordered_map.hpp>
+
 #include "constants.hpp"
 #include "fragment_model.hpp"
 #include "logger.hpp"
 #include "queue.hpp"
 
 
-static const char* param_est_task_name = "Estimating model parameters.";
+static const char* param_est_task_name = "Estimating model parameters";
 
 
 /* An interval used for fragment model parameter estimation. */
@@ -57,28 +59,24 @@ class FragmentModelThread
         void run()
         {
             FragmentModelInterval* interval;
+            ReadSet::UniqueReadCounts read_counts;
 
             while (true) {
                 interval = q.pop();
                 if (interval == NULL) break;
 
                 /* dispatch! */
-                switch (interval->type) {
-                    case FragmentModelInterval::INTERGENIC:
-                        /* TODO: measure additive noise */
-                        break;
+                if (interval->type == FragmentModelInterval::INTERGENIC) {
+                    /* TODO: measure additive noise */
+                }
+                else if (interval->type == FragmentModelInterval::EXONIC) {
+                    interval->rs.make_unique_read_counts(read_counts);
 
-                    case FragmentModelInterval::EXONIC:
-                        /* TODO:
-                         * measure_fragment_lengths
-                         * measure_strand_bias
-                         * */
-
-                        /* TODO:
-                         * we need to reword the bias correction stuff to be
-                         * able to train it here.
-                         */
-                        break;
+                    /* TODO:
+                     * measure_fragment_lengths
+                     * measure_strand_bias
+                     * */
+                    read_counts.clear();
                 }
 
                 interval->clear();
@@ -99,19 +97,68 @@ class FragmentModelThread
             t = NULL;
         }
 
+        /* strand_bias[0] counts the number of times the read's strand agrees
+         * with the transcripts, and strand_bias[1] the number of disagreements.
+         * */
+        unsigned long strand_bias[2];
+
+        /* A hash table mapping fragment lengths to number of observations */
+        boost::unordered_map<unsigned int, unsigned int> frag_lens;
+
+        /* A hash table mapping a number k to the number of intergenic
+         * positions with k read starts. */
+        boost::unordered_map<unsigned int, unsigned int> noise_counts;
+
     private:
+        void measure_fragment_lengths(const ReadSet::UniqueReadCounts& counts)
+        {
+            boost::unordered_map<unsigned int, unsigned int>::iterator c;
+            ReadSet::UniqueReadCounts::const_iterator i;
+            for (i = counts.begin(); i != counts.end(); ++i) {
+                AlignedReadIterator j(*i->first);
+                for (; j != AlignedReadIterator(); ++j) {
+                    if (j->mate1 == NULL || j->mate2 == NULL) continue;
+                    pos_t len = j->naive_frag_len();
+                    if (len <= 0 || len > constants::max_frag_len) continue;
+
+                    c = frag_lens.find(len);
+                    if (c == frag_lens.end()) {
+                        frag_lens.insert(std::make_pair((unsigned int) len, 1));
+                    }
+                    else {
+                        c->second += 1;
+                    }
+                }
+            }
+        }
+
+        void measure_strand_bias(strand_t strand,
+                                 const ReadSet::UniqueReadCounts& counts)
+        {
+            ReadSet::UniqueReadCounts::const_iterator i;
+            for (i = counts.begin(); i != counts.end(); ++i) {
+                AlignedReadIterator j(*i->first);
+                for (; j != AlignedReadIterator(); ++j) {
+                    if (!j->mate1) continue;
+                    strand_bias[j->mate1->strand == strand ? 0 : 1]++;
+                }
+            }
+        }
+
         Queue<FragmentModelInterval*>& q;
         boost::thread* t;
 };
 
 
 FragmentModel::FragmentModel()
+    : sb(NULL)
 {
 }
 
 
 FragmentModel::~FragmentModel()
 {
+    if (sb) delete sb;
 }
 
 
@@ -120,8 +167,12 @@ void FragmentModel::estimate(TranscriptSet& ts,
                              const char* fa_fn)
 {
     if (fa_fn != NULL) {
-        /* TODO: train seqbias */
+        sb = new sequencing_bias(fa_fn, bam_fn,
+                                 constants::seqbias_num_reads,
+                                 constants::seqbias_left_pos,
+                                 constants::seqbias_right_pos);
     }
+    else sb = NULL;
 
     Queue<FragmentModelInterval*> q(constants::max_estimate_queue_size);
 

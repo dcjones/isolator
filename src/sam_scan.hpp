@@ -57,12 +57,12 @@ class SamScanInterval
         /* Clear used memory. */
         void clear();
 
+        ReadSet rs;
+
     private:
         SeqName seqname;
         pos_t start, end;
         strand_t strand;
-
-        ReadSet rs;
 
         /* A the sequence ID assigned by the BAM file, so we can arrange
          * intervals in the same order. */

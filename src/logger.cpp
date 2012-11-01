@@ -404,14 +404,15 @@ void LoggerTask::print(int indent)
         printf("[");
 
         double step = 80.0 / (double) n;
+        size_t i = 0;
         if ((int) ((double) k * step ) > 0) {
-            for (size_t i = 0; i < (size_t) ((double) k * step) - 1; ++i) {
+            for (; i < (size_t) ((double) k * step) - 1; ++i) {
                 putchar('=');
             }
             putchar('>');
         }
 
-        for (size_t i = 0; i < (size_t) (step * (double) (n - k)); ++i) putchar(' ');
+        for (; i < 79; ++i) putchar(' ');
 
         printf("] ");
 

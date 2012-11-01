@@ -1,5 +1,6 @@
 
 #include "read_set.hpp"
+#include "constants.hpp"
 
 
 Alignment::Alignment()
@@ -66,6 +67,144 @@ AlignedRead::~AlignedRead()
 }
 
 
+bool AlignedRead::operator < (const AlignedRead& other) const
+{
+    if (this->mate1.size() != other.mate1.size()) {
+        return this->mate1.size() < other.mate1.size();
+    }
+
+    if (this->mate2.size() != other.mate2.size()) {
+        return this->mate2.size() < other.mate2.size();
+    }
+
+    if      (start != other.start) return start < other.start;
+    else if (end   != other.end)   return end   < other.end;
+
+
+    std::set<Alignment*> S, T;
+
+    S.insert(this->mate1.begin(), this->mate1.end());
+    T.insert(other.mate1.begin(), other.mate1.end());
+
+    if (S != T) return S < T;
+
+    S.clear();
+    T.clear();
+
+    S.insert(this->mate2.begin(), this->mate2.end());
+    T.insert(other.mate2.begin(), other.mate2.end());
+
+    return S < T;
+}
+
+
+bool AlignmentPair::valid_frag() const
+{
+    /* Reads with only mate1 are considered valid single-end reads, for our
+     * purposes */
+    if (mate1 == NULL) return false;
+    if (mate1 != NULL && mate1 == NULL) return true;
+
+    switch (constants::libtype) {
+        case constants::LIBTYPE_FR:
+            if (mate1 ->strand == mate2->strand) return false;
+            if (mate1->strand == strand_pos)     return mate1->start <= mate2->start;
+            else                                 return mate1->start >= mate2->start;
+
+        case constants::LIBTYPE_RF:
+            if (mate1->strand == mate2->strand)  return false;
+            if (mate1->strand == strand_pos)     return mate1->start >= mate2->start;
+            else                                 return mate1->start <= mate2->start;
+
+        case constants::LIBTYPE_FF:
+            if (mate1->strand != mate2->strand) return false;
+            if (mate1->strand == strand_pos)    return mate1->start <= mate2->start;
+            else                                return mate1->start >= mate2->start;
+
+        default:
+            return false;
+    }
+}
+
+
+pos_t AlignmentPair::naive_frag_len() const
+{
+    if (mate1 == NULL || mate2 == NULL) return 0;
+    return std::max(mate2->end - mate1->start, mate1->end - mate2->start);
+}
+
+
+AlignedReadIterator::AlignedReadIterator()
+    : r(NULL)
+    , i(0)
+    , j(0)
+{
+}
+
+
+AlignedReadIterator::AlignedReadIterator(const AlignedRead& r)
+    : r(&r)
+    , i(0)
+    , j(0)
+{
+    if (i < r.mate1.size()) p.mate1 = r.mate1[i];
+    if (j < r.mate2.size()) p.mate2 = r.mate2[j];
+}
+
+
+AlignedReadIterator::~AlignedReadIterator()
+{
+}
+
+
+void AlignedReadIterator::increment()
+{
+    if (finished()) return;
+    do {
+        if (r->paired && j < r->mate2.size()) {
+            do {
+                ++j;
+            } while (j < r->mate2.size() && r->mate2[j] == r->mate2[j - 1]);
+        }
+
+        if (!r->paired || j >= r->mate2.size()) {
+            do {
+                ++i;
+            } while(i < r->mate1.size() && r->mate1[i] == r->mate1[i - 1]);
+
+            j = 0;
+        }
+
+        p.mate1 = i < r->mate1.size() ? r->mate1[i] : NULL;
+        p.mate2 = (j < r->mate2.size() && r->paired) ? r->mate2[j] : NULL;
+    } while (!finished() && !p.valid_frag());
+}
+
+
+bool AlignedReadIterator::finished() const
+{
+    return r == NULL || i >= r->mate1.size() || (r->paired && j >= r->mate2.size());
+}
+
+
+bool AlignedReadIterator::equal(const AlignedReadIterator& other) const
+{
+    if (finished()) {
+        return other.finished();
+    }
+    else {
+        if (other.finished()) return false;
+        return r == other.r && i == other.i && j == other.j;
+    }
+}
+
+
+const AlignmentPair& AlignedReadIterator::dereference() const
+{
+    return p;
+}
+
+
 ReadSet::ReadSet()
     : rs(NULL)
 {
@@ -121,6 +260,24 @@ void ReadSet::clear()
     hattrie_iter_free(i);
     hattrie_free(rs);
     rs = NULL;
+}
+
+
+void ReadSet::make_unique_read_counts(ReadSet::UniqueReadCounts& counts)
+{
+    hattrie_iter_t* i;
+    ReadSet::UniqueReadCounts::iterator j;
+    for (i = hattrie_iter_begin(rs, false);
+         !hattrie_iter_finished(i);
+         hattrie_iter_next(i)) {
+        AlignedRead** r = reinterpret_cast<AlignedRead**>(hattrie_iter_val(i));
+
+        j = counts.find(*r);
+        if (j == counts.end()) {
+            counts.insert(std::make_pair(*r, 1));
+        }
+        else j->second += 1;
+    }
 }
 
 

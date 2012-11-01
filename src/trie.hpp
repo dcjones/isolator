@@ -4,7 +4,6 @@
 
 #include <cstring>
 #include <boost/iterator/iterator_facade.hpp>
-//#include <boost/tuple.hpp>
 
 #include "hat-trie/hat-trie.h"
 

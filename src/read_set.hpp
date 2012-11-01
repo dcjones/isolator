@@ -2,6 +2,7 @@
 #ifndef ISOLATOR_READ_SET_HPP
 #define ISOLATOR_READ_SET_HPP
 
+#include <boost/iterator/iterator_facade.hpp>
 #include <vector>
 
 #include "common.hpp"
@@ -33,10 +34,53 @@ struct AlignedRead
     AlignedRead();
     ~AlignedRead();
 
+    bool operator < (const AlignedRead& other) const;
+
     pos_t start, end;
     bool paired;
     std::vector<Alignment*> mate1;
     std::vector<Alignment*> mate2;
+};
+
+
+/* A pair of alignments. (One for each mate.) */
+struct AlignmentPair
+{
+    /* TODO: other things here */
+
+    bool valid_frag() const;
+
+    /* The fragment length of a paired-end read, ignoring the effects of
+     * splicing. */
+    pos_t naive_frag_len() const;
+
+    const Alignment* mate1;
+    const Alignment* mate2;
+};
+
+
+/* Iterate of the cartesian product of mate alignment. */
+class AlignedReadIterator :
+    public boost::iterator_facade<AlignedReadIterator,
+                                  const AlignmentPair,
+                                  boost::forward_traversal_tag>
+{
+    public:
+        AlignedReadIterator();
+        AlignedReadIterator(const AlignedRead&);
+        ~AlignedReadIterator();
+
+    private:
+        friend class boost::iterator_core_access;
+
+        void increment();
+        bool equal(const AlignedReadIterator& other) const;
+        bool finished() const;
+        const AlignmentPair& dereference() const;
+
+        const AlignedRead* r;
+        size_t i, j;
+        AlignmentPair p;
 };
 
 
@@ -52,6 +96,21 @@ class ReadSet
 
         /* Make the set empty. Free memory. */
         void clear();
+
+        /* Map aligned reads to number of occurances. */
+        struct UniqueReadCountsCmp
+        {
+            bool operator () (AlignedRead* const& a, AlignedRead* const& b)
+            {
+                return *a < *b;
+            }
+        };
+
+        typedef std::map<AlignedRead*, unsigned int, UniqueReadCountsCmp>
+                UniqueReadCounts;
+
+        /* Make a unique read count from the read set. */
+        void make_unique_read_counts(UniqueReadCounts& counts);
 
     private:
         /* Map of read ids to a AligneRead objects. */
