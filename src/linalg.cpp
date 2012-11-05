@@ -1,6 +1,7 @@
 
-#include "linalg.hpp"
 #include "config.h"
+#include "linalg.hpp"
+#include "logger.hpp"
 
 #include <math.h>
 
@@ -41,6 +42,25 @@ static float fastlog2(float x_)
 #if defined(HAVE_AVX) && defined(HAVE_IMMINTRIN_H) && defined(__AVX__)
 
 #include <immintrin.h>
+
+
+float* vector_alloc(size_t n)
+{
+    float* xs = reinterpret_cast<float*>(
+                    _mm_malloc(n * sizeof(float), 16));
+    if (xs == NULL) {
+        Logger::abort("Can't allocate an array of size %ul.",
+                      (unsigned long) (n * sizeof(float)));
+    }
+    return xs;
+}
+
+
+void vector_free(float* xs)
+{
+    _mm_free(xs);
+}
+
 
 typedef union {
     __m256i a;
@@ -144,15 +164,78 @@ float dotlog(const float* xs, const float* ys, const size_t n)
 }
 
 
-//float asxpy(float* xs, const float* ys, const float c,
-            //const unsigned int* idx, const size_t n)
-//{
+void asxpy(float* xs, const float* ys, const float c,
+            const unsigned int* idx, const size_t n)
+{
+    __m256 yv;
+    __m256 cv = _mm256_set1_ps(c);
+    union {
+        __m256 v;
+        float f[8];
+    } x;
 
-//}
+    size_t i;
+    for (i = 0; i < 8 * (n / 8); ++i) {
+        yv = _mm256_mul_ps(cv, _mm256_load_ps(ys + i));
+
+        /* load from xs */
+        x.f[0] = xs[idx[i]];
+        x.f[1] = xs[idx[i+1]];
+        x.f[2] = xs[idx[i+2]];
+        x.f[3] = xs[idx[i+3]];
+        x.f[4] = xs[idx[i+4]];
+        x.f[5] = xs[idx[i+5]];
+        x.f[6] = xs[idx[i+6]];
+        x.f[7] = xs[idx[i+7]];
+
+        x.v = _mm256_add_ps(x.v, yv);
+
+        /* store in xs */
+        xs[idx[i]]   = x.f[0];
+        xs[idx[i+1]] = x.f[1];
+        xs[idx[i+2]] = x.f[2];
+        xs[idx[i+3]] = x.f[3];
+        xs[idx[i+4]] = x.f[4];
+        xs[idx[i+5]] = x.f[5];
+        xs[idx[i+6]] = x.f[6];
+        xs[idx[i+7]] = x.f[7];
+    }
+
+    /* handle overhang */
+    i = 8 * (n / 8);
+    switch (n % 8) {
+        case 8: xs[idx[i]] += c * ys[i]; ++i;
+        case 7: xs[idx[i]] += c * ys[i]; ++i;
+        case 6: xs[idx[i]] += c * ys[i]; ++i;
+        case 5: xs[idx[i]] += c * ys[i]; ++i;
+        case 4: xs[idx[i]] += c * ys[i]; ++i;
+        case 3: xs[idx[i]] += c * ys[i]; ++i;
+        case 2: xs[idx[i]] += c * ys[i]; ++i;
+        case 1: xs[idx[i]] += c * ys[i]; ++i;
+    }
+}
 
 
 /* Vanilla versions */
 #else
+
+
+float* vector_alloc(size_t n)
+{
+    float* xs = malloc(n * sizeof(float));
+    if (xs == NULL) {
+        Logger::abort("Can't allocate an array of size %ul.",
+                      (unsigned long) (n * sizeof(float)));
+    }
+    return xs;
+}
+
+
+void vector_free(float* xs)
+{
+    free(xs);
+}
+
 
 float dotlog(const float* xs, const float* ys, const size_t n)
 {
