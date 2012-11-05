@@ -214,6 +214,8 @@ void FragmentModel::estimate(TranscriptSet& ts,
         delete threads[i];
     }
 
+    /* TODO: collect statistics */
+
     Logger::pop_task(param_est_task_name);
 }
 

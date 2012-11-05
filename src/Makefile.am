@@ -8,6 +8,7 @@ isolator_SOURCES = isolator.cpp \
                    constants.hpp constants.cpp \
                    fragment_model.hpp fragment_model.cpp \
                    intervals.hpp intervals.cpp \
+                   linalg.hpp linalg.cpp \
                    logger.hpp logger.cpp \
                    queue.hpp \
                    read_set.hpp read_set.cpp \

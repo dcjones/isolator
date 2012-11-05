@@ -65,8 +65,8 @@ AS_IF([test "x$enable_debug" = xyes],
       [CFLAGS="$dbg_CFLAGS"],
       [CFLAGS="$opt_CFLAGS"])
 
-CXXFLAGS="$CFLAGS -std=c++0x"
-CFLAGS="$CFLAGS -std=gnu99"
+CXXFLAGS="$CFLAGS -std=c++0x $SIMD_FLAGS"
+CFLAGS="$CFLAGS -std=gnu99 $SIMD_FLAGS"
 
 # Don't crash on >4GB files.
 AC_DEFINE([_FILE_OFFSET_BITS], [64],
