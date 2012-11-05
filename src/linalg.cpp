@@ -204,11 +204,157 @@ void asxpy(float* xs, const float* ys, const float c,
     /* handle overhang */
     i = 8 * (n / 8);
     switch (n % 8) {
-        case 8: xs[idx[i]] += c * ys[i]; ++i;
         case 7: xs[idx[i]] += c * ys[i]; ++i;
         case 6: xs[idx[i]] += c * ys[i]; ++i;
         case 5: xs[idx[i]] += c * ys[i]; ++i;
         case 4: xs[idx[i]] += c * ys[i]; ++i;
+        case 3: xs[idx[i]] += c * ys[i]; ++i;
+        case 2: xs[idx[i]] += c * ys[i]; ++i;
+        case 1: xs[idx[i]] += c * ys[i]; ++i;
+    }
+}
+
+
+/* SSE2 versions */
+#elif defined(HAVE_IMMINTRIN_H) && defined(HAVE_SSE2) && defined(__SSE2__)
+
+#include <immintrin.h>
+
+
+float* vector_alloc(size_t n)
+{
+    float* xs = reinterpret_cast<float*>(
+                    _mm_malloc(n * sizeof(float), 16));
+    if (xs == NULL) {
+        Logger::abort("Can't allocate an array of size %ul.",
+                      (unsigned long) (n * sizeof(float)));
+    }
+    return xs;
+}
+
+
+void vector_free(float* xs)
+{
+    _mm_free(xs);
+}
+
+
+/* Macros for evaluating ploynomials. */
+#define SSE_POLY0(x, c0) _mm_set1_ps(c0)
+#define SSE_POLY1(x, c0, c1) \
+    _mm_add_ps(_mm_mul_ps(SSE_POLY0(x, c1), x), _mm_set1_ps(c0))
+#define SSE_POLY2(x, c0, c1, c2) \
+    _mm_add_ps(_mm_mul_ps(SSE_POLY1(x, c1, c2), x), _mm_set1_ps(c0))
+#define SSE_POLY3(x, c0, c1, c2, c3) \
+    _mm_add_ps(_mm_mul_ps(SSE_POLY2(x, c1, c2, c3), x), _mm_set1_ps(c0))
+#define SSE_POLY4(x, c0, c1, c2, c3, c4) \
+    _mm_add_ps(_mm_mul_ps(SSE_POLY3(x, c1, c2, c3, c4), x), _mm_set1_ps(c0))
+#define SSE_POLY5(x, c0, c1, c2, c3, c4, c5) \
+    _mm_add_ps(_mm_mul_ps(SSE_POLY4(x, c1, c2, c3, c4, c5), x), _mm_set1_ps(c0))
+
+/* Comptue log2 over an sse single vector. */
+static __m128 sse_log2(__m128 x)
+{
+
+    /* extract exponent */
+    const __m128i i = _mm_castps_si128(x);
+    __m128 e = _mm_cvtepi32_ps(
+                 _mm_sub_epi32(
+                   _mm_srli_epi32(i, 23),
+                   _mm_set1_epi32(127)));
+
+    /* extract mantissa */
+    const __m128i mant_mask = _mm_set1_epi32(0x007FFFFF);
+    const __m128 one = _mm_set1_ps(1.0f);
+    __m128 m = _mm_or_ps(_mm_castsi128_ps(_mm_and_si128(i, mant_mask)), one);
+
+    /* polynomial approximation on the mantissa */
+    __m128 p = SSE_POLY5(m,
+                         3.1157899f,
+                        -3.3241990f,
+                         2.5988452f,
+                        -1.2315303f,
+                         3.1821337e-1f,
+                        -3.4436006e-2f);
+
+    p = _mm_add_ps(_mm_mul_ps(p, _mm_sub_ps(m, one)), e);
+
+    /* handle the case with x= < 0.0 */
+#if (defined(HAVE_SSE41) && defined(__SSE41__)) || (defined(HAVE_SSE42) && defined(__SSE42__))
+    p = _mm_blendv_ps(p, _mm_set1_ps(-INFINITY), _mm_cmple_ps(x, _mm_setzero_ps()));
+#else
+    // TODO: test this
+    __m128 mask = _mm_cmpgt_ps(x, _mm_setzero_ps());
+    p = _mm_or_ps(_mm_and_ps(mask, p), _mm_andnot_ps(mask, _mm_set1_ps(-INFINITY)));
+#endif
+
+    return p;
+}
+
+
+float dotlog(const float* xs, const float* ys, const size_t n)
+{
+    __m128 xv, yv;
+    union ans_t
+    {
+        __m128  v;
+        float   f[4];
+    } ans;
+    ans.v = _mm_setzero_ps();
+
+    size_t i;
+    for (i = 0; i < n / 4; ++i) {
+        xv = _mm_load_ps(xs + 4 * i);
+        yv = _mm_load_ps(ys + 4 * i);
+        ans.v = _mm_add_ps(ans.v, _mm_mul_ps(xv, sse_log2(yv)));
+    }
+
+    float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3];
+
+    /* handle any overhang */
+    i *= 4;
+    switch (n % 4) {
+        case 3: fans += xs[i] * fastlog2(ys[i]); ++i;
+        case 2: fans += xs[i] * fastlog2(ys[i]); ++i;
+        case 1: fans += xs[i] * fastlog2(ys[i]); ++i;
+    }
+
+    return fans;
+}
+
+
+void asxpy(float* xs, const float* ys, const float c,
+            const unsigned int* idx, const size_t n)
+{
+    __m128 yv;
+    __m128 cv = _mm_set1_ps(c);
+    union {
+        __m128 v;
+        float f[8];
+    } x;
+
+    size_t i;
+    for (i = 0; i < 4 * (n / 4); ++i) {
+        yv = _mm_mul_ps(cv, _mm_load_ps(ys + i));
+
+        /* load from xs */
+        x.f[0] = xs[idx[i]];
+        x.f[1] = xs[idx[i+1]];
+        x.f[2] = xs[idx[i+2]];
+        x.f[3] = xs[idx[i+3]];
+
+        x.v = _mm_add_ps(x.v, yv);
+
+        /* store in xs */
+        xs[idx[i]]   = x.f[0];
+        xs[idx[i+1]] = x.f[1];
+        xs[idx[i+2]] = x.f[2];
+        xs[idx[i+3]] = x.f[3];
+    }
+
+    /* handle overhang */
+    i = 4 * (n / 4);
+    switch (n % 4) {
         case 3: xs[idx[i]] += c * ys[i]; ++i;
         case 2: xs[idx[i]] += c * ys[i]; ++i;
         case 1: xs[idx[i]] += c * ys[i]; ++i;
@@ -256,7 +402,6 @@ void asxpy(float* xs, const float* ys, const float c,
         xs[idx[i]] += c * ys[i];
     }
 }
-
 
 
 #endif
