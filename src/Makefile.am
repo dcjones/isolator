@@ -22,6 +22,7 @@ isolator_LDADD = gtf/libgtf.la \
                  samtools/libbam.la \
                  seqbias/libseqbias.la \
                  sqlite3/libsqlite3.la \
+				 -lm \
                  -lz \
                  -lgsl \
                  -lgslcblas \

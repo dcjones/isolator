@@ -10,8 +10,14 @@ extern "C" {
  * the source code. I need to expose one function and add a new one.
  */
 
+#include <stdlib.h>
+
 #include "faidx.h"
-#include "bam.h"
+#include "sam.h"
+
+/* Report offset into a sam/bam file. */
+size_t samtell(samfile_t* fp);
+
 
 /* exposing a function defined in samtools/bam_aux.c */
 void bam_init_header_hash(bam_header_t *header);

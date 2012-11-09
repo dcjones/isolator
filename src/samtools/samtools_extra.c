@@ -1,7 +1,9 @@
 
 #include "samtools_extra.h"
 #include "khash.h"
+#include "kseq.h"
 
+KSTREAM_INIT(gzFile, gzread, 16384)
 
 #ifndef _NO_RAZF
 #include "samtools/razf.h"
@@ -97,6 +99,30 @@ char* faidx_fetch_seq_forced_lower(const faidx_t* fai, const char *c_name,
     while (p_beg_i + l <= p_end_i) seq[l++] = 'n';
 
     return seq0;
+}
+
+
+struct __tamFile_t {
+	gzFile fp;
+	kstream_t *ks;
+	kstring_t *str;
+	uint64_t n_lines;
+	int is_first;
+};
+
+
+size_t samtell(samfile_t* fp)
+{
+    if (fp->type & 1) { /* TYPE_BAM == 1 */
+#ifdef _USE_KNETFILE
+        return knet_tell(fp->x.bam->x.fpr);
+#else
+        ftello(fp->x.bam->file);
+#endif
+    }
+    else {
+        return (size_t) gzoffset(fp->x.tamr->fp);
+    }
 }
 
 

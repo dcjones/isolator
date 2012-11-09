@@ -69,7 +69,8 @@ class SamScanInterval
         int32_t tid;
 
         friend void sam_scan(std::vector<SamScanInterval*>& intervals,
-                             AlnCountTrie& T, const char* bam_fn);
+                             AlnCountTrie& T, const char* bam_fn,
+                             const char* task_name);
 };
 
 
@@ -84,7 +85,8 @@ class SamScanInterval
  *   bam_fn: Filename of a SAM/BAM file.
  * */
 void sam_scan(std::vector<SamScanInterval*>& intervals,
-              AlnCountTrie& T, const char* bam_fn);
+              AlnCountTrie& T, const char* bam_fn,
+              const char* task_name);
 
 #endif
 

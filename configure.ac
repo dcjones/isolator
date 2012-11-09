@@ -53,8 +53,8 @@ AC_CHECK_LIB([gsl],[gsl_blas_dgemm])
 AX_PATH_GSL
 
 # Configure option to disable compliler optimization.
-opt_CFLAGS="-Wall -Wextra -pedantic -g -O3 -DNDEBUG"
-dbg_CFLAGS="-Wall -Wextra -pedantic -g -O0"
+opt_CFLAGS="-Wall -Wextra -g -O3 -DNDEBUG"
+dbg_CFLAGS="-Wall -Wextra -g -O0"
 
 AC_ARG_ENABLE([debug],
               [AS_HELP_STRING([--enable-debug],
@@ -65,7 +65,7 @@ AS_IF([test "x$enable_debug" = xyes],
       [CFLAGS="$dbg_CFLAGS"],
       [CFLAGS="$opt_CFLAGS"])
 
-CXXFLAGS="$CFLAGS -std=c++0x $SIMD_FLAGS"
+CXXFLAGS="$CFLAGS -std=gnu++98 $SIMD_FLAGS"
 CFLAGS="$CFLAGS -std=gnu99 $SIMD_FLAGS"
 
 # Don't crash on >4GB files.

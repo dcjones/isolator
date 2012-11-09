@@ -282,8 +282,8 @@ void TranscriptSet::get_intergenic(std::vector<Interval>& intervals)
             end = i->max_end;
         }
         else {
-            if (i->min_start < end) {
-                end = std::max(end, i->min_start);
+            if (i->min_start <= end + 1) {
+                end = std::max(end, i->max_end);
             }
             else {
                 if (end > 0) {

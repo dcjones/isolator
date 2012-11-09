@@ -422,7 +422,7 @@ void LoggerTask::print(int indent)
         printf("%4.1f%%", 100.0 * (double) k / (double) n);
 
         /* time remaining */
-        if (k == 0) {
+        if (k <= 1) {
             printf("    ?:?? ETA\n");
         }
         else {

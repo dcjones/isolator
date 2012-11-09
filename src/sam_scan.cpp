@@ -3,9 +3,10 @@
 #include "sam_scan.hpp"
 
 extern "C" {
+#include "samtools/faidx.h"
 #include "samtools/khash.h"
 #include "samtools/sam.h"
-#include "samtools/faidx.h"
+#include "samtools/samtools_extra.h"
 KHASH_MAP_INIT_STR(s, int)
 }
 
@@ -83,9 +84,33 @@ void SamScanInterval::clear()
 }
 
 
-void sam_scan(std::vector<SamScanInterval*>& intervals,
-              AlnCountTrie& T, const char* bam_fn)
+struct SamScanIntervalPtrCmp
 {
+    bool operator () (const SamScanInterval* a,
+                      const SamScanInterval* b)
+    {
+        return *a < *b;
+    }
+};
+
+
+void sam_scan(std::vector<SamScanInterval*>& intervals,
+              AlnCountTrie& T, const char* bam_fn,
+              const char* task_name)
+{
+    /* Measure file size to monitor progress. */
+    size_t input_size = 0;
+    size_t input_block_size = 1000000;
+    if (task_name) {
+        FILE* f = fopen(bam_fn, "rb");
+        if (f) {
+            fseek(f, 0, SEEK_END);
+            input_size = (size_t) ftell(f);
+            fclose(f);
+        }
+        Logger::push_task(task_name, input_size / input_block_size);
+    }
+
     samfile_t* bam_f;
     bam_f = samopen(bam_fn, "rb", NULL);
     if (bam_f == NULL) {
@@ -107,17 +132,30 @@ void sam_scan(std::vector<SamScanInterval*>& intervals,
         else (*i)->tid = kh_value(tbl, k);
     }
 
-    sort(intervals.begin(), intervals.end());
+    sort(intervals.begin(), intervals.end(), SamScanIntervalPtrCmp());
 
     /* First interval which the current read may be contained in. */
     size_t j, j0 = 0;
     size_t n = intervals.size();
+
+    size_t last_file_pos = 0, file_pos;
+    size_t read_num = 0;
 
     /* Read the reads. */
     bam1_t* b = bam_init1();
     int32_t last_tid = -1;
     int32_t last_pos = -1;
     while (samread(bam_f, b) > 0) {
+        ++read_num;
+
+        if (read_num % 1000 == 0) {
+            file_pos = samtell(bam_f);
+            if (file_pos >= last_file_pos + input_block_size && input_size > 0) {
+                Logger::get_task(task_name).inc();
+                last_file_pos = file_pos;
+            }
+        }
+
         if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
 
         if (b->core.tid < last_tid ||
@@ -126,6 +164,7 @@ void sam_scan(std::vector<SamScanInterval*>& intervals,
                     "Excuse me, but I must insist that your SAM/BAM file be sorted. "
                     "Please run: 'samtools sort'.");
         }
+        last_tid = b->core.tid;
         last_pos = b->core.pos;
 
         /* Count numbers of alignments by read. */
@@ -156,8 +195,12 @@ void sam_scan(std::vector<SamScanInterval*>& intervals,
         }
     }
 
+    for(; j0 < n; ++j0) intervals[j0]->finish();
+
     bam_destroy1(b);
     samclose(bam_f);
+
+    if (task_name) Logger::pop_task(task_name);
 }
 
 

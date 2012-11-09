@@ -9,6 +9,7 @@
 #include "logger.hpp"
 #include "twobitseq.hpp"
 #include "samtools/faidx.h"
+#include "samtools/samtools_extra.h"
 #include <climits>
 #include <cmath>
 #include <cctype>
@@ -284,11 +285,6 @@ void sequencing_bias::build(const char* ref_fn,
         Logger::abort("Can't open bam file '%s'.", reads_fn);
     }
 
-    bam_index_t* reads_index = bam_index_load(reads_fn);
-    if (reads_index == NULL) {
-        Logger::abort("Can't open bam index '%s.bai'.", reads_fn);
-    }
-
     bam_init_header_hash(reads_f->header);
 
     bam1_t* read = bam_init1();
@@ -336,7 +332,6 @@ void sequencing_bias::build(const char* ref_fn,
     pos_table_destroy(&T1);
     pos_table_destroy(&T2);
 
-    bam_index_destroy(reads_index);
     samclose(reads_f);
 }
 
@@ -649,11 +644,6 @@ kmer_matrix tabulate_bias(double* kl,
         Logger::abort("Can't open bam file '%s'.", reads_fn);
     }
 
-    bam_index_t* reads_index = bam_index_load(reads_fn);
-    if (reads_index == NULL) {
-        Logger::abort("Can't open bam index '%s.bai'.", reads_fn);
-    }
-
     sequencing_bias* sb = NULL;
     if (model_fn != NULL) {
         //sb = new sequencing_bias(ref_fn, model_fn);
@@ -812,7 +802,6 @@ kmer_matrix tabulate_bias(double* kl,
     bam_destroy1(read);
     pos_table_destroy(&T);
     delete sb;
-    bam_index_destroy(reads_index);
     samclose(reads_f);
 
     return dest;

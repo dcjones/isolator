@@ -368,7 +368,7 @@ void asxpy(float* xs, const float* ys, const float c,
 
 float* vector_alloc(size_t n)
 {
-    float* xs = malloc(n * sizeof(float));
+    float* xs = (float*) malloc(n * sizeof(float));
     if (xs == NULL) {
         Logger::abort("Can't allocate an array of size %ul.",
                       (unsigned long) (n * sizeof(float)));

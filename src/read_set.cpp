@@ -265,6 +265,7 @@ void ReadSet::clear()
 
 void ReadSet::make_unique_read_counts(ReadSet::UniqueReadCounts& counts)
 {
+    if (rs == NULL) return;
     hattrie_iter_t* i;
     ReadSet::UniqueReadCounts::iterator j;
     for (i = hattrie_iter_begin(rs, false);

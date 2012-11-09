@@ -24,6 +24,10 @@ namespace constants
      */
     extern size_t max_estimate_queue_size;
 
+    /* Minimum length of an exonic region to use while estimating the fragment
+     * length distribution. */
+    extern pos_t min_estimate_exon_length;
+
     /* The number of reads to train seqbias with. */
     extern size_t seqbias_num_reads;
 

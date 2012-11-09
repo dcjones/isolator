@@ -7,9 +7,6 @@
 #include "queue.hpp"
 
 
-static const char* param_est_task_name = "Estimating model parameters";
-
-
 /* An interval used for fragment model parameter estimation. */
 class FragmentModelInterval : public SamScanInterval
 {
@@ -80,7 +77,6 @@ class FragmentModelThread
                 }
 
                 interval->clear();
-                Logger::get_task(param_est_task_name).inc();
             }
         }
 
@@ -178,32 +174,17 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
     std::vector<SamScanInterval*> intervals;
 
-    std::vector<Interval> intergenic, exonic;
-    ts.get_intergenic(intergenic);
+    std::vector<Interval> exonic;
     ts.get_consensus_exonic(exonic);
 
-    /* TODO: if speed is an issue, we can easily subset intergenic and exonic.
-     * This is way more data than we really need. */
     std::vector<Interval>::iterator interval;
-    for (interval = intergenic.begin(); interval != intergenic.end(); ++interval) {
-        intervals.push_back(new FragmentModelInterval(
-                            *interval, FragmentModelInterval::INTERGENIC, q));
-    }
-
-    for (interval = exonic.begin(); interval != exonic.end(); ++interval) {
-        intervals.push_back(new FragmentModelInterval(
-                            *interval, FragmentModelInterval::INTERGENIC, q));
-    }
-
-    Logger::push_task(param_est_task_name, intervals.size());
-
     std::vector<FragmentModelThread*> threads(constants::num_threads);
     for (size_t i = 0; i < constants::num_threads; ++i) {
         threads.push_back(new FragmentModelThread(q));
         threads.back()->start();
     }
 
-    sam_scan(intervals, alncnt, bam_fn);
+    sam_scan(intervals, alncnt, bam_fn, "Indexing reads");
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         q.push(NULL);
@@ -215,8 +196,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
     }
 
     /* TODO: collect statistics */
-
-    Logger::pop_task(param_est_task_name);
 }
 
 
