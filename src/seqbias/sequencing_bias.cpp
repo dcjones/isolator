@@ -269,14 +269,27 @@ void sequencing_bias::build(const char* ref_fn,
 {
     clear();
 
-    if (T1.size() > 1000) {
-        Logger::info("Training mate1 motif.");
-        buildn(&M1, ref_fn, T1, max_reads, L, R, complexity_penalty);
+    const size_t min_positions = 1000;
+
+    if (T1.size() >= min_positions) {
+        const char* task_name;
+        if (T2.size() >= min_positions) {
+            task_name = "Estimating sequence bias";
+        }
+        else {
+            task_name = "Estimating mate 1 sequence bias";
+        }
+
+        Logger::push_task(task_name);
+        buildn(&M1, ref_fn, T1, max_reads, L, R, complexity_penalty, task_name);
+        Logger::pop_task(task_name);
     }
 
-    if (T2.size() > 1000) {
-        Logger::info("Training mate2 motif.");
-        buildn(&M2, ref_fn, T2, max_reads, L, R, complexity_penalty);
+    if (T2.size() >= min_positions) {
+        const char* task_name = "Estimating mate 2 sequence bias";
+        Logger::push_task(task_name);
+        buildn(&M2, ref_fn, T2, max_reads, L, R, complexity_penalty, task_name);
+        Logger::pop_task(task_name);
     }
 }
 
@@ -295,7 +308,8 @@ void sequencing_bias::buildn(motif** Mn,
                              PosTable& T,
                              size_t max_reads,
                              pos_t L, pos_t R,
-                             double complexity_penalty)
+                             double complexity_penalty,
+                             const char* task_name)
 {
     this->ref_fn = ref_fn;
 
@@ -309,7 +323,7 @@ void sequencing_bias::buildn(motif** Mn,
     /* sort by tid (so we can load one chromosome at a time) */
     random_shuffle(S.begin(), S.end());
     sort(S.begin(), S.end(), ReadPosSeqnameCmp());
-    
+
     /* sample foreground and background kmer frequencies */
     ref_f = fai_load(ref_fn);
     if (ref_f == NULL) {
@@ -345,7 +359,7 @@ void sequencing_bias::buildn(motif** Mn,
 
             seq = faidx_fetch_seq(ref_f, i->seqname.get().c_str(), 0, INT_MAX, &seqlen);
 
-            Logger::info("read sequence %s.", i->seqname.get().c_str());
+            Logger::debug("read sequence %s.", i->seqname.get().c_str());
 
             if (seq == NULL) {
                 Logger::warn("warning: reference sequence not found, skipping.");
@@ -411,7 +425,8 @@ void sequencing_bias::buildn(motif** Mn,
                     L + 1 + R,
                     max_parents,
                     max_distance,
-                    complexity_penalty);
+                    complexity_penalty,
+                    task_name);
 
 
     std::deque<twobitseq*>::iterator seqit;

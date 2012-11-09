@@ -90,13 +90,15 @@ class motif_trainer
                   size_t m,
                   size_t max_parents,
                   size_t max_distance,
-                  double complexity_penalty)
+                  double complexity_penalty,
+                  const char* task_name)
         : col(0)
         , col_max(30)
         , m(m)
         , max_parents(max_parents)
         , max_distance(max_distance)
         , complexity_penalty(complexity_penalty)
+        , task_name(task_name)
     {
         M.m = m;
         M.P0 = new kmer_matrix(m, max_parents + 1);
@@ -174,8 +176,6 @@ class motif_trainer
 
     void train()
     {
-        Logger::suspend();
-
         char msg[512];
 
         /* How good the current solution is. */
@@ -197,12 +197,13 @@ class motif_trainer
 
         while (true) {
             ++round_num;
+            Logger::get_task(task_name).inc();
             compute_reachability();
 
-            Logger::print(col_base);
+            Logger::debug(col_base);
             snprintf(msg, sizeof(msg), "round %4zu (ic = %0.4e)", round_num, ic);
-            Logger::print(msg);
-            Logger::print(col_base);
+            Logger::debug(msg);
+            Logger::debug(col_base);
             col = 0;
 
             ic_best = -HUGE_VAL;
@@ -234,26 +235,26 @@ class motif_trainer
                 move_best = MOVE_REVERSAL;
             }
 
-            Logger::print("\n");
+            Logger::debug("\n");
 
             if (ic_best <= ic) break;
 
             /* make the best move */
 
-            Logger::print(col_base);
+            Logger::debug(col_base);
             switch (move_best) {
                 case MOVE_ADDITION:
-                    Logger::print(" [+] ");
+                    Logger::debug(" [+] ");
                     add_edge(i_best, j_best);
                     break;
 
                 case MOVE_SUBTRACTION:
-                    Logger::print(" [-] ");
+                    Logger::debug(" [-] ");
                     del_edge(i_best, j_best);
                     break;
 
                 case MOVE_REVERSAL:
-                    Logger::print(" [.] ");
+                    Logger::debug(" [.] ");
                     del_edge(i_best, j_best);
                     add_edge(j_best, i_best);
 
@@ -267,7 +268,7 @@ class motif_trainer
                     break;
 
                 default:
-                    Logger::abort("Inexplicable error. Please report this.");
+                    Logger::debug("Inexplicable error. Please report this.");
             }
 
             vecsubcol(ms0, L0, n, m, j_best);
@@ -279,12 +280,10 @@ class motif_trainer
             vecaddcol(ms1, L1, n, m, j_best);
 
             snprintf(msg, sizeof(msg), "%d->%d\n", i_best, j_best);
-            Logger::print(msg);
+            Logger::debug(msg);
 
             ic = ic_best;
         }
-
-        Logger::resume();
     }
 
 
@@ -326,17 +325,17 @@ class motif_trainer
         /* make a move */
         switch (move) {
             case MOVE_ADDITION:
-                Logger::print("+");
+                Logger::debug("+");
                 add_edge(i, j);
                 break;
 
             case MOVE_SUBTRACTION:
-                Logger::print("-");
+                Logger::debug("-");
                 del_edge(i, j);
                 break;
 
             case MOVE_REVERSAL:
-                Logger::print(".");
+                Logger::debug(".");
                 rev_edge(i, j);
                 break;
 
@@ -346,7 +345,7 @@ class motif_trainer
 
         if (++col > col_max) {
             col = 0;
-            Logger::print(col_base);
+            Logger::debug(col_base);
         }
 
         /* evaluate likelihood */
@@ -754,6 +753,8 @@ class motif_trainer
     double* ps1_i;
     double* ps1_j;
 
+    const char* task_name;
+
     static const double pseudocount;
 };
 
@@ -790,7 +791,8 @@ motif::motif(const deque<twobitseq*>& seqs0,
              size_t m,
              size_t max_parents,
              size_t max_distance,
-             double complexity_penalty)
+             double complexity_penalty,
+             const char* task_name)
     : nparents(NULL)
 {
     /* We are essentially outsourcing construction here. The motif_trainer
@@ -801,7 +803,8 @@ motif::motif(const deque<twobitseq*>& seqs0,
                           m,
                           max_parents,
                           max_distance,
-                          complexity_penalty);
+                          complexity_penalty,
+                          task_name);
 
     trainer.train();
 

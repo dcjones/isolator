@@ -28,7 +28,8 @@ class motif
               size_t m,
               size_t max_parents = 0,
               size_t max_distance = 0,
-              double complexity_penalty = 1.0);
+              double complexity_penalty = 1.0,
+              const char* task_name = NULL);
 
         /** read from yaml */
         //motif(const YAML::Node& node);

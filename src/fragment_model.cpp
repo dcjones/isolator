@@ -170,7 +170,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     ts.get_consensus_exonic(exonic);
 
     std::vector<Interval>::iterator interval;
-    std::vector<FragmentModelThread*> threads(constants::num_threads);
+    std::vector<FragmentModelThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
         threads.push_back(new FragmentModelThread(q));
         threads.back()->start();

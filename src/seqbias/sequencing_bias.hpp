@@ -97,7 +97,8 @@ class sequencing_bias
                     PosTable& T,
                     size_t max_reads,
                     pos_t L, pos_t R,
-                    double complexity_penalty);
+                    double complexity_penalty,
+                    const char* task_name);
 
 
         double* get_maten_bias(
