@@ -103,7 +103,7 @@ bool AlignmentPair::valid_frag() const
     /* Reads with only mate1 are considered valid single-end reads, for our
      * purposes */
     if (mate1 == NULL) return false;
-    if (mate1 != NULL && mate1 == NULL) return true;
+    if (mate1 != NULL && mate2 == NULL) return true;
 
     switch (constants::libtype) {
         case constants::LIBTYPE_FR:

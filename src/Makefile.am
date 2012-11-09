@@ -4,8 +4,10 @@ SUBDIRS = gtf hat-trie samtools seqbias sqlite3
 bin_PROGRAMS = isolator
 
 isolator_SOURCES = isolator.cpp \
+                   alloc.hpp \
                    common.hpp common.cpp \
                    constants.hpp constants.cpp \
+                   emp_dist.hpp emp_dist.cpp \
                    fragment_model.hpp fragment_model.cpp \
                    intervals.hpp intervals.cpp \
                    linalg.hpp linalg.cpp \

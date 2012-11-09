@@ -60,11 +60,11 @@ class SamScanInterval
 
         ReadSet rs;
 
-    private:
         SeqName seqname;
         pos_t start, end;
         strand_t strand;
 
+    private:
         /* A the sequence ID assigned by the BAM file, so we can arrange
          * intervals in the same order. */
         int32_t tid;

@@ -273,7 +273,7 @@ void sequencing_bias::build(const char* ref_fn,
 
     if (T1.size() >= min_positions) {
         const char* task_name;
-        if (T2.size() >= min_positions) {
+        if (T2.size() < min_positions) {
             task_name = "Estimating sequence bias";
         }
         else {

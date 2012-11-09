@@ -51,6 +51,18 @@ namespace constants
     /* When estimating fragment length distributions, throw out anything larger
      * than this, assuming it's an artifact. */
     extern pos_t max_frag_len;
+
+    /* When estimating fragment length distribution, exclude outlier fragment
+     * lengths that have probability less that this number. */
+    extern float min_frag_len_pr;
+
+    /* The degree of smoothing to use for the emperical distribution over
+     * fragment lengths. */
+    extern float frag_len_dist_smoothing;
+
+    /* Minimum number of paired-end reads needed to estimate the fragment length
+     * distribution. */
+    extern size_t frag_len_min_pe_reads;
 }
 
 #endif

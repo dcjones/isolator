@@ -3,7 +3,10 @@
 #define ISOLATOR_COMMON_HPP
 
 #include <boost/flyweight.hpp>
+#include <cstdlib>
 #include <string>
+
+#include "logger.hpp"
 
 /* A genomic position. */
 typedef long pos_t;

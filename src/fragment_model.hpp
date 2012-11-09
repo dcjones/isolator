@@ -6,6 +6,7 @@
 #include "sam_scan.hpp"
 #include "seqbias/sequencing_bias.hpp"
 #include "transcripts.hpp"
+#include "emp_dist.hpp"
 
 /* A probabalistic model of fragment sampling in RNA-Seq experiments. */
 class FragmentModel
@@ -20,8 +21,16 @@ class FragmentModel
          * of alignments for each read. */
         AlnCountTrie alncnt;
 
-        /* A model of sequenc bias. */
+        /* Probability of a read being from the same strand as the transcript it
+         * originates from. */
+        float strand_specificity;
+
+        /* A model of sequence bias. */
         sequencing_bias* sb;
+
+        /* Distribution over fragment lengths. */
+        EmpDist* frag_len_dist;
+
 };
 
 
