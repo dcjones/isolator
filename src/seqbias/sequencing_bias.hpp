@@ -8,12 +8,12 @@
 #ifndef ISOLATOR_SEQUENCING_BIAS_HPP
 #define ISOLATOR_SEQUENCING_BIAS_HPP
 
+#include <string>
 
+#include "../pos_table.hpp"
 #include "common.hpp"
 #include "motif.hpp"
-#include "pos_table.h"
 #include "samtools/faidx.h"
-#include <string>
 
 /** A representation of sequencing bias for a particular dataset.
  */
@@ -33,7 +33,8 @@ class sequencing_bias
         /** Train a new model.
          *
          * \param ref_fn    File name of an indexed FASTA file.
-         * \param reads_fn  File name of an indexed BAM file.
+         * \param M1        Positions of mate1 reads.
+         * \param M1        Positions of mate2 reads.
          * \param max_reads How many reads (at most) to use.
          * \param L         How many left positions to consider.
          * \param R         How many right positions to consider.
@@ -41,7 +42,7 @@ class sequencing_bias
          *                           larger.
          */
         sequencing_bias(const char* ref_fn,
-                        const char* reads_fn,
+                        PosTable& T1, PosTable& T2,
                         size_t max_reads,
                         pos_t L, pos_t R,
                         double complexity_penalty = 0.5);
@@ -86,14 +87,14 @@ class sequencing_bias
         void clear();
 
         void build(const char* ref_fn,
-                   const char* reads_fn,
+                   PosTable& T1, PosTable& T2,
                    size_t max_reads,
                    pos_t L, pos_t R,
                    double complexity_penalty);
 
         void buildn(motif** Mn,
                     const char* ref_fn,
-                    pos_table* T,
+                    PosTable& T,
                     size_t max_reads,
                     pos_t L, pos_t R,
                     double complexity_penalty);

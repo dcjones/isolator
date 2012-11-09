@@ -10,6 +10,7 @@ isolator_SOURCES = isolator.cpp \
                    intervals.hpp intervals.cpp \
                    linalg.hpp linalg.cpp \
                    logger.hpp logger.cpp \
+                   pos_table.hpp pos_table.cpp \
                    queue.hpp \
                    read_set.hpp read_set.cpp \
                    sam_scan.hpp sam_scan.cpp \

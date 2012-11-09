@@ -162,14 +162,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
                              const char* bam_fn,
                              const char* fa_fn)
 {
-    if (fa_fn != NULL) {
-        sb = new sequencing_bias(fa_fn, bam_fn,
-                                 constants::seqbias_num_reads,
-                                 constants::seqbias_left_pos,
-                                 constants::seqbias_right_pos);
-    }
-    else sb = NULL;
-
     Queue<FragmentModelInterval*> q(constants::max_estimate_queue_size);
 
     std::vector<SamScanInterval*> intervals;
@@ -184,7 +176,20 @@ void FragmentModel::estimate(TranscriptSet& ts,
         threads.back()->start();
     }
 
-    sam_scan(intervals, alncnt, bam_fn, "Indexing reads");
+    PosTable mate1_pos_tab, mate2_pos_tab;
+    sam_scan(intervals, alncnt,
+             mate1_pos_tab, mate2_pos_tab,
+             bam_fn, "Indexing reads");
+
+    if (fa_fn != NULL) {
+        sb = new sequencing_bias(fa_fn,
+                                 mate1_pos_tab, mate2_pos_tab,
+                                 constants::seqbias_num_reads,
+                                 constants::seqbias_left_pos,
+                                 constants::seqbias_right_pos);
+    }
+    else sb = NULL;
+
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         q.push(NULL);

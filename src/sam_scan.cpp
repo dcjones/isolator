@@ -95,7 +95,10 @@ struct SamScanIntervalPtrCmp
 
 
 void sam_scan(std::vector<SamScanInterval*>& intervals,
-              AlnCountTrie& T, const char* bam_fn,
+              AlnCountTrie& T,
+              PosTable& mate1_pos_tab,
+              PosTable& mate2_pos_tab,
+              const char* bam_fn,
               const char* task_name)
 {
     /* Measure file size to monitor progress. */
@@ -168,8 +171,14 @@ void sam_scan(std::vector<SamScanInterval*>& intervals,
         last_pos = b->core.pos;
 
         /* Count numbers of alignments by read. */
-        if (b->core.flag & BAM_FREAD2) T.inc_mate2(bam1_qname(b));
-        else                           T.inc_mate1(bam1_qname(b));
+        if (b->core.flag & BAM_FREAD2) {
+            T.inc_mate2(bam1_qname(b));
+            mate2_pos_tab.add(b, bam_f);
+        }
+        else {
+            T.inc_mate1(bam1_qname(b));
+            mate1_pos_tab.add(b, bam_f);
+        }
 
         /* Add reads to intervals in which they are contained. */
         for (j = j0; j < n; ++j) {

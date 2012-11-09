@@ -6,9 +6,10 @@
 
 #include "common.hpp"
 #include "hat-trie/hat-trie.h"
+#include "intervals.hpp"
+#include "pos_table.hpp"
 #include "read_set.hpp"
 #include "samtools/sam.h"
-#include "intervals.hpp"
 
 typedef std::pair<unsigned int, unsigned int> MateCount;
 
@@ -69,7 +70,10 @@ class SamScanInterval
         int32_t tid;
 
         friend void sam_scan(std::vector<SamScanInterval*>& intervals,
-                             AlnCountTrie& T, const char* bam_fn,
+                             AlnCountTrie& T,
+                             PosTable& mate1_pos_tab,
+                             PosTable& mate2_pos_tab,
+                             const char* bam_fn,
                              const char* task_name);
 };
 
@@ -85,7 +89,10 @@ class SamScanInterval
  *   bam_fn: Filename of a SAM/BAM file.
  * */
 void sam_scan(std::vector<SamScanInterval*>& intervals,
-              AlnCountTrie& T, const char* bam_fn,
+              AlnCountTrie& T,
+              PosTable& mate1_pos_tab,
+              PosTable& mate2_pos_tab,
+              const char* bam_fn,
               const char* task_name);
 
 #endif
