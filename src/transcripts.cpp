@@ -39,6 +39,21 @@ Transcript::Transcript()
 }
 
 
+Transcript::Transcript(const Transcript& other)
+    : std::set<Exon>(other)
+    , gene_id(other.gene_id)
+    , transcript_id(other.transcript_id)
+    , seqname(other.seqname)
+    , strand(other.strand)
+    , min_start(other.min_start)
+    , max_end(other.max_end)
+    , start_codon(other.start_codon)
+    , stop_codon(other.stop_codon)
+    , id(other.id)
+{
+}
+
+
 Transcript::~Transcript()
 {
 
@@ -67,6 +82,13 @@ bool Transcript::operator < (const Transcript& other) const
     else                                   return transcript_id < other.transcript_id;
 }
 
+
+bool Transcript::overlaps(SeqName seqname, pos_t start, pos_t end) const
+{
+    return this->seqname == seqname &&
+           this->min_start <= end &&
+           this->max_end   >= start;
+}
 
 
 /* Construct a TranscriptSet */
@@ -297,6 +319,81 @@ void TranscriptSet::get_intergenic(std::vector<Interval>& intervals)
             }
         }
     }
+}
+
+
+TranscriptSetLocus::TranscriptSetLocus()
+    : min_start(-1)
+    , max_end(-1)
+{
+}
+
+
+TranscriptSetLocus::TranscriptSetLocus(const TranscriptSetLocus& other)
+    : std::deque<Transcript>(other)
+    , seqname(other.seqname)
+    , min_start(other.min_start)
+    , max_end(other.max_end)
+{
+}
+
+
+void TranscriptSetLocus::push_back(Transcript const& t)
+{
+    if (min_start == -1 || t.min_start < min_start) min_start = t.min_start;
+    if (max_end   == -1 || t.max_end   > max_end)   max_end   = t.max_end;
+    seqname = t.seqname;
+    std::deque<Transcript>::push_back(t);
+}
+
+
+void TranscriptSetLocus::clear()
+{
+    min_start = -1;
+    max_end= -1;
+    std::deque<Transcript>::clear();
+}
+
+
+TranscriptSetLocusIterator::TranscriptSetLocusIterator()
+    : ts(NULL)
+{
+}
+
+
+TranscriptSetLocusIterator::TranscriptSetLocusIterator(const TranscriptSet& ts)
+    : ts(&ts)
+{
+    i = ts.transcripts.begin();
+}
+
+
+void TranscriptSetLocusIterator::increment()
+{
+    if (ts == NULL) return;
+
+    locus.clear();
+    for (; i != ts->transcripts.end(); ++i) {
+        if (locus.empty() ||
+                i->overlaps(locus.seqname, locus.min_start, locus.max_end)) {
+            locus.push_back(*i);
+        }
+    }
+
+    /* Mark the end of the iterator. */
+    if (locus.empty()) ts = NULL;
+}
+
+
+bool TranscriptSetLocusIterator::equal(const TranscriptSetLocusIterator& other) const
+{
+    return (ts == NULL && other.ts == NULL) || i == other.i;
+}
+
+
+const TranscriptSetLocus& TranscriptSetLocusIterator::dereference() const
+{
+    return locus;
 }
 
 

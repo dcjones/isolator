@@ -8,6 +8,7 @@
 #include "fragment_model.hpp"
 #include "logger.hpp"
 #include "sample_db.hpp"
+#include "sampler.hpp"
 #include "transcripts.hpp"
 
 const char* isolator_logo =
@@ -139,11 +140,12 @@ int quantify(int argc, char* argv[])
     SampleDB db(out_fn, true);
 
     /* Initialize the fragment model. */
-    FragmentModel fragmod;
-    fragmod.estimate(ts, bam_fn, fa_fn);
+    FragmentModel fm;
+    fm.estimate(ts, bam_fn, fa_fn);
 
     /* Initialize the sampler. */
-    /* TODO */
+    Sampler sampler(bam_fn, fa_fn, ts, fm);
+    /* TODO: run the sampler */
 
     Logger::info("Finished. Have a nice day!");
     Logger::end();

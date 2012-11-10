@@ -16,6 +16,7 @@ isolator_SOURCES = isolator.cpp \
                    queue.hpp \
                    read_set.hpp read_set.cpp \
                    sam_scan.hpp sam_scan.cpp \
+                   sampler.hpp sampler.cpp \
                    sample_db.hpp sample_db.cpp \
                    transcripts.hpp transcripts.cpp \
                    trie.hpp
