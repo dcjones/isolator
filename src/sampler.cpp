@@ -2,10 +2,9 @@
 #include "constants.hpp"
 #include "logger.hpp"
 #include "queue.hpp"
-#include "sam_scan.hpp"
 #include "sampler.hpp"
 
-class SamplerInitInterval : public SamScanInterval
+class SamplerInitInterval
 {
     public:
         SamplerInitInterval(
@@ -97,7 +96,7 @@ Sampler::Sampler(const char* bam_fn, const char* ref_fn,
     Queue<SamplerInitInterval*> q;
 
     /* Collect intervals */
-    std::vector<SamScanInterval*> intervals;
+    std::vector<SamplerInitInterval*> intervals;
     for (TranscriptSetLocusIterator i(ts); i != TranscriptSetLocusIterator(); ++i) {
         intervals.push_back(new SamplerInitInterval(*i, q));
     }
@@ -120,6 +119,12 @@ Sampler::Sampler(const char* bam_fn, const char* ref_fn,
      *
      * If we choose 1, it seems like the current version should just become part
      * of fragment_model.cpp...
+     *
+     *
+     * Fuck it. Let's just write two sam_scan functions.
+     *
+     *
+     *
      */
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
