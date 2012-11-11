@@ -51,6 +51,80 @@ MateCount AlnCountTrie::get(const char* id) const
 }
 
 
+void AlnCountTrie::set(const char* id, const MateCount& count)
+{
+    unsigned long* val = hattrie_get(t, id, strlen(id));
+    *val = (count.first & 0xffff) | ((count.second & 0xffff) << 16);
+}
+
+
+bool AlnCountTrie::has(const char* id) const
+{
+    return hattrie_tryget(t, id, strlen(id)) != NULL;
+}
+
+
+size_t AlnCountTrie::size() const
+{
+    return hattrie_size(t);
+}
+
+
+AlnCountTrieIterator::AlnCountTrieIterator()
+    : it(NULL)
+{
+
+}
+
+
+AlnCountTrieIterator::AlnCountTrieIterator(const AlnCountTrie& t)
+{
+    it = hattrie_iter_begin(t.t, false);
+    if (!hattrie_iter_finished(it)) {
+        x.first = hattrie_iter_key(it, NULL);
+        unsigned long* val = hattrie_iter_val(it);
+        x.second.first  = *val & 0xffff;
+        x.second.second = (*val >> 16) & 0xffff;
+    }
+}
+
+
+AlnCountTrieIterator::~AlnCountTrieIterator()
+{
+    hattrie_iter_free(it);
+}
+
+
+void AlnCountTrieIterator::increment()
+{
+    hattrie_iter_next(it);
+    if (!hattrie_iter_finished(it)) {
+        x.first = hattrie_iter_key(it, NULL);
+        unsigned long* val = hattrie_iter_val(it);
+        x.second.first  = *val & 0xffff;
+        x.second.second = (*val >> 16) & 0xffff;
+    }
+}
+
+
+bool AlnCountTrieIterator::equal(const AlnCountTrieIterator& other) const
+{
+    if (it == NULL || hattrie_iter_finished(it)) {
+        return other.it == NULL || hattrie_iter_finished(other.it);
+    }
+    else if (other.it == NULL || hattrie_iter_finished(other.it)) {
+        return false;
+    }
+    else return hattrie_iter_equal(it, other.it);
+}
+
+
+const std::pair<const char*, MateCount>& AlnCountTrieIterator::dereference() const
+{
+    return x;
+}
+
+
 /* An interval used for fragment model parameter estimation. */
 class FragmentModelInterval
 {
@@ -285,7 +359,7 @@ class FragmentModelThread
                     read_counts.clear();
                 }
 
-                interval->clear();
+                delete interval;
             }
         }
 
@@ -396,10 +470,24 @@ void FragmentModel::estimate(TranscriptSet& ts,
         threads.back()->start();
     }
 
+    AlnCountTrie* alncnt = new AlnCountTrie();
     PosTable mate1_pos_tab, mate2_pos_tab;
-    sam_scan(intervals, alncnt,
+    sam_scan(intervals, *alncnt,
              mate1_pos_tab, mate2_pos_tab,
              bam_fn, "Indexing reads");
+
+    /* Index multireads. */
+    unsigned long total_reads = alncnt->size();
+    for (AlnCountTrieIterator i(*alncnt); i != AlnCountTrieIterator(); ++i) {
+        if (i->second.first > 1 || i->second.second > 1) {
+            multireads.set(i->first, i->second);
+        }
+    }
+    delete alncnt;
+
+    Logger::info("Reads: %lu, %0.1f%% with multiple alignments",
+                 total_reads,
+                 100.0 * (double) multireads.size() / (double) total_reads);
 
     if (fa_fn != NULL) {
         sb = new sequencing_bias(fa_fn,
@@ -474,8 +562,8 @@ void FragmentModel::estimate(TranscriptSet& ts,
         delete frag_len_vals;
         delete frag_len_lens;
 
-        Logger::info("Fragment length distribution estimated. (Median: %d)",
-                     (int) frag_len_dist->median());
+        Logger::info("Fragment length distribution estimated.");
+        Logger::info("Median fragment-length: %d", (int) frag_len_dist->median());
     }
     else {
         Logger::info("Too few paired-end reads to estimate fragment length distribution.");

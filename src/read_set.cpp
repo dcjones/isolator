@@ -57,6 +57,62 @@ bool Alignment::operator != (const bam1_t* b) const
 }
 
 
+CigarIterator::CigarIterator()
+    : owner(NULL)
+    , i(0)
+{
+}
+
+
+CigarIterator::CigarIterator(const Alignment& owner)
+    : owner(&owner)
+    , i(0)
+{
+    if (i < owner.cigar_len) {
+        c.start = owner.start;
+        c.end   = c.start + (owner.cigar[i] >> BAM_CIGAR_SHIFT) - 1;
+        c.op    = owner.cigar[i] & BAM_CIGAR_MASK;
+    }
+    else {
+        c.start = -1;
+        c.end   = -1;
+        c.op    = BAM_CPAD;
+    }
+}
+
+
+void CigarIterator::increment()
+{
+    if (i >= owner->cigar_len) return;
+
+    if (++i < owner->cigar_len) {
+        c.start = c.end + 1;
+        c.end   = c.start + (owner->cigar[i] >> BAM_CIGAR_SHIFT) - 1;
+        c.op    = owner->cigar[i] & BAM_CIGAR_MASK;
+    }
+}
+
+
+bool CigarIterator::equal(const CigarIterator& other) const
+{
+    if (owner == NULL || i >= owner->cigar_len) {
+        return other.owner == NULL || other.i >= other.owner->cigar_len;
+    }
+    else if (other.owner == NULL || other.i >= other.owner->cigar_len) {
+        return false;
+    }
+    else {
+        return owner == other.owner && i == other.i;
+    }
+}
+
+
+const Cigar& CigarIterator::dereference() const
+{
+    return c;
+}
+
+
 AlignedRead::AlignedRead()
 {
 }
@@ -98,6 +154,20 @@ bool AlignedRead::operator < (const AlignedRead& other) const
 }
 
 
+AlignmentPair::AlignmentPair()
+    : mate1(NULL)
+    , mate2(NULL)
+{
+}
+
+
+bool AlignmentPair::operator < (const AlignmentPair& other) const
+{
+    if (this->mate1 != other.mate1) return this->mate1 < other.mate1;
+    else                            return this->mate2 < other.mate2;
+}
+
+
 bool AlignmentPair::valid_frag() const
 {
     /* Reads with only mate1 are considered valid single-end reads, for our
@@ -124,6 +194,127 @@ bool AlignmentPair::valid_frag() const
         default:
             return false;
     }
+}
+
+/* A couple functions to assist with AlignmentPair::frag_len */
+static bool exon_compatible_cigar_op(uint8_t op)
+{
+    // TODO: what should be done in the case of indels ?
+    return op == BAM_CMATCH;
+}
+
+
+static bool intron_compatible_cigar_op(uint8_t op)
+{
+    return op == BAM_CREF_SKIP;
+}
+
+
+pos_t AlignmentPair::frag_len(const Transcript& t) const
+{
+    /* Reorder mates for convenience. */
+    const Alignment *a1, *a2;
+    if (mate1 != NULL && mate2 != NULL) {
+        if (mate1->start <= mate2->start) {
+            a1 = mate1;
+            a2 = mate2;
+        }
+        else {
+            a1 = mate2;
+            a2 = mate1;
+        }
+
+        /* NOTE: we currently don't allow one mate to be contained within the
+         * other. This might occur if the mates are if different lengths, but
+         * isn't likely to be a problem. This function will need some
+         * modifications if it does prove to be an issue. */
+        if (a1->end > a2->end) return -1;
+    }
+    else if (mate1 != NULL) {
+        a1 = mate1;
+        a2 = NULL;
+    }
+    else {
+        a1 = mate2;
+        a2 = NULL;
+    }
+
+    TranscriptIntronExonIterator e1(t);
+    CigarIterator c1(*a1);
+    pos_t intron_len = 0;
+
+    while (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
+        // case 1: e entirely preceedes c
+        if (c1->start > e1->first.end) {
+            ++e1;
+        }
+
+        // case 2: c is contained within e
+        else if (c1->end   >= e1->first.start
+              && c1->end   <= e1->first.end
+              && c1->start >= e1->first.start)
+        {
+            if (e1->second == EXONIC_INTERVAL_TYPE) {
+                if (!exon_compatible_cigar_op(c1->op)) return -1;
+            }
+            else {
+                if (!intron_compatible_cigar_op(c1->op)) return -1;
+                intron_len += c1->end - c1->start + 1;
+            }
+
+            ++c1;
+        }
+
+        // case 3: c precedes or partially overlaps e
+        else {
+            return -1;
+        }
+    }
+
+    /* alignment overhangs the transcript. */
+    if (c1 == CigarIterator()) return -1;
+
+    /* alignment is compatible, but single ended. */
+    if (a2 == NULL) return 0;
+
+    bool e2_sup_e1 = false; /* marks when e2 > e1 */
+    TranscriptIntronExonIterator e2(t);
+    CigarIterator c2(*a2);
+
+    while (e2 != TranscriptIntronExonIterator() && c2 != CigarIterator()) {
+        // case 1: e entirely preceedes c
+        if (c2->start > e2->first.end) {
+            if (e2->second == EXONIC_INTERVAL_TYPE && e2_sup_e1) {
+                intron_len += e2->first.end - e2->first.start + 1;
+            }
+
+            if (e1 == e2) e2_sup_e1 = true;
+            ++e2;
+        }
+
+        // case 2: c is contained within e
+        else if (c2->end   >= e2->first.start
+              && c2->end   <= e2->first.end
+              && c2->start >= e2->first.start)
+        {
+            if (e2->second == EXONIC_INTERVAL_TYPE) {
+                if (!exon_compatible_cigar_op(c2->op)) return -1;
+            }
+            else {
+                if (!intron_compatible_cigar_op(c2->op)) return -1;
+            }
+
+            ++c2;
+        }
+
+        // case 3: c precedes or partially overlaps e
+        else {
+            return -1;
+        }
+    }
+
+    assert(intron_len < a2->end - a1->start + 1);
+    return a2->end - a1->start + 1 - intron_len;
 }
 
 
@@ -281,5 +472,54 @@ void ReadSet::make_unique_read_counts(ReadSet::UniqueReadCounts& counts)
     }
 }
 
+
+ReadSetIterator::ReadSetIterator()
+    : it(NULL)
+{
+}
+
+
+ReadSetIterator::ReadSetIterator(const ReadSet& s)
+{
+    it = hattrie_iter_begin(s.rs, false);
+    if (!hattrie_iter_finished(it)) {
+        x.first = hattrie_iter_key(it, NULL);
+        x.second = *reinterpret_cast<AlignedRead**>(hattrie_iter_val(it));
+    }
+}
+
+
+ReadSetIterator::~ReadSetIterator()
+{
+    hattrie_iter_free(it);
+}
+
+
+void ReadSetIterator::increment()
+{
+    hattrie_iter_next(it);
+    if (!hattrie_iter_finished(it)) {
+        x.first = hattrie_iter_key(it, NULL);
+        x.second = *reinterpret_cast<AlignedRead**>(hattrie_iter_val(it));
+    }
+}
+
+
+bool ReadSetIterator::equal(const ReadSetIterator& other) const
+{
+    if (it == NULL || hattrie_iter_finished(it)) {
+        return other.it == NULL || hattrie_iter_finished(other.it);
+    }
+    else if (other.it == NULL || hattrie_iter_finished(other.it)) {
+        return false;
+    }
+    else return hattrie_iter_equal(it, other.it);
+}
+
+
+const std::pair<const char*, AlignedRead*>& ReadSetIterator::dereference() const
+{
+    return x;
+}
 
 

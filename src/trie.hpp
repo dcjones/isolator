@@ -72,7 +72,7 @@ class TrieSetIterator :
             hattrie_iter_next(it);
         }
 
-        bool equal(TrieSetIterator const& other) const
+        bool equal(const TrieSetIterator& other) const
         {
             if (it == NULL || hattrie_iter_finished(it)) {
                 return other.it == NULL || hattrie_iter_finished(other.it);

@@ -91,6 +91,64 @@ bool Transcript::overlaps(SeqName seqname, pos_t start, pos_t end) const
 }
 
 
+TranscriptIntronExonIterator::TranscriptIntronExonIterator()
+    : owner(NULL)
+{
+}
+
+
+TranscriptIntronExonIterator::TranscriptIntronExonIterator(const Transcript& t)
+    : owner(&t)
+    , i(t.begin())
+{
+    if (i != owner->end()) {
+        interval.first.start = i->start;
+        interval.first.end   = i->end;
+        interval.second = EXONIC_INTERVAL_TYPE;
+    }
+}
+
+void TranscriptIntronExonIterator::increment()
+{
+    if (i == owner->end()) return;
+
+    if (interval.second == EXONIC_INTERVAL_TYPE) {
+        pos_t last_end = interval.first.end;
+        ++i;
+        if (i != owner->end()) {
+            interval.first.start = last_end + 1;
+            interval.first.end   = i->start - 1;
+            interval.second = INTRONIC_INTERVAL_TYPE;
+        }
+    }
+    else {
+        interval.first.start = i->start;
+        interval.first.end   = i->end;
+        interval.second = EXONIC_INTERVAL_TYPE;
+    }
+}
+
+
+bool TranscriptIntronExonIterator::equal(const TranscriptIntronExonIterator& other) const
+{
+    if (owner == NULL || i == owner->end()) {
+        return other.owner == NULL || other.i == other.owner->end();
+    }
+    else if (other.owner == NULL || other.i == other.owner->end()) {
+        return false;
+    }
+    else {
+        return i == other.i;
+    }
+}
+
+
+const std::pair<Exon, IntronExonType>&TranscriptIntronExonIterator::dereference() const
+{
+    return interval;
+}
+
+
 /* Construct a TranscriptSet */
 TranscriptSet::TranscriptSet()
 {
@@ -176,14 +234,16 @@ void TranscriptSet::read_gtf(FILE* f)
     gtf_row_free(row);
     gtf_file_free(gtf_file);
 
+    unsigned int next_id = 0;
     for (TrieMapIterator<Transcript> t(ts);
          t != TrieMapIterator<Transcript>();
          ++t) {
+        t->second->id = next_id++;
         transcripts.insert(*t->second);
     }
 
     Logger::pop_task(task_name);
-    Logger::info("Read %lu transcripts.", (unsigned long) size());
+    Logger::info("Transcripts: %lu", (unsigned long) size());
 }
 
 

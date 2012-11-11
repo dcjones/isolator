@@ -8,6 +8,7 @@
 #include "common.hpp"
 #include "hat-trie/hat-trie.h"
 #include "samtools/sam.h"
+#include "transcripts.hpp"
 
 /* A representation of an aligned sequence. */
 struct Alignment
@@ -25,6 +26,38 @@ struct Alignment
     uint16_t  cigar_len;
     uint32_t* cigar;
     uint8_t   strand;
+};
+
+
+/* A single cigar operation. */
+struct Cigar
+{
+    uint8_t op;
+    pos_t start;
+    pos_t end;
+};
+
+
+/* Iterate through cigar operations in an alignment.. */
+class CigarIterator :
+    public boost::iterator_facade<CigarIterator,
+                                  const Cigar,
+                                  boost::forward_traversal_tag>
+{
+    public:
+        CigarIterator();
+        CigarIterator(const Alignment&);
+
+    private:
+        friend class boost::iterator_core_access;
+
+        void increment();
+        bool equal(const CigarIterator& other) const;
+        const Cigar& dereference() const;
+
+        const Alignment* owner;
+        size_t i;
+        Cigar c;
 };
 
 
@@ -46,9 +79,20 @@ struct AlignedRead
 /* A pair of alignments. (One for each mate.) */
 struct AlignmentPair
 {
-    /* TODO: other things here */
+    AlignmentPair();
+
+    bool operator < (const AlignmentPair& other) const;
 
     bool valid_frag() const;
+
+    /* Fragment length, assuming the read-pair originated from the given
+     * transcript.
+     *
+     * Returns 0 if the pair lacks a mate so that so not no estimate can be
+     * made.
+     *
+     * Return <0 if the pair is incompatible with the trascript. */
+    pos_t frag_len(const Transcript& t) const;
 
     /* The fragment length of a paired-end read, ignoring the effects of
      * splicing. */
@@ -118,7 +162,32 @@ class ReadSet
 
         /* A pool of unique alignments. */
         std::vector<Alignment*> as;
+
+        friend class ReadSetIterator;
 };
+
+
+/* Iterate through a set of reads. */
+class ReadSetIterator :
+    public boost::iterator_facade<ReadSetIterator,
+                                  const std::pair<const char*, AlignedRead*>,
+                                  boost::forward_traversal_tag>
+{
+    public:
+        ReadSetIterator();
+        ReadSetIterator(const ReadSet&);
+        ~ReadSetIterator();
+
+    private:
+        friend class boost::iterator_core_access;
+        void increment();
+        bool equal(const ReadSetIterator& other) const;
+        const std::pair<const char*, AlignedRead*>& dereference() const;
+
+        hattrie_iter_t* it;
+        std::pair<const char*, AlignedRead*> x;
+};
+
 
 #endif
 

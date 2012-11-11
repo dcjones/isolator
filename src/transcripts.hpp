@@ -59,6 +59,37 @@ class Transcript : public std::set<Exon>
 
     private:
         friend class TranscriptSet;
+        friend class TranscriptIntronExonIterator;
+};
+
+
+enum IntronExonType {
+    EXONIC_INTERVAL_TYPE,
+    INTRONIC_INTERVAL_TYPE
+};
+
+
+/* A special iterator that iterates through a transcripts introns and exons in
+ * order. */
+class TranscriptIntronExonIterator :
+    public boost::iterator_facade<TranscriptIntronExonIterator,
+                                  const std::pair<Exon, IntronExonType>,
+                                  boost::forward_traversal_tag>
+{
+    public:
+        TranscriptIntronExonIterator();
+        TranscriptIntronExonIterator(const Transcript&);
+
+    private:
+        void increment();
+        bool equal(const TranscriptIntronExonIterator&) const;
+        const std::pair<Exon, IntronExonType>& dereference() const;
+
+        const Transcript* owner;
+        Transcript::const_iterator i;
+        std::pair<Exon, IntronExonType> interval;
+        friend class boost::iterator_core_access;
+
 };
 
 

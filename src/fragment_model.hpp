@@ -28,8 +28,42 @@ class AlnCountTrie
         /* Get the number of alignments of both mates of the given ID. */
         MateCount get(const char*) const;
 
+        /* Set the number of alignments for the read with teh given ID. */
+        void set(const char*, const MateCount&);
+
+        /* True if the key is present. */
+        bool has(const char*) const;
+
+        /* Number of entries. */
+        size_t size() const;
+
     private:
         hattrie_t* t;
+
+        friend class AlnCountTrieIterator;
+};
+
+
+class AlnCountTrieIterator :
+    public boost::iterator_facade<AlnCountTrieIterator,
+                                  const std::pair<const char*, MateCount>,
+                                  boost::forward_traversal_tag>
+{
+    public:
+        AlnCountTrieIterator();
+        AlnCountTrieIterator(const AlnCountTrie&);
+        ~AlnCountTrieIterator();
+
+    private:
+        friend class boost::iterator_core_access;
+        void increment();
+        bool equal(const AlnCountTrieIterator& other) const;
+        const std::pair<const char*, MateCount>& dereference() const;
+
+        hattrie_iter_t* it;
+
+        /* key value at the current position. */
+        std::pair<const char*, MateCount> x;
 };
 
 
@@ -41,10 +75,9 @@ class FragmentModel
         ~FragmentModel();
         void estimate(TranscriptSet& ts, const char* bam_fn, const char* fa_fn);
 
-    private:
         /* On it's pass through the reads, estimate will also count the number
          * of alignments for each read. */
-        AlnCountTrie alncnt;
+        AlnCountTrie multireads;
 
         /* Probability of a read being from the same strand as the transcript it
          * originates from. */
@@ -55,7 +88,6 @@ class FragmentModel
 
         /* Distribution over fragment lengths. */
         EmpDist* frag_len_dist;
-
 };
 
 
