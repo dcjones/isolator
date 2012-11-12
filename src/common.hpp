@@ -19,6 +19,9 @@ typedef enum {
     strand_na  = 2
 } strand_t;
 
+/* Negate strand. */
+strand_t other_strand(strand_t);
+
 /* Like strcmp but impart a more natural ordering on sequence names. */
 int seqname_compare(const char* u, const char* v);
 

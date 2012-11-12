@@ -98,6 +98,9 @@ struct AlignmentPair
      * splicing. */
     pos_t naive_frag_len() const;
 
+    /* Orientation of the read. */
+    strand_t strand() const;
+
     const Alignment* mate1;
     const Alignment* mate2;
 };

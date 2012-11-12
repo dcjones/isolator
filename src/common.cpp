@@ -5,6 +5,15 @@
 
 #include "common.hpp"
 
+
+strand_t other_strand(strand_t s)
+{
+    if      (s == strand_na)  return strand_na;
+    else if (s == strand_pos) return strand_neg;
+    else                      return strand_pos;
+}
+
+
 static int seqname_num(const char* u)
 {
     int num = 0;

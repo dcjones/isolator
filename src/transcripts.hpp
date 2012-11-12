@@ -9,6 +9,8 @@
 
 #include "common.hpp"
 #include "intervals.hpp"
+#include "seqbias/twobitseq.hpp"
+
 
 /* An exon, relative to some transcript. */
 struct Exon
@@ -41,6 +43,22 @@ class Transcript : public std::set<Exon>
         /* Insert a new exon. Use this rather than the std::set insert functions
          * as this will update min_start, max_end. */
         void add(pos_t start, pos_t end);
+
+        /* Return the length of the spliced transcritpt sequence. */
+        pos_t exonic_length() const;
+
+        /* Extract the sequence of the spliced transcript from the full
+         * reference sequence.
+         *
+         * Args:
+         *   out: Sequence is written to this object.
+         *   ref: The refence sequence the transcript is one. (e.g. chromosome
+         *         sequence).
+         *   lpad, rpad: Extend the extracted this far to the left and right in
+         *               the reference sequence.
+         * */
+        void get_sequence(twobitseq& out, const twobitseq& ref,
+                          pos_t lpad, pos_t rpad) const;
 
         GeneID gene_id;
         TranscriptID transcript_id;

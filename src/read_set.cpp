@@ -325,6 +325,23 @@ pos_t AlignmentPair::naive_frag_len() const
 }
 
 
+strand_t AlignmentPair::strand() const
+{
+    if (mate1) return (strand_t) mate1->strand;
+    else {
+        switch (constants::libtype) {
+            case constants::LIBTYPE_FF:
+                return (strand_t) mate2->strand;
+
+            case constants::LIBTYPE_FR:
+            case constants::LIBTYPE_RF:
+            default:
+                return other_strand((strand_t) mate2->strand);
+        }
+    }
+}
+
+
 AlignedReadIterator::AlignedReadIterator()
     : r(NULL)
     , i(0)
@@ -480,11 +497,14 @@ ReadSetIterator::ReadSetIterator()
 
 
 ReadSetIterator::ReadSetIterator(const ReadSet& s)
+    : it(NULL)
 {
-    it = hattrie_iter_begin(s.rs, false);
-    if (!hattrie_iter_finished(it)) {
-        x.first = hattrie_iter_key(it, NULL);
-        x.second = *reinterpret_cast<AlignedRead**>(hattrie_iter_val(it));
+    if (s.rs) {
+        it = hattrie_iter_begin(s.rs, false);
+        if (!hattrie_iter_finished(it)) {
+            x.first = hattrie_iter_key(it, NULL);
+            x.second = *reinterpret_cast<AlignedRead**>(hattrie_iter_val(it));
+        }
     }
 }
 

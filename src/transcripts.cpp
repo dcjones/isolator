@@ -69,6 +69,57 @@ void Transcript::add(pos_t start, pos_t end)
 }
 
 
+pos_t Transcript::exonic_length() const
+{
+    pos_t l = 0;
+    for (const_iterator exon = begin(); exon != end(); ++exon) {
+        l += exon->end - exon->start + 1;
+    }
+    return l;
+}
+
+
+void Transcript::get_sequence(twobitseq& dest, const twobitseq& src,
+                              pos_t lpad, pos_t rpad) const
+{
+    const pos_t len = exonic_length();
+
+    pos_t src_start = 0;
+    pos_t src_end   = len - 1;
+
+    src_start -= lpad;
+    src_end   += rpad;
+
+    dest.resize(src_end - src_start + 1);
+    pos_t offset = 0;
+
+    if (src_start < 0) {
+        dest.copy(src, min_start + src_start, 0, -src_start);
+        offset += -src_start;
+        src_start = 0;
+    }
+
+    pos_t cum = 0;
+    pos_t u, v;
+    for (const_iterator e = begin(); e != end(); ++e) {
+        u = e->start + std::max((pos_t) 0, src_start - cum);
+        v = std::min(e->end, e->start + (src_end - cum));
+
+        cum += e->end - e->start + 1;
+
+        if (u > v) continue;
+
+        dest.copy(src, u, offset, v - u + 1);
+        offset += v - u + 1;
+    }
+
+    if (src_end >= len) {
+        dest.copy(src, max_end + 1, offset, src_end - len + 1);
+        offset += src_end - len + 1;
+    }
+}
+
+
 bool Transcript::operator < (const Transcript& other) const
 {
     int c;
@@ -410,7 +461,7 @@ void TranscriptSetLocus::push_back(Transcript const& t)
 void TranscriptSetLocus::clear()
 {
     min_start = -1;
-    max_end= -1;
+    max_end = -1;
     std::deque<Transcript>::clear();
 }
 
@@ -425,6 +476,7 @@ TranscriptSetLocusIterator::TranscriptSetLocusIterator(const TranscriptSet& ts)
     : ts(&ts)
 {
     i = ts.transcripts.begin();
+    increment();
 }
 
 
@@ -438,6 +490,7 @@ void TranscriptSetLocusIterator::increment()
                 i->overlaps(locus.seqname, locus.min_start, locus.max_end)) {
             locus.push_back(*i);
         }
+        else break;
     }
 
     /* Mark the end of the iterator. */

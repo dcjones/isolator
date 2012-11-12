@@ -1,4 +1,5 @@
 
+#include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
 
 #include "constants.hpp"
@@ -113,6 +114,7 @@ class SamplerInitInterval
 
         TranscriptSetLocus ts;
         ReadSet rs;
+        boost::shared_ptr<twobitseq> seq;
 
     private:
         int32_t tid;
@@ -164,9 +166,12 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
     }
 
     /* Open the FASTA file */
-    faidx_t* fa_f = fai_load(fa_fn);
-    if (fa_f == NULL) {
-        Logger::abort("Can't open FASTA file %s.", fa_fn);
+    faidx_t* fa_f = NULL;
+    if (fa_fn) {
+        faidx_t* fa_f = fai_load(fa_fn);
+        if (fa_f == NULL) {
+            Logger::abort("Can't open FASTA file %s.", fa_fn);
+        }
     }
 
     /* Sort the intervals in the same order as the BAM file. */
@@ -213,6 +218,24 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
                     "Excuse me, but I must insist that your SAM/BAM file be sorted. "
                     "Please run: 'samtools sort'.");
         }
+
+        if (fa_f && b->core.tid != last_tid) {
+            /* TODO: handle the case in which an alignments sequence is not in
+             * the reference We should ignore these reads and complain loudly.
+             * .*/
+            int seqlen;
+            char* seqstr = faidx_fetch_seq(
+                    fa_f, bam_f->header->target_name[b->core.tid],
+                    0, INT_MAX, &seqlen);
+
+            boost::shared_ptr<twobitseq> seq(new twobitseq(seqstr));
+            free(seqstr);
+
+            for (j = j0; j < n && b->core.tid == intervals[j]->tid; ++j) {
+                intervals[j]->seq = seq;
+            }
+        }
+
         last_tid = b->core.tid;
         last_pos = b->core.pos;
 
@@ -244,7 +267,7 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
 
     bam_destroy1(b);
     samclose(bam_f);
-    fai_destroy(fa_f);
+    if (fa_f) fai_destroy(fa_f);
 
     if (task_name) Logger::pop_task(task_name);
 }
@@ -258,6 +281,7 @@ class SamplerInitThread
                 Queue<SamplerInitInterval*>& q)
             : fm(fm)
             , q(q)
+            , thread(NULL)
         {
 
         }
@@ -292,24 +316,44 @@ class SamplerInitThread
     private:
         void process_locus(SamplerInitInterval* locus);
 
+        /* Compute sequence bias for both mates on both strand.
+         *
+         * Results are stored in mate1_seqbias, mate2_seqbias. */
+        void transcript_sequence_bias(const SamplerInitInterval& locus,
+                                      const Transcript& t);
+
+        /* Compute the sum of the weights of all fragmens in the transcript.
+         *
+         * This assumes that transcript_sequence_bias has already been called,
+         * and the mate1_seqbias/mate2_seqbias arrays set for t. */
+        float transcript_weight(const Transcript& t);
+
         /* Compute (a number proportional to) the probability of observing the
          * given fragment from the given transcript, assuming every transcript
          * is equally expressed. */
-        float fragment_probability(
+        float fragment_weight(
                 const Transcript& t,
                 const AlignmentPair& a);
 
         FragmentModel& fm;
         Queue<SamplerInitInterval*>& q;
         boost::thread* thread;
+
+        /* Temprorary space for computing sequence bias, indexed by strand. */
+        std::vector<float> mate1_seqbias[2];
+        std::vector<float> mate2_seqbias[2];
+
+        /* Temporary space for holding transcript sequences. */
+        twobitseq tseq0; /* + strand */
+        twobitseq tseq1; /* reverse complement of tseq0 */
+
+        /* Temporary space used when computing transcript weight. */
+        std::vector<float> ws;
 };
 
 
 void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 {
-    /* Number of transcripts */
-    size_t n = locus->ts.size();
-
     /* A map of fragments onto sequential indices. */
     typedef std::map<AlignmentPair, unsigned int> FragIdx;
     FragIdx fragidx;
@@ -332,8 +376,9 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
             TranscriptSetLocus::iterator t;
             bool has_compatible_transcript;
             for (t = locus->ts.begin(); t != locus->ts.end(); ++t) {
-                // TODO: compute fragment likelihood
-                // set flag if non-zero
+                if ((has_compatible_transcript = a->frag_len(*t) > 0)) {
+                    break;
+                }
             }
 
             if (has_compatible_transcript) {
@@ -346,40 +391,109 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         }
     }
 
+    /* TODO: if (fragidx.empty()) return now, without doing a bunch of extra
+     * work. */
 
+    for (TranscriptSetLocus::iterator t = locus->ts.begin();
+            t != locus->ts.end(); ++t) {
+        transcript_sequence_bias(*locus, *t);
+        transcript_weight(*t);
+        /* TODO: do some fragment weight calculations. */
+    }
 
     /* TODO */
-
-    /* Collect loci. */
-
-    /* TODO:
-     * The interval contains a set of transcripts along
-     * with the reads than inersect that locus.
-     *
-     * We need to produce from that a matrix of fragment
-     * likelihoods.
-     */
-
-
-    /* Something like this:
-     *
-     * If this is not a multiread:
-     *      Make a new row for it in the loci's matrix.
-     * Otherwise:
-     *      ???
-     *
-     *      Otherwise what?
-     *
-     *      We have to figure this out before we write a bunch of
-     *      code that will end up in the garbage.
-     *
-     *
-     */
 }
 
 
-float SamplerInitThread::fragment_probability(const Transcript& t,
-                                              const AlignmentPair& a)
+void SamplerInitThread::transcript_sequence_bias(
+                const SamplerInitInterval& locus,
+                const Transcript& t)
+{
+    pos_t tlen = t.exonic_length();
+    if ((size_t) tlen > mate1_seqbias[0].size()) {
+        mate1_seqbias[0].resize(tlen);
+        mate1_seqbias[1].resize(tlen);
+        mate2_seqbias[0].resize(tlen);
+        mate2_seqbias[1].resize(tlen);
+    }
+
+    if (fm.sb == NULL) {
+        std::fill(mate1_seqbias[0].begin(), mate1_seqbias[0].begin() + tlen, 1.0);
+        std::fill(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen, 1.0);
+        std::fill(mate2_seqbias[0].begin(), mate2_seqbias[0].begin() + tlen, 1.0);
+        std::fill(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen, 1.0);
+        return;
+    }
+
+    t.get_sequence(tseq0, *locus.seq, fm.sb->getL(), fm.sb->getR());
+    t.get_sequence(tseq1, *locus.seq, fm.sb->getR(), fm.sb->getL());
+    tseq1.revcomp();
+
+    for (pos_t pos = 0; pos < tlen; ++pos) {
+        mate1_seqbias[0][pos] = fm.sb->get_mate1_bias(tseq0, pos + fm.sb->getL());
+        mate1_seqbias[1][pos] = fm.sb->get_mate1_bias(tseq1, pos + fm.sb->getL());
+        mate1_seqbias[0][pos] = fm.sb->get_mate2_bias(tseq0, pos + fm.sb->getL());
+        mate1_seqbias[1][pos] = fm.sb->get_mate2_bias(tseq1, pos + fm.sb->getL());
+    }
+    std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
+    std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
+}
+
+
+
+float SamplerInitThread::transcript_weight(const Transcript& t)
+{
+    pos_t trans_len = t.exonic_length();
+    if ((size_t) trans_len + 1 > ws.size()) ws.resize(trans_len + 1);
+
+    /* Set ws[k] to be the the number of fragmens of length k, weighted by
+     * sequence bias. */
+    for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
+        float frag_len_pr;
+        /* TODO: fallback fragment length distribution. */
+        frag_len_pr = fm.frag_len_dist->pdf(frag_len);
+
+        /* Don't bother considering sequence bias if the fragment length
+         * probability is extremely small (i.e., so that it suffocates any
+         * effect from bias.). */
+        if (frag_len_pr < constants::min_frag_len_pr) {
+            ws[frag_len] = (float) (trans_len - frag_len + 1);
+            continue;
+        }
+
+        /* TODO: The following logic assumes the library type is FR. We need
+         * seperate cases to properly handle other library types, that
+         * presumably exist somewhere. */
+
+        ws[frag_len] = 0.0;
+
+        float sp;
+        sp = t.strand == strand_pos ? fm.strand_specificity :
+                                      1.0 - fm.strand_specificity;
+        for (pos_t pos = 0; pos <= trans_len - frag_len; ++pos) {
+            ws[frag_len] += sp * mate1_seqbias[0][pos] * mate2_seqbias[1][pos + frag_len - 1];
+        }
+
+        sp = t.strand == strand_neg ? fm.strand_specificity :
+                                      1.0 - fm.strand_specificity;
+        for (pos_t pos = 0; pos <= trans_len - frag_len; ++pos) {
+            ws[frag_len] += sp * mate2_seqbias[0][pos] * mate1_seqbias[1][pos + frag_len - 1];
+        }
+    }
+
+    float w = 0.0;
+    for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
+        /* TODO: fallback fragment length distribution. */
+        float frag_len_pr = fm.frag_len_dist->pdf(frag_len);
+        w += frag_len_pr * ws[frag_len];
+    }
+
+    return w;
+}
+
+
+float SamplerInitThread::fragment_weight(const Transcript& t,
+                                         const AlignmentPair& a)
 {
     pos_t fragment_length;
 
@@ -392,7 +506,15 @@ float SamplerInitThread::fragment_probability(const Transcript& t,
         // TODO
     }
 
-    return 0.0;
+    float p = fm.frag_len_dist->pdf(fragment_length);
+
+    /* strand specificity */
+    p *= a.strand() == t.strand ? fm.strand_specificity :
+                                  1.0 - fm.strand_specificity;
+
+    /* TODO: sequence bias */
+
+    return p;
 }
 
 
@@ -405,7 +527,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
 {
     /* Producer/consumer queue of intervals containing indexed reads to be
      * processed. */
-    Queue<SamplerInitInterval*> q;
+    Queue<SamplerInitInterval*> q(100);
 
     /* Collect intervals */
     std::vector<SamplerInitInterval*> intervals;
@@ -419,7 +541,9 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
         threads.back()->start();
     }
 
-    sam_scan(intervals, bam_fn, fa_fn, "Initializing samplers");
+    Logger::info("%lu loci", (unsigned long) intervals.size());
+
+    sam_scan(intervals, bam_fn, fa_fn, "Initializing sampler");
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         q.push(NULL);
