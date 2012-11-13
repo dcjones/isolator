@@ -33,3 +33,11 @@ isolator_LDADD = gtf/libgtf.la \
                  $(BOOST_SYSTEM_LIBS) \
                  $(BOOST_TIMER_LIBS)
 
+noinst_PROGRAMS = hattrie-bench
+
+hattrie_bench_SOURCES = hattrie-bench.c
+
+hattrie_bench_LDADD = hat-trie/libhat-trie.la \
+                      samtools/libbam.la \
+                      -lz
+
