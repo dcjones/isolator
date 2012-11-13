@@ -44,19 +44,18 @@ static float fastlog2(float x_)
 #include <immintrin.h>
 
 
-float* vector_alloc(size_t n)
+void* aalloc(size_t n)
 {
-    float* xs = reinterpret_cast<float*>(
-                    _mm_malloc(n * sizeof(float), 16));
+    void* xs = _mm_malloc(n, 16);
     if (xs == NULL) {
         Logger::abort("Can't allocate an array of size %ul.",
-                      (unsigned long) (n * sizeof(float)));
+                      (unsigned long) n);
     }
     return xs;
 }
 
 
-void vector_free(float* xs)
+void afree(void* xs)
 {
     _mm_free(xs);
 }
@@ -220,20 +219,18 @@ void asxpy(float* xs, const float* ys, const float c,
 
 #include <immintrin.h>
 
-
-float* vector_alloc(size_t n)
+void* aalloc(size_t n)
 {
-    float* xs = reinterpret_cast<float*>(
-                    _mm_malloc(n * sizeof(float), 16));
+    void* xs = _mm_malloc(n, 16);
     if (xs == NULL) {
         Logger::abort("Can't allocate an array of size %ul.",
-                      (unsigned long) (n * sizeof(float)));
+                      (unsigned long) n);
     }
     return xs;
 }
 
 
-void vector_free(float* xs)
+void afree(void* xs)
 {
     _mm_free(xs);
 }
@@ -366,18 +363,18 @@ void asxpy(float* xs, const float* ys, const float c,
 #else
 
 
-float* vector_alloc(size_t n)
+void* aalloc(size_t n)
 {
-    float* xs = (float*) malloc(n * sizeof(float));
+    void* xs = malloc(n);
     if (xs == NULL) {
         Logger::abort("Can't allocate an array of size %ul.",
-                      (unsigned long) (n * sizeof(float)));
+                      (unsigned long) n);
     }
     return xs;
 }
 
 
-void vector_free(float* xs)
+void afree(void* xs)
 {
     free(xs);
 }

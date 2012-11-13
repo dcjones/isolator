@@ -32,6 +32,11 @@ class Indexer
             return next++;
         }
 
+        unsigned int count()
+        {
+            return next;
+        }
+
     private:
         boost::mutex mut;
         unsigned int next;
@@ -50,8 +55,17 @@ struct WeightMatrixEntry
         return i != other.i ? i < other.i : j < other.j;
     }
 
+    struct ColOrd
+    {
+        bool operator () (const WeightMatrixEntry& a, const WeightMatrixEntry& b) const
+        {
+            return a.j < b.j;
+        }
+    };
+
     unsigned int i, j;
     float w;
+
 };
 
 
@@ -84,149 +98,34 @@ struct Multiread
         }
     };
 
-    std::vector<Cell> cells;
+    std::deque<Cell> cells;
 };
 
 
 /* When initializing the likelihood matrix rows for reads with multiple
  * alignments cannot be added until all alignments have been read.
  * This class collects information for multireads to be processed later. */
-class MultireadIndex
-
-/* Handle multireads. */
+class MultireadIndex :
+    public boost::unordered_map<unsigned int, Multiread>
 {
     public:
-        MultireadIndex()
+        void push(unsigned int key, const Multiread::Cell& cell)
         {
-            t = hattrie_create();
+            Multiread& r = (*this)[key];
+            r.cells.push_back(cell);
         }
 
-        ~MultireadIndex();
-
-        /* Add a new alignment for the given read to the index.
-         *
-         * The reads matrix index is returned.
-         */
-        void push(const char* id, const Multiread::Cell& cell)
+        void push(unsigned int key, const std::deque<Multiread::Cell>& cells)
         {
-            boost::lock_guard<boost::mutex> lock(mut);
-            Multiread** r = reinterpret_cast<Multiread**>(
-                    hattrie_get(t, id, strlen(id)));
-
-            if (*r == NULL) {
-                *r = new Multiread();
-            }
-
-            (*r)->cells.push_back(cell);
+            Multiread& r = (*this)[key];
+            //r.cells.reserve(r.cells.size() + cells.size());
+            r.cells.insert(r.cells.end(), cells.begin(), cells.end());
         }
-
-        void push(const char* id, const std::vector<Multiread::Cell>& cells)
-        {
-            boost::lock_guard<boost::mutex> lock(mut);
-            Multiread** r = reinterpret_cast<Multiread**>(
-                    hattrie_get(t, id, strlen(id)));
-
-            if (*r == NULL) {
-                *r = new Multiread();
-            }
-
-            (*r)->cells.reserve((*r)->cells.size() +
-                    std::distance(cells.begin(), cells.end()));
-            (*r)->cells.insert((*r)->cells.end(), cells.begin(), cells.end());
-        }
-
-        void clear();
-
-    private:
-        hattrie_t* t;
-        boost::mutex mut;
-
-        friend class MultireadIndexIterator;
 };
 
 
-class MultireadIndexIterator :
-    public boost::iterator_facade<MultireadIndexIterator,
-                                  const std::pair<const char*, Multiread*>,
-                                  boost::forward_traversal_tag>
-{
-    public:
-        MultireadIndexIterator()
-            : it(NULL)
-        {
-        }
-
-        MultireadIndexIterator(const MultireadIndex& owner)
-            : it(hattrie_iter_begin(owner.t, false))
-        {
-            if (!hattrie_iter_finished(it)) {
-                curr.first = hattrie_iter_key(it, NULL);
-                curr.second = *reinterpret_cast<Multiread**>(hattrie_iter_val(it));
-            }
-        }
-
-        ~MultireadIndexIterator()
-        {
-            hattrie_iter_free(it);
-        }
-
-    private:
-        friend class boost::iterator_core_access;
-
-        void increment()
-        {
-            hattrie_iter_next(it);
-            if (!hattrie_iter_finished(it)) {
-                curr.first = hattrie_iter_key(it, NULL);
-                curr.second = *reinterpret_cast<Multiread**>(hattrie_iter_val(it));
-            }
-        }
-
-        const std::pair<const char*, Multiread*>& dereference() const
-        {
-            return curr;
-        }
-
-        bool equal(const MultireadIndexIterator& other) const
-        {
-            if (it == NULL || hattrie_iter_finished(it)) {
-                return other.it == NULL || hattrie_iter_finished(other.it);
-            }
-            else if (other.it == NULL || hattrie_iter_finished(other.it)) {
-                return false;
-            }
-            else return hattrie_iter_equal(it, other.it);
-        }
-
-        hattrie_iter_t* it;
-        std::pair<const char*, Multiread*> curr;
-};
-
-
-MultireadIndex::~MultireadIndex()
-{
-    for (MultireadIndexIterator i(*this);
-            i != MultireadIndexIterator(); ++i) {
-        delete i->second;
-    }
-
-    hattrie_free(t);
-}
-
-
-void MultireadIndex::clear()
-{
-    for (MultireadIndexIterator i(*this);
-            i != MultireadIndexIterator(); ++i) {
-        delete i->second;
-    }
-
-    hattrie_free(t);
-    t = hattrie_create();
-}
-
-
-/* */
+/* An interval of overlapping transcripts, which constitutes a unit of work when
+ * doing initialization across multiple threads. */
 class SamplerInitInterval
 {
     public:
@@ -541,15 +440,18 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
     FragSet excluded_frags;
 
     /* The set of reads with multiple alignment. */
-    typedef std::set<std::pair<const char*, AlignedRead*> > MultireadSet;
+    typedef std::set<std::pair<unsigned int, AlignedRead*> > MultireadSet;
     MultireadSet multiread_set;
 
     /* Collapse identical reads, filter out those that don't overlap any
      * transcript. */
+    size_t num_entries = 0;
     for (ReadSetIterator r(locus->rs); r != ReadSetIterator(); ++r) {
         /* Skip multireads for now. */
-        if (fm.multireads.has(r->first)) {
-            multiread_set.insert(*r);
+        int multiread_num = fm.multireads.get(r->first);
+        if (multiread_num >= 0) {
+            multiread_set.insert(std::make_pair((unsigned int) multiread_num,
+                                                r->second));
             continue;
         }
 
@@ -566,11 +468,11 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 
         bool has_compatible_transcript = false;
         for (TranscriptSetLocus::iterator t = locus->ts.begin();
-             t != locus->ts.end(); ++t) {
+                t != locus->ts.end(); ++t) {
             if (a->frag_len(*t) >= 0) {
                 has_compatible_transcript = true;
-                break;
             }
+            ++num_entries;
         }
 
         if (has_compatible_transcript) {
@@ -586,6 +488,13 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         assert(++a == AlignedReadIterator());
     }
 
+    frag_counts.reserve(frag_counts.size() + frag_idx.size());
+    for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
+        frag_counts.push_back(f->second);
+    }
+
+    weight_matrix_entries.reserve(weight_matrix_entries.size() + num_entries);
+    transcript_weights.reserve(transcript_weights.size() + locus->ts.size());
     for (TranscriptSetLocus::iterator t = locus->ts.begin();
             t != locus->ts.end(); ++t) {
         transcript_sequence_bias(*locus, *t);
@@ -595,17 +504,18 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
              r != multiread_set.end(); ++r) {
             for (AlignedReadIterator a(*r->second); a != AlignedReadIterator(); ++a) {
                 float w = fragment_weight(*t, *a);
-                /* TODO: alignment probability */
-                multiread_index.push(
-                        r->first, Multiread::Cell(t->id, w, 1.0));
+                if (w > 0.0) {
+                    multiread_index.push(r->first, Multiread::Cell(t->id, w, 1.0));
+                }
             }
         }
 
         for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
-            WeightMatrixEntry w(t->id, f->second.first,
-                                fragment_weight(*t, f->first));
-            weight_matrix_entries.push_back(w);
-            frag_counts.push_back(f->second);
+            float w = fragment_weight(*t, f->first);
+            if (w > 0.0) {
+                weight_matrix_entries.push_back(
+                        WeightMatrixEntry(t->id, f->second.first, w));
+            }
         }
     }
 }
@@ -725,6 +635,118 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
 }
 
 
+/* This class merges vectors of weight matrix entries generated by
+ * initialization threads. */
+class WeightMatrixEntryStream : public SparseMatEntryStream
+{
+    private:
+        friend class HeapCmp;
+        struct HeapCmp
+        {
+            HeapCmp(const WeightMatrixEntryStream& stream)
+                : stream(stream)
+            {}
+
+            bool operator () (size_t i, size_t j)
+            {
+                if (stream.is[i] == stream.sources[i]->end()) return false;
+                else if (stream.is[j] == stream.sources[j]->end()) return true;
+                else {
+                    if (stream.is[i]->i != stream.is[j]->i) {
+                        return stream.is[i]->i < stream.is[j]->i;
+                    }
+                    else return stream.is[i]->j < stream.is[j]->j;
+                }
+            }
+
+            const WeightMatrixEntryStream& stream;
+        };
+
+    public:
+        WeightMatrixEntryStream(
+                const std::vector<std::vector<WeightMatrixEntry>*>& sources)
+            : cmp(*this)
+            , is(sources.size())
+            , sources(sources)
+        {
+            for (size_t i = 0; i < sources.size(); ++i) {
+                is[i] = sources[i]->begin();
+                if (is[i] != sources[i]->end()) {
+                    h.push_back(i);
+                }
+            }
+
+            std::make_heap(h.begin(), h.end(), cmp);
+            next();
+        }
+
+        bool finished()
+        {
+            return h.empty();
+        }
+
+        void next()
+        {
+            size_t i = h.front();
+            std::pop_heap(h.begin(), h.end(), cmp);
+            h.pop_back();
+            cur_row = is[i]->i;
+            cur_col = is[i]->j;
+            cur_val = is[i]->w;
+
+            is[i]++;
+            if (is[i] != sources[i]->end()) {
+                h.push_back(i);
+                std::push_heap(h.begin(), h.end());
+            }
+        }
+
+        unsigned int row()
+        {
+            return cur_row;
+        }
+
+        unsigned int col()
+        {
+            return cur_col;
+        }
+
+        float value()
+        {
+            return cur_val;
+        }
+
+    private:
+        HeapCmp cmp;
+        std::vector<size_t> h;
+        std::vector<std::vector<WeightMatrixEntry>::const_iterator> is;
+        const std::vector<std::vector<WeightMatrixEntry>*>& sources;
+
+        unsigned int cur_row, cur_col;
+        float cur_val;
+};
+
+
+
+static unsigned int disjset_find(unsigned int* ds, unsigned int i)
+{
+    if (ds[i] == i) {
+        return i;
+    } else {
+        return ds[i] = disjset_find(ds, ds[i]);
+    }
+}
+
+
+static void disjset_union(unsigned int* ds, unsigned int i, unsigned int j)
+{
+    unsigned int a = disjset_find(ds, i);
+    unsigned int b = disjset_find(ds, j);
+    ds[b] = a;
+}
+
+
+
 Sampler::Sampler(const char* bam_fn, const char* fa_fn,
                  TranscriptSet& ts,
                  FragmentModel& fm)
@@ -760,9 +782,9 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     /* Merge multiread indexes. */
     MultireadIndex multiread_index;
     for (size_t i = 0; i < constants::num_threads; ++i) {
-        for (MultireadIndexIterator j(threads[i]->multiread_index);
-                j != MultireadIndexIterator(); ++j) {
-            multiread_index.push(j->first, j->second->cells);
+        for (MultireadIndex::iterator j = threads[i]->multiread_index.begin();
+                j != threads[i]->multiread_index.end(); ++j) {
+            multiread_index.push(j->first, j->second.cells);
         }
 
         /* free some memory */
@@ -770,11 +792,11 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     }
 
     /* Add weight matrix entries for each multiread. */
-    std::vector<WeightMatrixEntry> multiread_entries;
-    for (MultireadIndexIterator i(multiread_index);
-            i != MultireadIndexIterator(); ++i) {
-        std::vector<Multiread::Cell>& cells = i->second->cells;
-        std::vector<Multiread::Cell>::iterator j;
+    std::vector<WeightMatrixEntry> entries;
+    for (MultireadIndex::iterator i = multiread_index.begin();
+            i != multiread_index.end(); ++i) {
+        std::deque<Multiread::Cell>& cells = i->second.cells;
+        std::deque<Multiread::Cell>::iterator j;
         float sum_weight = 0.0;
         float sum_align_pr = 0.0;
         for (j = cells.begin(); j != cells.end(); ++j) {
@@ -794,11 +816,11 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
 
         /* Sum alignments on the same transcripts. */
         float w = 0.0;
-        std::vector<Multiread::Cell>::iterator j0;
+        std::deque<Multiread::Cell>::iterator j0;
         for (j0 = j = cells.begin(); j != cells.end(); ++j) {
             if (j->transcript_idx != j0->transcript_idx) {
                 if (w > 0.0) {
-                    multiread_entries.push_back(
+                    entries.push_back(
                             WeightMatrixEntry(j0->transcript_idx, frag_idx, w));
                 }
                 j0 = j;
@@ -808,35 +830,119 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
             w += j->align_pr * j->frag_weight;
         }
         if (w > 0.0) {
-            multiread_entries.push_back(
+            entries.push_back(
                     WeightMatrixEntry(j0->transcript_idx, frag_idx, w));
         }
     }
     multiread_index.clear();
 
+    /* Copy everything into the same vector. */
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        entries.reserve(entries.size() + threads[i]->weight_matrix_entries.size());
+        for (std::vector<WeightMatrixEntry>::iterator j = threads[i]->weight_matrix_entries.begin();
+                j != threads[i]->weight_matrix_entries.end(); ++j) {
+            if (j->w > 0.0) {
+                entries.push_back(*j);
+            }
+        }
+    }
+
+    /* Reassign read indices, now that zero entries are left out. */
+    std::sort(entries.begin(), entries.end(), WeightMatrixEntry::ColOrd());
+    unsigned int col = 0;
+    unsigned int last_j = 0;
+    for (std::vector<WeightMatrixEntry>::iterator i = entries.begin();
+            i != entries.end(); ++i) {
+        if (i->j != last_j && col > 0) ++col;
+        i->j = col;
+    }
+
+    /* Find connected components. */
+    size_t n = ts.size();
+    size_t m = col + 1;
+
+    /* ds is disjoint set data structure, where ds[i] holds a pointer to item
+     * i's parent, and ds[i] = i, when the node is the root. */
+    unsigned int* ds = new unsigned int [n + m];
+    for (size_t i = 0; i < n + m; ++i) ds[i] = i;
+
+    for (std::vector<WeightMatrixEntry>::iterator i = entries.begin();
+            i != entries.end(); ++i) {
+        if (i->w > 0.0) {
+            disjset_union(ds, i->i, n + i->j);
+        }
+    }
+
+    for (size_t i = 0; i < n + m; ++i) disjset_find(ds, i);
+
+    /* 1. Relabel components
+     * 2. Reassign column indices based on components. How?
+     *    We need to sort the entries according to component.
+     *    The easiest way may be to just add a component field to each entry.
+     * */
+
+
+
+    /* We can produce */
+
+    //boost::unordered_set<unsigned int> components;
+    //for (size_t i = 0; i < n + m; ++i) {
+        //components.insert(disjset_find(ds, i));
+    //}
+
+
+#if 0
     /* Calculate the number of non-zero entries in the weight matrix. */
+    std::vector<size_t> rowlens(ts.size(), 0);
+    size_t ncol = 0;
     size_t nnz = multiread_entries.size();
     for (size_t i = 0; i < constants::num_threads; ++i) {
         std::vector<WeightMatrixEntry>::iterator j;
         for (j = threads[i]->weight_matrix_entries.begin();
                 j != threads[i]->weight_matrix_entries.end(); ++j) {
-            if (j->w > 0.0) ++nnz;
+            if (j->w > 0.0) {
+                ++nnz;
+                ++rowlens[j->i];
+            }
         }
-
-        sort(threads[i]->weight_matrix_entries.begin(),
-             threads[i]->weight_matrix_entries.end());
     }
 
     Logger::info("Weight matrix entries: %lu", (unsigned long) nnz);
+#endif
+
+    /* Reassign fragment indices, removing that can't have non-zero weight. */
+    /* Can we do this with the stream trick?
+     *
+     *
+     * Once we free the multiread indexes, I don't think memory is a big issue.
+     * Let's just make one long entry list. Sort it. Reassign column indicies.
+     *
+     * Then, build a graph, find the connected components.
+     *
+     * This is going to involve another rasignment of column indices.
+     */
 
 
-    /* TODO:
-     *  We're getting close!
-     *  Now we just need to build the sparse matrix.
+#if 0
+    std::vector<std::vector<WeightMatrixEntry>*> sources;
+    sources.push_back(&multiread_entries);
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        sources.push_back(&threads[i]->weight_matrix_entries);
+    }
+
+    WeightMatrixEntryStream entry_stream(sources);
+    W = new SparseMat(ts.size(), ncol, rowlens, entry_stream);
+#endif
+
+
+    /* Current problem:
+     * What can be done about fragments with all zero weights.
      *
-     *  We need the merge the sorted entries from each thread, and the
-     *  multireads.
+     * 1. Try to remove them here, which means reassigning indexs, etc.
+     * 2. ...
      *
+     * Fuck, we are going to have to do that anyway, since we removed a bunch of
+     * reads when filtering the multireads most likely.
      */
 }
 

@@ -114,6 +114,9 @@ const Cigar& CigarIterator::dereference() const
 
 
 AlignedRead::AlignedRead()
+    : start(-1)
+    , end(-1)
+    , paired(false)
 {
 }
 

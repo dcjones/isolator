@@ -17,6 +17,7 @@ isolator_SOURCES = isolator.cpp \
                    read_set.hpp read_set.cpp \
                    sampler.hpp sampler.cpp \
                    sample_db.hpp sample_db.cpp \
+                   sparse_mat.hpp sparse_mat.cpp \
                    transcripts.hpp transcripts.cpp \
                    trie.hpp
 

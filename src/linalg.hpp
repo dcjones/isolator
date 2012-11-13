@@ -8,9 +8,10 @@
  * different instruction sets (vanilla x86, SSE4, and AVX). */
 
 
-/* Allocate a vector, with proper alignment if required. */
-float* vector_alloc(size_t n);
-void vector_free(float*);
+/* Allocate an array with 16-bytes alignment (assuming the cpu supports SEE or
+ * AVX */
+void* aalloc(size_t n);
+void afree(void*);
 
 
 /* Dot product of xs and log(ys).

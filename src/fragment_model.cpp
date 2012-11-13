@@ -127,6 +127,43 @@ const std::pair<const char*, MateCount>& AlnCountTrieIterator::dereference() con
 }
 
 
+AlnIndex::AlnIndex()
+{
+    t = hattrie_create();
+}
+
+
+AlnIndex::~AlnIndex()
+{
+    hattrie_free(t);
+}
+
+
+size_t AlnIndex::size() const
+{
+    return hattrie_size(t);
+}
+
+
+void AlnIndex::add(const char* key)
+{
+    value_t* val = hattrie_get(t, key, strlen(key));
+    if (*val == 0) {
+        *val = 1 + hattrie_size(t);
+    }
+}
+
+
+int AlnIndex::get(const char* key)
+{
+    value_t* val = hattrie_tryget(t, key, strlen(key));
+    if (val == NULL) return -1;
+    else {
+        return *val - 1;;
+    }
+}
+
+
 /* An interval used for fragment model parameter estimation. */
 class FragmentModelInterval
 {
@@ -482,7 +519,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     unsigned long total_reads = alncnt->size();
     for (AlnCountTrieIterator i(*alncnt); i != AlnCountTrieIterator(); ++i) {
         if (i->second.first > 1 || i->second.second > 1) {
-            multireads.set(i->first, i->second);
+            multireads.add(i->first);
         }
     }
     delete alncnt;

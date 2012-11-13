@@ -67,6 +67,26 @@ class AlnCountTrieIterator :
 };
 
 
+/* Assign indexes to a set of string. (Read ids in this case.) */
+class AlnIndex
+{
+    public:
+        AlnIndex();
+        ~AlnIndex();
+
+        size_t size() const;
+
+        void add(const char* key);
+
+        /* Return -1 if the key is not present, otherwise return the key's
+         * index. */
+        int get(const char* key);
+
+    private:
+        hattrie_t* t;
+};
+
+
 /* A probabalistic model of fragment sampling in RNA-Seq experiments. */
 class FragmentModel
 {
@@ -83,7 +103,7 @@ class FragmentModel
 
         /* On it's pass through the reads, estimate will also count the number
          * of alignments for each read. */
-        AlnCountTrie multireads;
+        AlnIndex multireads;
 
         /* Probability of a read being from the same strand as the transcript it
          * originates from. */
