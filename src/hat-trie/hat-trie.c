@@ -5,12 +5,20 @@
  *
  */
 
-#include "hat-trie.h"
-#include "ahtable.h"
-#include "misc.h"
-#include "pstdint.h"
 #include <assert.h>
 #include <string.h>
+
+#include "../config.h"
+#include "ahtable.h"
+#include "hat-trie.h"
+#include "misc.h"
+#include "pstdint.h"
+
+#ifdef HAVE_LIBJEMALLOC
+#define JEMALLOC_MANGLE
+#include <jemalloc/jemalloc.h>
+#endif
+
 
 /* maximum number of keys that may be stored in a bucket before it is burst */
 static const size_t MAX_BUCKET_SIZE = 16384;

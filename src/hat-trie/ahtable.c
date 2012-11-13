@@ -5,12 +5,18 @@
  *
  */
 
-#include "ahtable.h"
-#include "misc.h"
-#include "murmurhash3.h"
 #include <assert.h>
 #include <string.h>
 
+#include "../config.h"
+#include "ahtable.h"
+#include "misc.h"
+#include "murmurhash3.h"
+
+#ifdef HAVE_LIBJEMALLOC
+#define JEMALLOC_MANGLE
+#include <jemalloc/jemalloc.h>
+#endif
 
 
 const double ahtable_max_load_factor = 100000.0; /* arbitrary large number => don't resize */

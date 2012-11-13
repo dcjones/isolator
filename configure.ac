@@ -38,7 +38,7 @@ fi
 AC_MSG_RESULT(${ok})
 
 # Zlib, for BAM's sake.
-AX_CHECK_ZLIB
+AC_CHECK_LIB([z],[deflate])
 
 # Boost
 BOOST_REQUIRE([1.48.0])
@@ -51,6 +51,9 @@ AC_CHECK_LIB([m],[cos])
 AC_CHECK_LIB([gslcblas],[cblas_dgemm])
 AC_CHECK_LIB([gsl],[gsl_blas_dgemm])
 AX_PATH_GSL
+
+# Jemalloc
+AC_CHECK_LIB([jemalloc],[je_malloc])
 
 # Configure option to disable compliler optimization.
 opt_CFLAGS="-Wall -Wextra -g -O3 -DNDEBUG"
