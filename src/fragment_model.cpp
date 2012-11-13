@@ -1,5 +1,7 @@
 
 #include <boost/unordered_map.hpp>
+#include <gsl/gsl_cdf.h>
+#include <gsl/gsl_randist.h>
 
 #include "constants.hpp"
 #include "fragment_model.hpp"
@@ -573,4 +575,28 @@ void FragmentModel::estimate(TranscriptSet& ts,
         delete threads[i];
     }
 }
+
+
+float FragmentModel::frag_len_p(pos_t frag_len)
+{
+    if (frag_len_dist) return frag_len_dist->pdf(frag_len);
+    else return gsl_ran_gaussian_pdf((double) frag_len - constants::frag_len_mu,
+                                     constants::frag_len_sd);
+}
+
+
+float FragmentModel::frag_len_c(pos_t frag_len)
+{
+    if (frag_len_dist) return frag_len_dist->cdf(frag_len);
+    else return gsl_cdf_gaussian_P((double) frag_len - constants::frag_len_mu,
+                                   constants::frag_len_sd);
+}
+
+
+float FragmentModel::frag_len_med()
+{
+    if (frag_len_dist) return frag_len_dist->median();
+    else return constants::frag_len_mu;
+}
+
 

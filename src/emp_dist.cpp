@@ -7,6 +7,7 @@ EmpDist::EmpDist(EmpDist& other)
     : n(other.n)
     , m(other.m)
     , w(other.w)
+    , med(other.med)
     , pdf_memo(other.pdf_memo)
     , cdf_memo(other.cdf_memo)
 {
@@ -20,6 +21,7 @@ EmpDist::EmpDist(EmpDist& other)
 
 EmpDist::EmpDist(const unsigned int* vals, const unsigned int* lens,
                  size_t n, float w)
+    : med(NAN)
 {
     /* count number of non-zero observations. */
     size_t nnz = 0;
@@ -55,8 +57,9 @@ EmpDist::~EmpDist()
 float EmpDist::median() const
 {
     if (n == 0) return NAN;
+    if (finite(med)) return med;
 
-    /* Dump O(n) median computation. */
+    /* Dumb O(n) median computation. */
     size_t i = 0, j = n - 1;
     unsigned int u = lens[0], v = lens[n - 1];
     while (i < j) {
@@ -70,7 +73,7 @@ float EmpDist::median() const
         }
     }
 
-    return (float) vals[i];
+    return med = (float) vals[i];
 }
 
 

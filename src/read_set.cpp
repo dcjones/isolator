@@ -272,7 +272,7 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     }
 
     /* alignment overhangs the transcript. */
-    if (c1 == CigarIterator()) return -1;
+    if (c1 != CigarIterator()) return -1;
 
     /* alignment is compatible, but single ended. */
     if (a2 == NULL) return 0;

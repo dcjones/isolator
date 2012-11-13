@@ -57,6 +57,9 @@ class EmpDist
         /* Smoothing coefficient */
         float w;
 
+        /* Precomputed median */
+        mutable float med;
+
         /* Memoization of the pdf and cdf functions. */
         mutable boost::unordered_map<unsigned int, float> pdf_memo;
         mutable boost::unordered_map<unsigned int, float> cdf_memo;

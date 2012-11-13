@@ -75,6 +75,12 @@ class FragmentModel
         ~FragmentModel();
         void estimate(TranscriptSet& ts, const char* bam_fn, const char* fa_fn);
 
+        /* Fragment length probability ,cdf, and median using a fallback when no
+         * emperical distribution is available. */
+        float frag_len_p(pos_t frag_len);
+        float frag_len_c(pos_t frag_len);
+        float frag_len_med();
+
         /* On it's pass through the reads, estimate will also count the number
          * of alignments for each read. */
         AlnCountTrie multireads;

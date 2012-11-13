@@ -60,6 +60,11 @@ class Transcript : public std::set<Exon>
         void get_sequence(twobitseq& out, const twobitseq& ref,
                           pos_t lpad, pos_t rpad) const;
 
+
+        /* Get the offset of a genomic position within the spliced transcript
+         * sequence. */
+        pos_t get_offset(pos_t) const;
+
         GeneID gene_id;
         TranscriptID transcript_id;
         SeqName seqname;

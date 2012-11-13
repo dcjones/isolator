@@ -120,6 +120,26 @@ void Transcript::get_sequence(twobitseq& dest, const twobitseq& src,
 }
 
 
+pos_t Transcript::get_offset(pos_t pos) const
+{
+    pos_t offset = 0;
+    for (const_iterator exon = begin(); exon != end(); ++exon) {
+        if (pos > exon->end) {
+            offset += exon->end - exon->start + 1;
+        }
+        else if (pos >= exon->start) {
+            return offset + pos - exon->start;
+        }
+        // position does not overlap an exon
+        else {
+            return -1;
+        }
+    }
+
+    return -1;
+}
+
+
 bool Transcript::operator < (const Transcript& other) const
 {
     int c;

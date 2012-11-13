@@ -63,6 +63,11 @@ namespace constants
     /* Minimum number of paired-end reads needed to estimate the fragment length
      * distribution. */
     extern size_t frag_len_min_pe_reads;
+
+    /* A normal distribution with the following parameters is used as the
+     * fragment length distribution when no emperical estimate is available. */
+    extern double frag_len_mu;
+    extern double frag_len_sd;
 }
 
 #endif

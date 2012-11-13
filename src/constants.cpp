@@ -12,3 +12,5 @@ pos_t                constants::max_frag_len             = 1000;
 float                constants::min_frag_len_pr          = 1e-8;
 float                constants::frag_len_dist_smoothing  = 0.1;
 size_t               constants::frag_len_min_pe_reads    = 10000;
+double               constants::frag_len_mu              = 200.0;
+double               constants::frag_len_sd              = 10.0;
