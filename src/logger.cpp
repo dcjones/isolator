@@ -326,14 +326,14 @@ LoggerTask& LoggerTask::get_task(const char* name)
 }
 
 
-void LoggerTask::inc()
+void LoggerTask::inc(size_t d)
 {
     boost::lock_guard<boost::mutex> lock(mut);
 
     if (k == 0) {
         timer.start();
     }
-    if (k < n || n == 0) ++k;
+    if (k + d <= n || n == 0) k += d;
 }
 
 

@@ -51,7 +51,7 @@ class LoggerTask
         LoggerTask& get_task(const char* name);
 
         /* Update with the completion of one unit of work. */
-        void inc();
+        void inc(size_t d = 1);
 
     private:
         boost::timer::cpu_timer timer;
