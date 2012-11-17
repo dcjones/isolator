@@ -52,6 +52,9 @@ T* realloc_or_die(T* xs, size_t n)
 }
 
 
+/* A (fragment indx, count) pair. */
+typedef std::pair<unsigned int, unsigned int> FragIdxCount;
+
 
 /* A row compressed sparse matrix.
  */
@@ -129,8 +132,14 @@ class WeightMatrix
         /* This function does two things: sorts the columns by index and
          * reallocates each array to be of exact size (to preserve space) and to
          * be 16-bytes aligned. It also reassigns column indices to remove empty
-         * columns. */
-        void compact()
+         * columns.
+         *
+         * Returns:
+         *   A map of the previous column indexes onto new indexs. The caller is
+         *   responsible for freeing this with delete [].
+         *
+         * */
+        unsigned int* compact()
         {
             /* Reallocate each row array */
             for (unsigned int i = 0; i < nrow; ++i) {
@@ -150,12 +159,6 @@ class WeightMatrix
                 idxs[i] = newidx;
 
                 reserved[i] = m;
-            }
-
-            /* TODO: just testing sortrow here. */
-            /* Sort each row by column */
-            for (unsigned int i = 0; i < nrow; ++i) {
-                sortrow(i);
             }
 
             /* Mark observed columns */
@@ -188,18 +191,28 @@ class WeightMatrix
                 }
             }
 
-            delete [] newidx;
-
             /* Sort each row by column */
             for (unsigned int i = 0; i < nrow; ++i) {
                 sortrow(i);
             }
 
             compacted = true;
+
+            return newidx;
         }
 
-        // TODO: reorder_columns
 
+        /* Reorder columns given an array of the form map[i] = j, mapping column
+         * i to column j. */
+        void reorder_columns(const unsigned int* idxmap)
+        {
+            for (unsigned int i = 0; i < nrow; ++i) {
+                for (unsigned int j = 0; j < rowlens[i]; ++j) {
+                    idxs[i][j] = idxmap[idxs[i][j]];
+                }
+                sortrow(i);
+            }
+        }
 
         unsigned int nrow, ncol;
 
@@ -281,13 +294,6 @@ class WeightMatrix
                 s.push_back(std::make_pair(u, a));
                 s.push_back(std::make_pair(a + 1, v));
             }
-
-            /* TODO: remove when we are sure this is working. */
-            for (unsigned int j = 0; j < m - 1; ++j) {
-                if (idx[j] >= idx[j + 1]) {
-                    Logger::error("WeightMatrix::sortrow is broken.");
-                }
-            }
         }
 
         /* Number of entries in each row. */
@@ -333,6 +339,16 @@ class WeightMatrixIterator :
         {
             i = 0;
             k = 0;
+            while (i < owner.nrow && k >= owner.rowlens[i]) {
+                ++i;
+                k = 0;
+            }
+
+            if (i < owner.nrow) {
+                entry.i = i;
+                entry.j = owner.idxs[i][k];
+                entry.w = owner.rows[i][k];
+            }
         }
 
 
@@ -349,9 +365,11 @@ class WeightMatrixIterator :
                 k = 0;
             }
 
-            entry.i = i;
-            entry.j = owner->idxs[i][k];
-            entry.w = owner->rows[i][k];
+            if (i < owner->nrow) {
+                entry.i = i;
+                entry.j = owner->idxs[i][k];
+                entry.w = owner->rows[i][k];
+            }
         }
 
         bool equal(const WeightMatrixIterator& other) const
@@ -406,34 +424,6 @@ class Indexer
 };
 
 
-/* An entry in the coordinate respresentation of the sparse weight matrix. */
-#if 0
-struct WeightMatrixEntry
-{
-    WeightMatrixEntry(unsigned int i, unsigned int j, float w)
-        : i(i), j(j), w(w)
-    {}
-
-    bool operator < (const WeightMatrixEntry& other) const
-    {
-        return i != other.i ? i < other.i : j < other.j;
-    }
-
-    struct ColOrd
-    {
-        bool operator () (const WeightMatrixEntry& a, const WeightMatrixEntry& b) const
-        {
-            return a.j < b.j;
-        }
-    };
-
-    unsigned int i, j;
-    float w;
-
-};
-#endif
-
-
 struct MultireadEntry
 {
     MultireadEntry(unsigned int multiread_num,
@@ -465,13 +455,20 @@ struct MultireadEntry
 /* Thread safe vector, allowing multiple threads to write.
  * In particular: modification through push_back and reserve_extra are safe. */
 template <typename T>
-class TSVec : public std::deque<T>
+class TSVec : public std::vector<T>
 {
     public:
         void push_back(const T& x)
         {
             boost::lock_guard<boost::mutex> lock(mut);
-            std::deque<T>::push_back(x);
+            std::vector<T>::push_back(x);
+        }
+
+
+        void reserve_extra(size_t n)
+        {
+            boost::lock_guard<boost::mutex> lock(mut);
+            std::vector<T>::reserve(std::vector<T>::size() + n);
         }
 
     private:
@@ -697,8 +694,12 @@ class SamplerInitThread
                 FragmentModel& fm,
                 Indexer& read_indexer,
                 WeightMatrix& weight_matrix,
+                TSVec<FragIdxCount>& frag_counts,
+                float* transcript_weights,
                 Queue<SamplerInitInterval*>& q)
             : weight_matrix(weight_matrix)
+            , frag_counts(frag_counts)
+            , transcript_weights(transcript_weights)
             , fm(fm)
             , read_indexer(read_indexer)
             , q(q)
@@ -760,12 +761,8 @@ class SamplerInitThread
                 const AlignmentPair& a);
 
         WeightMatrix& weight_matrix;
-
-        typedef std::pair<unsigned int, unsigned int> FragIdxCount;
-        std::vector<FragIdxCount> frag_counts;
-
-        typedef std::pair<unsigned int, float> TransIdxCount;
-        std::vector<TransIdxCount> transcript_weights;
+        TSVec<FragIdxCount>& frag_counts;
+        float* transcript_weights;
 
         FragmentModel& fm;
         Indexer& read_indexer;
@@ -846,17 +843,18 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         assert(++a == AlignedReadIterator());
     }
 
-    frag_counts.reserve(frag_counts.size() + frag_idx.size());
     for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
-        frag_counts.push_back(f->second);
+        /* fragment with count == 1 are implicit */
+        if (f->second.second > 1) {
+            frag_counts.push_back(f->second);
+        }
     }
 
     std::vector<MultireadEntry> multiread_entries;
-    transcript_weights.reserve(transcript_weights.size() + locus->ts.size());
     for (TranscriptSetLocus::iterator t = locus->ts.begin();
             t != locus->ts.end(); ++t) {
         transcript_sequence_bias(*locus, *t);
-        transcript_weights.push_back(std::make_pair(t->id, transcript_weight(*t)));
+        transcript_weights[t->id] = transcript_weight(*t);
 
         for (MultireadSet::iterator r = multiread_set.begin();
              r != multiread_set.end(); ++r) {
@@ -879,11 +877,11 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
     }
 
     /* Process multiread entries into weight matrix entries */
-#if 0
     std::sort(multiread_entries.begin(), multiread_entries.end());
-    for (std::vector<MultireadEntry>::iterator i = multiread_entries.begin();
-            i != multiread_entries.end(); ++i) {
-        std::vector<MultireadEntry>::iterator j, k = i + 1;
+    for (std::vector<MultireadEntry>::iterator k, i = multiread_entries.begin();
+            i != multiread_entries.end(); i = k) {
+        k = i + 1;
+        std::vector<MultireadEntry>::iterator j;
         while (k != multiread_entries.end() &&
                 i->multiread_num == k->multiread_num) {
             ++k;
@@ -903,18 +901,19 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         std::vector<MultireadEntry>::iterator j0;
         for (j0 = j = i; j != k; ++j) {
             if (j->transcript_idx != j0->transcript_idx) {
-                weight_matrix.push(j->transcript_idx, j0->multiread_num, w);
+                if (w > 0.0) {
+                    weight_matrix.push(j0->transcript_idx, j0->multiread_num, w);
+                }
                 j0 = j;
                 w = 0.0;
             }
 
-            w += j->align_pr * j->frag_weight;
+            w += j->align_pr / sum_align_pr * j->frag_weight;
         }
         if (w > 0.0) {
             weight_matrix.push(j0->transcript_idx, j0->multiread_num, w);
         }
     }
-#endif
 }
 
 
@@ -1050,6 +1049,21 @@ static void disjset_union(unsigned int* ds, unsigned int i, unsigned int j)
 }
 
 
+/* A comparison operator used in Sampler::Sampler. */
+struct ComponentCmp
+{
+    ComponentCmp(unsigned int* ds)
+        : ds(ds)
+    {
+    }
+
+    bool operator () (unsigned int i, unsigned int j) {
+        return ds[i] < ds[j];
+    }
+
+    unsigned int* ds;
+};
+
 
 Sampler::Sampler(const char* bam_fn, const char* fa_fn,
                  TranscriptSet& ts,
@@ -1070,14 +1084,18 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
         intervals.push_back(new SamplerInitInterval(*i, q));
     }
 
-    WeightMatrix weight_matrix(ts.size());;
+    weight_matrix = new WeightMatrix(ts.size());
+    transcript_weights = new float [ts.size()];
+    TSVec<FragIdxCount> nz_frag_counts;
 
     std::vector<SamplerInitThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
         threads.push_back(new SamplerInitThread(
                     fm,
                     read_indexer,
-                    weight_matrix,
+                    *weight_matrix,
+                    nz_frag_counts,
+                    transcript_weights,
                     q));
         threads.back()->start();
     }
@@ -1092,122 +1110,112 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     for (size_t i = 0; i < constants::num_threads; ++i) q.push(NULL);
     for (size_t i = 0; i < constants::num_threads; ++i) threads[i]->join();
 
-    Logger::info("Pre-compact columns: %lu",
-            (unsigned long) weight_matrix.ncol);
-    weight_matrix.compact();
-    Logger::info("Post-compact columns: %lu",
-            (unsigned long) weight_matrix.ncol);
+    unsigned int* idxmap = weight_matrix->compact();
+    Logger::info("Weight-matrix dimensions: %lu x %lu",
+            (unsigned long) weight_matrix->nrow,
+            (unsigned long) weight_matrix->ncol);
 
+    /* Update frag_count indexes */
+    for (TSVec<FragIdxCount>::iterator i = nz_frag_counts.begin();
+            i != nz_frag_counts.end(); ++i) {
+        i->first = idxmap[i->first];
+    }
 
+    delete [] idxmap;
 
     /* Find connected components. */
-
-    unsigned int N = weight_matrix.ncol + weight_matrix.nrow;
+    unsigned int N = weight_matrix->ncol + weight_matrix->nrow;
 
     /* ds is disjoint set data structure, where ds[i] holds a pointer to item
      * i's parent, and ds[i] = i, when the node is the root. */
     unsigned int* ds = new unsigned int [N];
     for (size_t i = 0; i < N; ++i) ds[i] = i;
 
-    /* TODO: we need to be able to iterate over matrix entries */
-#if 0
-    for (TSVec<WeightMatrixEntry>::iterator i = weight_matrix_entries.begin();
-            i != weight_matrix_entries.end(); ++i) {
-        if (i->w > 0.0) {
-            disjset_union(ds, i->i, n + i->j);
-        }
+    for (WeightMatrixIterator entry(*weight_matrix);
+            entry != WeightMatrixIterator(); ++entry) {
+        disjset_union(ds, weight_matrix->ncol + entry->i, entry->j);
     }
 
-    for (size_t i = 0; i < n + m; ++i) disjset_find(ds, i);
+    for (size_t i = 0; i < N; ++i) disjset_find(ds, i);
 
     /* Label components sequentially. */
-    boost::unordered_map<unsigned int, unsigned int> component_label;
-    for (size_t i = 0; i < n + m; ++i) {
-        boost::unordered_map<unsigned int, unsigned int>::iterator c;
-        c = component_label.find(ds[i]);
-        if (c == component_label.end()) {
-            component_label.insert(std::make_pair(ds[i], component_label.size()));
-        }
-    }
-    Logger::info("Components: %lu", (unsigned long) component_label.size());
-#endif
-
-
-
-    /* 1. Relabel components
-     * 2. Reassign column indices based on components. How?
-     *    We need to sort the entries according to component.
-     *    The easiest way may be to just add a component field to each entry.
-     * */
-
-
-
-    /* We can produce */
-
-    //boost::unordered_set<unsigned int> components;
-    //for (size_t i = 0; i < n + m; ++i) {
-        //components.insert(disjset_find(ds, i));
-    //}
-    //
-
-#if 0
-    /* Calculate the number of non-zero entries in the weight matrix. */
-    std::vector<size_t> rowlens(ts.size(), 0);
-    size_t ncol = 0;
-    size_t nnz = multiread_entries.size();
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        std::vector<WeightMatrixEntry>::iterator j;
-        for (j = threads[i]->weight_matrix_entries.begin();
-                j != threads[i]->weight_matrix_entries.end(); ++j) {
-            if (j->w > 0.0) {
-                ++nnz;
-                ++rowlens[j->i];
+    {
+        boost::unordered_map<unsigned int, unsigned int> component_label;
+        for (size_t i = 0; i < N; ++i) {
+            boost::unordered_map<unsigned int, unsigned int>::iterator c;
+            c = component_label.find(ds[i]);
+            if (c == component_label.end()) {
+                component_label.insert(std::make_pair(ds[i], component_label.size()));
             }
         }
+
+        for (size_t i = 0; i < N; ++i) ds[i] = component_label[ds[i]];
+        num_components = component_label.size();
     }
 
-    Logger::info("Weight matrix entries: %lu", (unsigned long) nnz);
-#endif
+    Logger::info("Components: %lu", (unsigned long) num_components);
 
-    /* Reassign fragment indices, removing that can't have non-zero weight. */
-    /* Can we do this with the stream trick?
-     *
-     *
-     * Once we free the multiread indexes, I don't think memory is a big issue.
-     * Let's just make one long entry list. Sort it. Reassign column indicies.
-     *
-     * Then, build a graph, find the connected components.
-     *
-     * This is going to involve another rasignment of column indices.
-     */
-
-
-#if 0
-    std::vector<std::vector<WeightMatrixEntry>*> sources;
-    sources.push_back(&multiread_entries);
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        sources.push_back(&threads[i]->weight_matrix_entries);
+    /* Label transcript components */
+    transcript_component = new unsigned int [ts.size()];
+    for (size_t i = 0; i < ts.size(); ++i) {
+        transcript_component[i] = ds[weight_matrix->ncol + i];
     }
 
-    WeightMatrixEntryStream entry_stream(sources);
-    W = new SparseMat(ts.size(), ncol, rowlens, entry_stream);
-#endif
+    /* Now, reorder columns by component. */
+    idxmap = new unsigned int [weight_matrix->ncol];
+    for (size_t i = 0; i < weight_matrix->ncol; ++i) idxmap[i] = i;
 
+    std::sort(idxmap, idxmap + weight_matrix->ncol, ComponentCmp(ds));
+    std::sort(ds, ds + weight_matrix->ncol);
+    weight_matrix->reorder_columns(idxmap);
 
-    /* Current problem:
-     * What can be done about fragments with all zero weights.
-     *
-     * 1. Try to remove them here, which means reassigning indexs, etc.
-     * 2. ...
-     *
-     * Fuck, we are going to have to do that anyway, since we removed a bunch of
-     * reads when filtering the multireads most likely.
-     */
+    /* Update frag_count indexes */
+    for (TSVec<FragIdxCount>::iterator i = nz_frag_counts.begin();
+            i != nz_frag_counts.end(); ++i) {
+        i->first = idxmap[i->first];
+    }
+    std::sort(nz_frag_counts.begin(), nz_frag_counts.end());
+
+    /* Build fragment count array. */
+    component_frag = new unsigned int [num_components];
+    frag_counts = new float* [num_components];
+    std::fill(frag_counts, frag_counts + num_components, (float*) NULL);
+    TSVec<FragIdxCount>::iterator fc = nz_frag_counts.begin();
+    for (size_t i = 0, j = 0; i < num_components; ++i) {
+        component_frag[i] = j;
+        assert(ds[j] <= i);
+        if (ds[j] > i) continue;
+        size_t k;
+        for (k = j + 1; k < weight_matrix->ncol && ds[j] == ds[k]; ++k) {}
+        size_t component_size = k - j;
+
+        if (component_size == 0) continue;
+
+        frag_counts[i] =
+            reinterpret_cast<float*>(aalloc(component_size * sizeof(float)));
+        std::fill(frag_counts[i], frag_counts[i] + component_size, 1.0f);
+
+        while (fc != nz_frag_counts.end() && fc->first < k) {
+            frag_counts[i][fc->first - j] = (float) fc->second;
+            ++fc;
+        }
+    }
+
+    delete [] ds;
+    delete [] idxmap;
 }
 
 
 Sampler::~Sampler()
 {
+    delete [] transcript_component;
+    for (size_t i = 0; i < num_components; ++i) {
+        afree(frag_counts[i]);
+    }
+    delete [] frag_counts;
+    delete [] component_frag;
+    delete weight_matrix;
+    delete [] transcript_weights;
 }
 
 

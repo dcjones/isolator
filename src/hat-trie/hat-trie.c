@@ -116,6 +116,12 @@ static void hattrie_free_node(node_ptr node)
 void hattrie_clear(hattrie_t* T)
 {
     hattrie_free_node(T->root);
+    node_ptr node;
+    node.b = ahtable_create();
+    node.b->flag = NODE_TYPE_HYBRID_BUCKET;
+    node.b->c0 = 0x00;
+    node.b->c1 = 0xff;
+    T->root.t = alloc_trie_node(node);
 }
 
 
