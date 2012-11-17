@@ -287,7 +287,7 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     while (e2 != TranscriptIntronExonIterator() && c2 != CigarIterator()) {
         // case 1: e entirely preceedes c
         if (c2->start > e2->first.end) {
-            if (e2->second == EXONIC_INTERVAL_TYPE && e2_sup_e1) {
+            if (e2->second == INTRONIC_INTERVAL_TYPE && e2_sup_e1) {
                 intron_len += e2->first.end - e2->first.start + 1;
             }
 
@@ -315,6 +315,8 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
             return -1;
         }
     }
+
+    if (c2 != CigarIterator()) return -1;
 
     assert(intron_len < a2->end - a1->start + 1);
     return a2->end - a1->start + 1 - intron_len;

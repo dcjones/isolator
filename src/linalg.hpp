@@ -9,7 +9,7 @@
 
 
 /* Allocate an array with 16-bytes alignment (assuming the cpu supports SEE or
- * AVX */
+ * AVX) */
 void* aalloc(size_t n);
 void afree(void*);
 
@@ -33,7 +33,7 @@ float dotlog(const float* xs, const float* ys, const size_t n);
  *  For all 0 <= i < n.
  */
 void asxpy(float* xs, const float* ys, const float c,
-            const unsigned int* idx, const size_t n);
+           const unsigned int* idx, const size_t n);
 
 
 #endif

@@ -145,6 +145,12 @@ size_t AlnIndex::size() const
 }
 
 
+void AlnIndex::clear()
+{
+    hattrie_clear(t);
+}
+
+
 void AlnIndex::add(const char* key)
 {
     value_t* val = hattrie_get(t, key, strlen(key));

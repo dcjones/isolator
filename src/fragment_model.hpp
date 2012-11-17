@@ -75,12 +75,14 @@ class AlnIndex
         ~AlnIndex();
 
         size_t size() const;
+        void clear();
 
         void add(const char* key);
 
         /* Return -1 if the key is not present, otherwise return the key's
          * index. */
         int get(const char* key);
+
 
     private:
         hattrie_t* t;

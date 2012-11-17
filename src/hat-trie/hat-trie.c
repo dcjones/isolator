@@ -113,6 +113,12 @@ static void hattrie_free_node(node_ptr node)
 }
 
 
+void hattrie_clear(hattrie_t* T)
+{
+    hattrie_free_node(T->root);
+}
+
+
 void hattrie_free(hattrie_t* T)
 {
     hattrie_free_node(T->root);

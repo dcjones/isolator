@@ -1,9 +1,19 @@
 
+/* Plan of attack:
+ *
+ * X 1. Make the indexer for reads start at multireads.size().
+ *   2. Process MultiReadEntries into WeightEntries within each locus.
+ *   3. In Sampler::Sampler figure out how to reassign indices to reads.
+ *      We're likely going to have to do this twice.
+ *      First, to remove zeros, and again to rearrange accorditing to component.
+ */
+
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
 
 #include "constants.hpp"
 #include "hat-trie/hat-trie.h"
+#include "linalg.hpp"
 #include "logger.hpp"
 #include "queue.hpp"
 #include "read_set.hpp"
@@ -17,12 +27,365 @@ KHASH_MAP_INIT_STR(s, int)
 }
 
 
+
+/* Safe c-style allocation. */
+
+template <typename T>
+T* malloc_or_die(size_t n)
+{
+    T* xs = reinterpret_cast<T*>(malloc(n * sizeof(T)));
+    if (xs == NULL) {
+        Logger::abort("Could not allocated %lu bytes.", n * sizeof(T));
+    }
+    return xs;
+}
+
+
+template <typename T>
+T* realloc_or_die(T* xs, size_t n)
+{
+    T* ys = reinterpret_cast<T*>(realloc(xs, n * sizeof(T)));
+    if (ys == NULL) {
+        Logger::abort("Could not allocated %lu bytes.", n * sizeof(T));
+    }
+    return ys;
+}
+
+
+
+/* A row compressed sparse matrix.
+ */
+class WeightMatrix
+{
+    public:
+        WeightMatrix(unsigned int nrow)
+        {
+            this->nrow = nrow;
+            ncol = 0;
+
+            rowlens = new unsigned int [nrow];
+            std::fill(rowlens, rowlens+ nrow, 0);
+
+            reserved = new unsigned int [nrow];
+            std::fill(reserved, reserved + nrow, 0);
+
+            rows = new float* [nrow];
+            std::fill(rows, rows + nrow, (float*) NULL);
+
+            idxs = new unsigned int* [nrow];
+            std::fill(idxs, idxs + nrow, (unsigned int*) NULL);
+
+            compacted = false;
+        }
+
+        ~WeightMatrix()
+        {
+            delete [] rowlens;
+            delete [] reserved;
+            if (compacted) {
+                for (unsigned int i = 0; i < nrow; ++i) {
+                    afree(rows[i]);
+                    afree(idxs[i]);
+                }
+            }
+            else {
+                for (unsigned int i = 0; i < nrow; ++i) {
+                    free(rows[i]);
+                    free(idxs[i]);
+                }
+            }
+            delete [] rows;
+            delete [] idxs;
+        }
+
+        void push(unsigned int i, unsigned int j, float w)
+        {
+            if (rowlens[i] >= reserved[i]) {
+                /* We use a pretty non-agressive resizing strategy, since there
+                 * are potentially many arrays here and we want to avoid wasting
+                 * much space.  */
+                unsigned int newsize;
+                if (reserved[i] == 0) {
+                    newsize = 1;
+                }
+                else if (reserved[i] < 100) {
+                    newsize = 2 * reserved[i];
+                }
+                else {
+                    newsize = reserved[i] + 100;
+                }
+
+                rows[i] = realloc_or_die(rows[i], newsize);
+                idxs[i] = realloc_or_die(idxs[i], newsize);
+                reserved[i] = newsize;
+            }
+
+            idxs[i][rowlens[i]] = j;
+            rows[i][rowlens[i]] = w;
+            ++rowlens[i];
+        };
+
+
+        /* This function does two things: sorts the columns by index and
+         * reallocates each array to be of exact size (to preserve space) and to
+         * be 16-bytes aligned. It also reassigns column indices to remove empty
+         * columns. */
+        void compact()
+        {
+            /* Reallocate each row array */
+            for (unsigned int i = 0; i < nrow; ++i) {
+                unsigned int m = rowlens[i];
+                if (m == 0) continue;
+
+                float* newrow = reinterpret_cast<float*>(
+                        aalloc(m * sizeof(float)));
+                memcpy(newrow, rows[i], m * sizeof(float));
+                free(rows[i]);
+                rows[i] = newrow;
+
+                unsigned int* newidx = reinterpret_cast<unsigned int*>(
+                        aalloc(m * sizeof(unsigned int)));
+                memcpy(newidx, idxs[i], m * sizeof(unsigned int));
+                free(idxs[i]);
+                idxs[i] = newidx;
+
+                reserved[i] = m;
+            }
+
+            /* TODO: just testing sortrow here. */
+            /* Sort each row by column */
+            for (unsigned int i = 0; i < nrow; ++i) {
+                sortrow(i);
+            }
+
+            /* Mark observed columns */
+            ncol = 0;
+            for (unsigned int i = 0; i < nrow; ++i) {
+                for (unsigned int j = 0; j < rowlens[i]; ++j) {
+                    if (idxs[i][j] >= ncol) ncol = idxs[i][j] + 1;
+                }
+            }
+
+            unsigned int* newidx = new unsigned int [ncol];
+            memset(newidx, 0, ncol * sizeof(unsigned int));
+
+            for (unsigned int i = 0; i < nrow; ++i) {
+                for (unsigned int j = 0; j < rowlens[i]; ++j) {
+                    newidx[idxs[i][j]] = 1;
+                }
+            }
+
+            /* Reassign column indexes */
+            for (unsigned int i = 0, j = 0; i < ncol; ++i) {
+                if (newidx[i]) newidx[i] = j++;
+                else newidx[i] = j;
+            }
+            ncol = newidx[ncol - 1] + 1;
+
+            for (unsigned int i = 0; i < nrow; ++i) {
+                for (unsigned int j = 0; j < rowlens[i]; ++j) {
+                    idxs[i][j] = newidx[idxs[i][j]];
+                }
+            }
+
+            delete [] newidx;
+
+            /* Sort each row by column */
+            for (unsigned int i = 0; i < nrow; ++i) {
+                sortrow(i);
+            }
+
+            compacted = true;
+        }
+
+        // TODO: reorder_columns
+
+
+        unsigned int nrow, ncol;
+
+    private:
+        unsigned int median_of_three(const unsigned int* idx,
+                                     unsigned int a,
+                                     unsigned int b,
+                                     unsigned int c) const
+        {
+            unsigned int abc[3] = {a, b, c};
+            if (idx[abc[0]] < idx[abc[1]]) std::swap(abc[0], abc[1]);
+            if (idx[abc[1]] < idx[abc[2]]) std::swap(abc[1], abc[2]);
+            if (idx[abc[0]] < idx[abc[1]]) std::swap(abc[0], abc[1]);
+            return abc[1];
+        }
+
+        /* Sort a row by column index. A custom sort function is used since we
+         * want to sort both rows[i] and idxs[i] by idxs[i] without any
+         * intermediate steps. */
+        void sortrow(unsigned int i)
+        {
+            unsigned int m = rowlens[i];
+            if (m == 0) return;
+
+            const unsigned int insert_sort_cutoff = 7;
+            typedef std::pair<unsigned int, unsigned int> Range;
+            typedef std::deque<Range> RangeStack;
+            RangeStack s;
+            float* row = rows[i];
+            unsigned int* idx = idxs[i];
+
+            s.push_back(std::make_pair(0, m));
+            while (!s.empty()) {
+                Range r = s.back();
+                s.pop_back();
+
+                unsigned int u = r.first;
+                unsigned int v = r.second;
+
+                if (u == v) continue;
+                else if (v - u < insert_sort_cutoff) {
+                    unsigned int a, minpos, minval;
+                    while (u < v - 1) {
+                        minpos = u;
+                        minval = idx[u];
+                        for (a = u + 1; a < v; ++a) {
+                            if (idx[a] < minval) {
+                                minpos = a;
+                                minval = idx[a];
+                            }
+                        }
+                        std::swap(idx[u], idx[minpos]);
+                        std::swap(row[u], row[minpos]);
+                        ++u;
+                    }
+                    continue;
+                }
+
+                unsigned int p = median_of_three(
+                        idx, u, u + (v - u) / 2, v - 1);
+
+                unsigned int pval = idx[p];
+
+                std::swap(idx[p], idx[v - 1]);
+                std::swap(row[p], row[v - 1]);
+
+                unsigned int a, b;
+                for (a = b = u; b < v - 1; ++b) {
+                    if (idx[b] <= pval) {
+                        std::swap(idx[a], idx[b]);
+                        std::swap(row[a], row[b]);
+                        ++a;
+                    }
+                }
+
+                std::swap(idx[a], idx[v - 1]);
+                std::swap(row[a], row[v - 1]);
+
+                s.push_back(std::make_pair(u, a));
+                s.push_back(std::make_pair(a + 1, v));
+            }
+
+            /* TODO: remove when we are sure this is working. */
+            for (unsigned int j = 0; j < m - 1; ++j) {
+                if (idx[j] >= idx[j + 1]) {
+                    Logger::error("WeightMatrix::sortrow is broken.");
+                }
+            }
+        }
+
+        /* Number of entries in each row. */
+        unsigned int* rowlens;
+
+        /* Entries reserved in each row. */
+        unsigned int* reserved;
+
+        /* Row data. */
+        float** rows;
+
+        /* Columns indexed for each row. */
+        unsigned int** idxs;
+
+        /* Have arrays been resized to fit with aligned blocks of memory. */
+        bool compacted;
+
+        friend class WeightMatrixIterator;
+};
+
+
+struct WeightMatrixEntry
+{
+    unsigned int i, j;
+    float w;
+};
+
+
+class WeightMatrixIterator :
+    public boost::iterator_facade<WeightMatrixIterator,
+                                  const WeightMatrixEntry,
+                                  boost::forward_traversal_tag>
+{
+    public:
+        WeightMatrixIterator()
+            : owner(NULL)
+        {
+
+        }
+
+        WeightMatrixIterator(const WeightMatrix& owner)
+            : owner(&owner)
+        {
+            i = 0;
+            k = 0;
+        }
+
+
+    private:
+        friend class boost::iterator_core_access;
+
+        void increment()
+        {
+            if (owner == NULL || i >= owner->nrow) return;
+
+            ++k;
+            while (i < owner->nrow && k >= owner->rowlens[i]) {
+                ++i;
+                k = 0;
+            }
+
+            entry.i = i;
+            entry.j = owner->idxs[i][k];
+            entry.w = owner->rows[i][k];
+        }
+
+        bool equal(const WeightMatrixIterator& other) const
+        {
+            if (owner == NULL || i >= owner->nrow) {
+                return other.owner == NULL || other.i >= other.owner->nrow;
+            }
+            else if (other.owner == NULL || other.i >= other.owner->nrow) {
+                return false;
+            }
+            else {
+                return owner == other.owner &&
+                       i == other.i &&
+                       k == other.k;
+            }
+        }
+
+        const WeightMatrixEntry& dereference() const
+        {
+            return entry;
+        }
+
+        WeightMatrixEntry entry;
+        const WeightMatrix* owner;
+        unsigned int i, k;
+};
+
+
 /* A trivial class to serve unique indices to multile threads. */
 class Indexer
 {
     public:
-        Indexer()
-            : next(0)
+        Indexer(unsigned int first = 0)
+            : next(first)
         {
         }
 
@@ -44,6 +407,7 @@ class Indexer
 
 
 /* An entry in the coordinate respresentation of the sparse weight matrix. */
+#if 0
 struct WeightMatrixEntry
 {
     WeightMatrixEntry(unsigned int i, unsigned int j, float w)
@@ -67,6 +431,7 @@ struct WeightMatrixEntry
     float w;
 
 };
+#endif
 
 
 struct MultireadEntry
@@ -94,6 +459,23 @@ struct MultireadEntry
     unsigned int transcript_idx;
     float frag_weight;
     float align_pr;
+};
+
+
+/* Thread safe vector, allowing multiple threads to write.
+ * In particular: modification through push_back and reserve_extra are safe. */
+template <typename T>
+class TSVec : public std::deque<T>
+{
+    public:
+        void push_back(const T& x)
+        {
+            boost::lock_guard<boost::mutex> lock(mut);
+            std::deque<T>::push_back(x);
+        }
+
+    private:
+        boost::mutex mut;
 };
 
 
@@ -314,17 +696,22 @@ class SamplerInitThread
         SamplerInitThread(
                 FragmentModel& fm,
                 Indexer& read_indexer,
+                WeightMatrix& weight_matrix,
                 Queue<SamplerInitInterval*>& q)
-            : fm(fm)
+            : weight_matrix(weight_matrix)
+            , fm(fm)
             , read_indexer(read_indexer)
             , q(q)
             , thread(NULL)
         {
-
         }
 
         ~SamplerInitThread()
         {
+            /* Note: we are not free weight_matrix_entries and
+             * multiread_entries. This get's done in Sampler::Sampler.
+             * It's all part of the delicate dance involved it minimizing
+             * memory use. */
         }
 
         void run()
@@ -335,8 +722,6 @@ class SamplerInitThread
                 process_locus(locus);
                 delete locus;
             }
-
-            std::sort(multiread_entries.begin(), multiread_entries.end());
         };
 
         void start()
@@ -374,8 +759,7 @@ class SamplerInitThread
                 const Transcript& t,
                 const AlignmentPair& a);
 
-        std::vector<WeightMatrixEntry> weight_matrix_entries;
-        std::vector<MultireadEntry> multiread_entries;
+        WeightMatrix& weight_matrix;
 
         typedef std::pair<unsigned int, unsigned int> FragIdxCount;
         std::vector<FragIdxCount> frag_counts;
@@ -420,7 +804,6 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 
     /* Collapse identical reads, filter out those that don't overlap any
      * transcript. */
-    size_t num_entries = 0;
     for (ReadSetIterator r(locus->rs); r != ReadSetIterator(); ++r) {
         /* Skip multireads for now. */
         int multiread_num = fm.multireads.get(r->first);
@@ -446,8 +829,8 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
                 t != locus->ts.end(); ++t) {
             if (a->frag_len(*t) >= 0) {
                 has_compatible_transcript = true;
+                break;
             }
-            ++num_entries;
         }
 
         if (has_compatible_transcript) {
@@ -468,7 +851,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         frag_counts.push_back(f->second);
     }
 
-    weight_matrix_entries.reserve(weight_matrix_entries.size() + num_entries);
+    std::vector<MultireadEntry> multiread_entries;
     transcript_weights.reserve(transcript_weights.size() + locus->ts.size());
     for (TranscriptSetLocus::iterator t = locus->ts.begin();
             t != locus->ts.end(); ++t) {
@@ -480,8 +863,9 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
             for (AlignedReadIterator a(*r->second); a != AlignedReadIterator(); ++a) {
                 float w = fragment_weight(*t, *a);
                 if (w > 0.0) {
+                    /* TODO: estimate alignment probability */
                     multiread_entries.push_back(
-                            MultireadEntry(r->first, t->id, w, 10.0));
+                            MultireadEntry(r->first, t->id, w, 1.0));
                 }
             }
         }
@@ -489,11 +873,48 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
             float w = fragment_weight(*t, f->first);
             if (w > 0.0) {
-                weight_matrix_entries.push_back(
-                        WeightMatrixEntry(t->id, f->second.first, w));
+                weight_matrix.push(t->id, f->second.first, w);
             }
         }
     }
+
+    /* Process multiread entries into weight matrix entries */
+#if 0
+    std::sort(multiread_entries.begin(), multiread_entries.end());
+    for (std::vector<MultireadEntry>::iterator i = multiread_entries.begin();
+            i != multiread_entries.end(); ++i) {
+        std::vector<MultireadEntry>::iterator j, k = i + 1;
+        while (k != multiread_entries.end() &&
+                i->multiread_num == k->multiread_num) {
+            ++k;
+        }
+
+        float sum_weight = 0.0;
+        float sum_align_pr = 0.0;
+        for (j = i; j != k; ++j) {
+            sum_weight += j->frag_weight * j->align_pr;
+            sum_align_pr += j->align_pr;
+        }
+
+        if (sum_align_pr == 0.0 || sum_weight == 0.0) continue;
+
+        /* Sum weight of alignments on the same transcript. */
+        float w = 0.0;
+        std::vector<MultireadEntry>::iterator j0;
+        for (j0 = j = i; j != k; ++j) {
+            if (j->transcript_idx != j0->transcript_idx) {
+                weight_matrix.push(j->transcript_idx, j0->multiread_num, w);
+                j0 = j;
+                w = 0.0;
+            }
+
+            w += j->align_pr * j->frag_weight;
+        }
+        if (w > 0.0) {
+            weight_matrix.push(j0->transcript_idx, j0->multiread_num, w);
+        }
+    }
+#endif
 }
 
 
@@ -611,99 +1032,6 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
 }
 
 
-/* This class merges vectors of weight matrix entries generated by
- * initialization threads. */
-class WeightMatrixEntryStream : public SparseMatEntryStream
-{
-    private:
-        friend class HeapCmp;
-        struct HeapCmp
-        {
-            HeapCmp(const WeightMatrixEntryStream& stream)
-                : stream(stream)
-            {}
-
-            bool operator () (size_t i, size_t j)
-            {
-                if (stream.is[i] == stream.sources[i]->end()) return false;
-                else if (stream.is[j] == stream.sources[j]->end()) return true;
-                else {
-                    if (stream.is[i]->i != stream.is[j]->i) {
-                        return stream.is[i]->i < stream.is[j]->i;
-                    }
-                    else return stream.is[i]->j < stream.is[j]->j;
-                }
-            }
-
-            const WeightMatrixEntryStream& stream;
-        };
-
-    public:
-        WeightMatrixEntryStream(
-                const std::vector<std::vector<WeightMatrixEntry>*>& sources)
-            : cmp(*this)
-            , is(sources.size())
-            , sources(sources)
-        {
-            for (size_t i = 0; i < sources.size(); ++i) {
-                is[i] = sources[i]->begin();
-                if (is[i] != sources[i]->end()) {
-                    h.push_back(i);
-                }
-            }
-
-            std::make_heap(h.begin(), h.end(), cmp);
-            next();
-        }
-
-        bool finished()
-        {
-            return h.empty();
-        }
-
-        void next()
-        {
-            size_t i = h.front();
-            std::pop_heap(h.begin(), h.end(), cmp);
-            h.pop_back();
-            cur_row = is[i]->i;
-            cur_col = is[i]->j;
-            cur_val = is[i]->w;
-
-            is[i]++;
-            if (is[i] != sources[i]->end()) {
-                h.push_back(i);
-                std::push_heap(h.begin(), h.end());
-            }
-        }
-
-        unsigned int row()
-        {
-            return cur_row;
-        }
-
-        unsigned int col()
-        {
-            return cur_col;
-        }
-
-        float value()
-        {
-            return cur_val;
-        }
-
-    private:
-        HeapCmp cmp;
-        std::vector<size_t> h;
-        std::vector<std::vector<WeightMatrixEntry>::const_iterator> is;
-        const std::vector<std::vector<WeightMatrixEntry>*>& sources;
-
-        unsigned int cur_row, cur_col;
-        float cur_val;
-};
-
-
-
 static unsigned int disjset_find(unsigned int* ds, unsigned int i)
 {
     if (ds[i] == i) {
@@ -734,7 +1062,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     Queue<SamplerInitInterval*> q(100);
 
     /* Assign matrix indices to reads. */
-    Indexer read_indexer;
+    Indexer read_indexer(fm.multireads.size());
 
     /* Collect intervals */
     std::vector<SamplerInitInterval*> intervals;
@@ -742,107 +1070,49 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
         intervals.push_back(new SamplerInitInterval(*i, q));
     }
 
+    WeightMatrix weight_matrix(ts.size());;
+
     std::vector<SamplerInitThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
-        threads.push_back(new SamplerInitThread(fm, read_indexer, q));
+        threads.push_back(new SamplerInitThread(
+                    fm,
+                    read_indexer,
+                    weight_matrix,
+                    q));
         threads.back()->start();
     }
 
-    Logger::info("%lu loci", (unsigned long) intervals.size());
+    Logger::info("Loci: %lu", (unsigned long) intervals.size());
 
     sam_scan(intervals, bam_fn, fa_fn, "Estimating fragment weights");
+
+    /* Free a little space. */
+    fm.multireads.clear();
 
     for (size_t i = 0; i < constants::num_threads; ++i) q.push(NULL);
     for (size_t i = 0; i < constants::num_threads; ++i) threads[i]->join();
 
-    /* Merge multiread entries. */
-    std::vector<MultireadEntry> multiread_entries;
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        multiread_entries.reserve(
-                multiread_entries.size() + threads[i]->multiread_entries.size());
-        multiread_entries.insert(multiread_entries.end(),
-                threads[i]->multiread_entries.begin(), threads[i]->multiread_entries.end());
+    Logger::info("Pre-compact columns: %lu",
+            (unsigned long) weight_matrix.ncol);
+    weight_matrix.compact();
+    Logger::info("Post-compact columns: %lu",
+            (unsigned long) weight_matrix.ncol);
 
-        std::vector<MultireadEntry>().swap(threads[i]->multiread_entries);
-    }
 
-    std::vector<WeightMatrixEntry> entries;
-
-    /* Process MultireadEntries into WeightMatrixEntries */
-    std::sort(multiread_entries.begin(), multiread_entries.end());
-    std::vector<MultireadEntry>::iterator i = multiread_entries.begin(),
-                                          j = multiread_entries.begin();
-
-    for (std::vector<MultireadEntry>::iterator i = multiread_entries.begin();
-            i != multiread_entries.end(); ++i) {
-        std::vector<MultireadEntry>::iterator j, k = i + 1;
-        while (k != multiread_entries.end() &&
-                i->multiread_num == k->multiread_num) {
-            ++k;
-        }
-
-        float sum_weight = 0.0;
-        float sum_align_pr = 0.0;
-        for (j = i; j != k; ++j) {
-            sum_weight += j->frag_weight * j->align_pr;
-            sum_align_pr += j->align_pr;
-        }
-
-        if (sum_align_pr == 0.0 || sum_weight == 0.0) continue;
-        unsigned int frag_idx = read_indexer.get();
-
-        /* Sum weight of alignments on the same transcript. */
-        float w = 0.0;
-        std::vector<MultireadEntry>::iterator j0;
-        for (j0 = j = i; j != k; ++j) {
-            if (j->transcript_idx != j0->transcript_idx) {
-                if (w > 0.0) {
-                    entries.push_back(
-                            WeightMatrixEntry(j0->transcript_idx, frag_idx, w));
-                }
-                j0 = j;
-                w = 0.0;
-            }
-
-            w += j->align_pr * j->frag_weight;
-        }
-        if (w > 0.0) {
-            entries.push_back(
-                    WeightMatrixEntry(j0->transcript_idx, frag_idx, w));
-        }
-    }
-    std::vector<MultireadEntry>().swap(multiread_entries);
-
-    /* Copy everything into the same vector. */
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        entries.reserve(entries.size() + threads[i]->weight_matrix_entries.size());
-        entries.insert(entries.end(),
-                threads[i]->weight_matrix_entries.begin(),
-                threads[i]->weight_matrix_entries.end());
-        std::vector<WeightMatrixEntry>().swap(threads[i]->weight_matrix_entries);
-    }
-
-    /* Reassign read indices, now that zero entries are left out. */
-    std::sort(entries.begin(), entries.end(), WeightMatrixEntry::ColOrd());
-    unsigned int col = 0;
-    unsigned int last_j = 0;
-    for (std::vector<WeightMatrixEntry>::iterator i = entries.begin();
-            i != entries.end(); ++i) {
-        if (i->j != last_j && col > 0) ++col;
-        i->j = col;
-    }
 
     /* Find connected components. */
-    size_t n = ts.size();
-    size_t m = col + 1;
+
+    unsigned int N = weight_matrix.ncol + weight_matrix.nrow;
 
     /* ds is disjoint set data structure, where ds[i] holds a pointer to item
      * i's parent, and ds[i] = i, when the node is the root. */
-    unsigned int* ds = new unsigned int [n + m];
-    for (size_t i = 0; i < n + m; ++i) ds[i] = i;
+    unsigned int* ds = new unsigned int [N];
+    for (size_t i = 0; i < N; ++i) ds[i] = i;
 
-    for (std::vector<WeightMatrixEntry>::iterator i = entries.begin();
-            i != entries.end(); ++i) {
+    /* TODO: we need to be able to iterate over matrix entries */
+#if 0
+    for (TSVec<WeightMatrixEntry>::iterator i = weight_matrix_entries.begin();
+            i != weight_matrix_entries.end(); ++i) {
         if (i->w > 0.0) {
             disjset_union(ds, i->i, n + i->j);
         }
@@ -860,6 +1130,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
         }
     }
     Logger::info("Components: %lu", (unsigned long) component_label.size());
+#endif
 
 
 
