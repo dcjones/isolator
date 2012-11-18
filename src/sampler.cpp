@@ -1,17 +1,9 @@
 
-/* Plan of attack:
- *
- * X 1. Make the indexer for reads start at multireads.size().
- *   2. Process MultiReadEntries into WeightEntries within each locus.
- *   3. In Sampler::Sampler figure out how to reassign indices to reads.
- *      We're likely going to have to do this twice.
- *      First, to remove zeros, and again to rearrange accorditing to component.
- */
-
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
 #include <gsl/gsl_randist.h>
 #include <gsl/gsl_rng.h>
+#include <nlopt.h>
 
 #include "constants.hpp"
 #include "hat-trie/hat-trie.h"
@@ -862,7 +854,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
              r != multiread_set.end(); ++r) {
             for (AlignedReadIterator a(*r->second); a != AlignedReadIterator(); ++a) {
                 float w = fragment_weight(*t, *a);
-                if (w > 0.0) {
+                if (w > constants::min_frag_weight) {
                     /* TODO: estimate alignment probability */
                     multiread_entries.push_back(
                             MultireadEntry(r->first, t->id, w, 1.0));
@@ -872,7 +864,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 
         for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
             float w = fragment_weight(*t, f->first);
-            if (w > 0.0) {
+            if (w > constants::min_frag_weight) {
                 weight_matrix.push(t->id, f->second.first, w);
             }
         }
@@ -903,7 +895,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         std::vector<MultireadEntry>::iterator j0;
         for (j0 = j = i; j != k; ++j) {
             if (j->transcript_idx != j0->transcript_idx) {
-                if (w > 0.0) {
+                if (w > constants::min_frag_weight) {
                     weight_matrix.push(j0->transcript_idx, j0->multiread_num, w);
                 }
                 j0 = j;
@@ -912,7 +904,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 
             w += j->align_pr / sum_align_pr * j->frag_weight;
         }
-        if (w > 0.0) {
+        if (w > constants::min_frag_weight) {
             weight_matrix.push(j0->transcript_idx, j0->multiread_num, w);
         }
     }
@@ -1449,6 +1441,67 @@ class MaxPostThread : public SamplerThread
 };
 
 
+/* Constrain xs to be on a simplex for nlopt. */
+static double simplex_constraint(unsigned int n, const double* xs,
+                                 double* grad, void* params)
+{
+    UNUSED(params);
+    double z = 0.0;
+    for (unsigned int i = 0; i < n; ++i) {
+        z += xs[i];
+    }
+    if (grad != NULL) std::fill(grad, grad + n, 1.0);
+    return z - 1.0;
+}
+
+
+/* NLopt maximum posterior objective function. */
+double posterior_objf(unsigned int n, const double* tmix,
+                      double* grad, void* params)
+{
+    Sampler& S = *reinterpret_cast<Sampler*>(params);
+
+    for (unsigned int i = 0; i < S.num_components; ++i) {
+        unsigned component_size = S.component_frag[i + 1] - S.component_frag[i];
+        std::fill(S.frag_probs[i], S.frag_probs[i] + component_size, 0.0f);
+    }
+
+    for (unsigned int i = 0; i < S.weight_matrix->nrow; ++i) {
+        unsigned int c = S.transcript_component[i];
+        asxpy(S.frag_probs[c],
+              S.weight_matrix->rows[i],
+              tmix[i], 
+              S.weight_matrix->idxs[i],
+              S.component_frag[c],
+              S.weight_matrix->rowlens[i]);
+    }
+
+    double p = 0.0;
+    for (unsigned int i = 0; i < S.num_components; ++i) {
+        unsigned int component_size = S.component_frag[i + 1] - S.component_frag[i];
+        p += dotlog(S.frag_counts[i], S.frag_probs[i], component_size);
+    }
+
+    if (grad != NULL) {
+        std::fill(grad, grad + n, 0.0);
+        for (unsigned int i = 0; i < S.weight_matrix->nrow; ++i) {
+            unsigned int c = S.transcript_component[i];
+            unsigned int off = S.component_frag[c];
+            for (unsigned int j = 0; j < S.weight_matrix->rowlens[i]; ++j) {
+                unsigned int k = S.weight_matrix->idxs[i][j];
+                grad[i] += S.frag_counts[c][k - off] * S.weight_matrix->rows[i][j] /
+                                S.frag_probs[c][k - off];
+            }
+            grad[i] /= M_LN2;
+        }
+    }
+
+    fprintf(stderr, "%f\n", p);
+
+    return p;
+}
+
+
 void Sampler::run(unsigned int num_samples)
 {
     /* Within-component transcript mixture coefficients */
@@ -1465,6 +1518,30 @@ void Sampler::run(unsigned int num_samples)
 
     init_frag_probs(tmix);
 
+    /* Find the maximum pasterior */
+    nlopt_opt opt = nlopt_create(NLOPT_AUGLAG, weight_matrix->nrow);
+    nlopt_opt local_opt = nlopt_create(NLOPT_LD_LBFGS, weight_matrix->nrow);
+    nlopt_opt local_opt = nlopt_create(NLOPT_LD_VAR1, weight_matrix->nrow);
+    nlopt_opt local_opt = nlopt_create(NLOPT_LD_VAR2, weight_matrix->nrow);
+    nlopt_opt local_opt = nlopt_create(NLOPT_LD_TNEWTON, weight_matrix->nrow);
+    nlopt_set_local_optimizer(opt, local_opt);
+    nlopt_set_lower_bounds1(opt, 0.0);
+    nlopt_set_upper_bounds1(opt, 1.0);
+    nlopt_add_equality_constraint(opt, simplex_constraint, NULL, 1e-6);
+    nlopt_set_max_objective(opt, posterior_objf, reinterpret_cast<void*>(this));
+    nlopt_set_xtol_abs1(opt, 1e-8);
+
+    double* dtmix = new double [weight_matrix->nrow];
+    std::fill(dtmix, dtmix + weight_matrix->nrow,
+              1.0 / (double) weight_matrix->nrow);
+
+    double optf;
+    nlopt_result res = nlopt_optimize(opt, dtmix, &optf);
+
+    nlopt_destroy(opt);
+    nlopt_destroy(local_opt);
+
+    delete [] dtmix;
 
     /* 
      * 2. Eval posterier.

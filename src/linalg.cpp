@@ -89,6 +89,19 @@ void acopy(void* dest_, const void* src_, size_t n)
 }
 
 
+// TODO: write/test this function.
+/*
+void pdpscpy(float* dest, const double* src, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n / 4; ++i) {
+        __m256d x = _mm256_load_pd(src + 4 * i);
+    }
+
+}
+*/
+
+
 typedef union {
     __m256i a;
     __m128i b[2];

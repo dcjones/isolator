@@ -14,3 +14,4 @@ float                constants::frag_len_dist_smoothing  = 0.1;
 size_t               constants::frag_len_min_pe_reads    = 10000;
 double               constants::frag_len_mu              = 200.0;
 double               constants::frag_len_sd              = 10.0;
+float                constants::min_frag_weight          = 1e-8;

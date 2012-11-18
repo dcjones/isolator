@@ -68,6 +68,10 @@ namespace constants
      * fragment length distribution when no emperical estimate is available. */
     extern double frag_len_mu;
     extern double frag_len_sd;
+
+    /* Discard fragments with weight lower than this, that might otherwise
+     * introduce zeros into the posterior probability. */
+    extern float min_frag_weight;
 }
 
 #endif

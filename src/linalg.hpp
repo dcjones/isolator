@@ -19,6 +19,12 @@ void afree(void*);
  * */
 void acopy(void* dest, const void* src, size_t n);
 
+/* Copy an array of n aligned doubles to an array of n aligned floats. */
+void pdpscpy(float* dest, const double* src, size_t n);
+
+/* Copy an array of n aligned floats to an array of n aligned doubles. */
+void pspscpy(float* dest, const double* src, size_t n);
+
 
 /* Dot product of xs and log(ys).
  *

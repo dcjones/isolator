@@ -35,5 +35,7 @@ typedef boost::flyweight<std::string, boost::flyweights::tag<transcript_id_tag> 
 struct seq_name_tag {};
 typedef boost::flyweight<std::string, boost::flyweights::tag<transcript_id_tag> > SeqName;
 
+#define UNUSED(x) (void)(x)
+
 #endif
 
