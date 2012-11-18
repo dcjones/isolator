@@ -18,7 +18,11 @@ class Sampler
                 TranscriptSet& ts, FragmentModel& fm);
         ~Sampler();
 
+        void run(unsigned int num_samples);
+
     private:
+        void init_frag_probs(const float* tmix);
+
         TranscriptSet& ts;
         FragmentModel& fm;
 
@@ -32,9 +36,17 @@ class Sampler
          * graph. */
         size_t num_components;
 
-        /* frag_couns[i][j] holds the number of occurances of the jth fragment
+        /* Number of transcripts in each component. */
+        unsigned int* component_num_transcripts;
+        unsigned int** component_transcripts;
+
+        /* frag_counts[i][j] holds the number of occurances of the jth fragment
          * in component i. */
         float** frag_counts;
+
+        /* frag_probs[i][j] holds the probability of the jth fragment in
+         * component i, given the component and transcript mixtures. */
+        float** frag_probs;
 
         /* component_frag[i] given the index of the first fragment in component
          * i */

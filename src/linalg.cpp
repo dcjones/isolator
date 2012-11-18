@@ -46,7 +46,7 @@ static float fastlog2(float x_)
 
 void* aalloc(size_t n)
 {
-    void* xs = _mm_malloc(n, 16);
+    void* xs = _mm_malloc(n, 32);
     if (xs == NULL) {
         Logger::abort("Can't allocate an array of size %ul.",
                       (unsigned long) n);
@@ -164,7 +164,8 @@ float dotlog(const float* xs, const float* ys, const size_t n)
 
 
 void asxpy(float* xs, const float* ys, const float c,
-            const unsigned int* idx, const size_t n)
+            const unsigned int* idx, const unsigned int off,
+            const size_t n)
 {
     __m256 yv;
     __m256 cv = _mm256_set1_ps(c);
@@ -173,43 +174,54 @@ void asxpy(float* xs, const float* ys, const float c,
         float f[8];
     } x;
 
+    union {
+        __m256i v;
+        __m128i w[2];
+        unsigned int i[8];
+    } iv;
+
+    __m128i voff = _mm_set1_epi32((int) off);
+
     size_t i;
-    for (i = 0; i < 8 * (n / 8); ++i) {
+    for (i = 0; i < 8 * (n / 8); i += 8) {
         yv = _mm256_mul_ps(cv, _mm256_load_ps(ys + i));
+        iv.v = _mm256_load_si256(reinterpret_cast<const __m256i*>(idx + i));
+        iv.w[0] = _mm_sub_epi32(iv.w[0], voff);
+        iv.w[1] = _mm_sub_epi32(iv.w[1], voff);
 
         /* load from xs */
-        x.f[0] = xs[idx[i]];
-        x.f[1] = xs[idx[i+1]];
-        x.f[2] = xs[idx[i+2]];
-        x.f[3] = xs[idx[i+3]];
-        x.f[4] = xs[idx[i+4]];
-        x.f[5] = xs[idx[i+5]];
-        x.f[6] = xs[idx[i+6]];
-        x.f[7] = xs[idx[i+7]];
+        x.f[0] = xs[iv.i[0]];
+        x.f[1] = xs[iv.i[1]];
+        x.f[2] = xs[iv.i[2]];
+        x.f[3] = xs[iv.i[3]];
+        x.f[4] = xs[iv.i[4]];
+        x.f[5] = xs[iv.i[5]];
+        x.f[6] = xs[iv.i[6]];
+        x.f[7] = xs[iv.i[7]];
 
         x.v = _mm256_add_ps(x.v, yv);
 
         /* store in xs */
-        xs[idx[i]]   = x.f[0];
-        xs[idx[i+1]] = x.f[1];
-        xs[idx[i+2]] = x.f[2];
-        xs[idx[i+3]] = x.f[3];
-        xs[idx[i+4]] = x.f[4];
-        xs[idx[i+5]] = x.f[5];
-        xs[idx[i+6]] = x.f[6];
-        xs[idx[i+7]] = x.f[7];
+        xs[iv.i[0]] = x.f[0];
+        xs[iv.i[1]] = x.f[1];
+        xs[iv.i[2]] = x.f[2];
+        xs[iv.i[3]] = x.f[3];
+        xs[iv.i[4]] = x.f[4];
+        xs[iv.i[5]] = x.f[5];
+        xs[iv.i[6]] = x.f[6];
+        xs[iv.i[7]] = x.f[7];
     }
 
     /* handle overhang */
     i = 8 * (n / 8);
     switch (n % 8) {
-        case 7: xs[idx[i]] += c * ys[i]; ++i;
-        case 6: xs[idx[i]] += c * ys[i]; ++i;
-        case 5: xs[idx[i]] += c * ys[i]; ++i;
-        case 4: xs[idx[i]] += c * ys[i]; ++i;
-        case 3: xs[idx[i]] += c * ys[i]; ++i;
-        case 2: xs[idx[i]] += c * ys[i]; ++i;
-        case 1: xs[idx[i]] += c * ys[i]; ++i;
+        case 7: xs[idx[i] - off] += c * ys[i]; ++i;
+        case 6: xs[idx[i] - off] += c * ys[i]; ++i;
+        case 5: xs[idx[i] - off] += c * ys[i]; ++i;
+        case 4: xs[idx[i] - off] += c * ys[i]; ++i;
+        case 3: xs[idx[i] - off] += c * ys[i]; ++i;
+        case 2: xs[idx[i] - off] += c * ys[i]; ++i;
+        case 1: xs[idx[i] - off] += c * ys[i]; ++i;
     }
 }
 
@@ -321,7 +333,8 @@ float dotlog(const float* xs, const float* ys, const size_t n)
 
 
 void asxpy(float* xs, const float* ys, const float c,
-            const unsigned int* idx, const size_t n)
+            const unsigned int* idx, const unsigned int off,
+            const size_t n)
 {
     __m128 yv;
     __m128 cv = _mm_set1_ps(c);
@@ -330,31 +343,40 @@ void asxpy(float* xs, const float* ys, const float c,
         float f[8];
     } x;
 
+    union {
+        __m128i v;
+        unsigned int i[4];
+    } iv;
+
+    __m128i voff = _mm_set1_epi32((int) off);
+
     size_t i;
-    for (i = 0; i < 4 * (n / 4); ++i) {
+    for (i = 0; i < 4 * (n / 4); i += 4) {
         yv = _mm_mul_ps(cv, _mm_load_ps(ys + i));
+        iv.v = _mm_load_si128(reinterpret_cast<const __m128i*>(idx + i));
+        iv.v = _mm_sub_epi32(iv.v, voff);
 
         /* load from xs */
-        x.f[0] = xs[idx[i]];
-        x.f[1] = xs[idx[i+1]];
-        x.f[2] = xs[idx[i+2]];
-        x.f[3] = xs[idx[i+3]];
+        x.f[0] = xs[iv.i[0]];
+        x.f[1] = xs[iv.i[1]];
+        x.f[2] = xs[iv.i[2]];
+        x.f[3] = xs[iv.i[3]];
 
         x.v = _mm_add_ps(x.v, yv);
 
         /* store in xs */
-        xs[idx[i]]   = x.f[0];
-        xs[idx[i+1]] = x.f[1];
-        xs[idx[i+2]] = x.f[2];
-        xs[idx[i+3]] = x.f[3];
+        xs[iv.i[0]] = x.f[0];
+        xs[iv.i[1]] = x.f[1];
+        xs[iv.i[2]] = x.f[2];
+        xs[iv.i[3]] = x.f[3];
     }
 
     /* handle overhang */
     i = 4 * (n / 4);
     switch (n % 4) {
-        case 3: xs[idx[i]] += c * ys[i]; ++i;
-        case 2: xs[idx[i]] += c * ys[i]; ++i;
-        case 1: xs[idx[i]] += c * ys[i]; ++i;
+        case 3: xs[idx[i] - off] += c * ys[i]; ++i;
+        case 2: xs[idx[i] - off] += c * ys[i]; ++i;
+        case 1: xs[idx[i] - off] += c * ys[i]; ++i;
     }
 }
 
@@ -392,11 +414,13 @@ float dotlog(const float* xs, const float* ys, const size_t n)
 
 
 void asxpy(float* xs, const float* ys, const float c,
-            const unsigned int* idx, const size_t n)
+            const unsigned int* idx,
+            const unsigned int off,
+            const size_t n)
 {
     size_t i;
     for (i = 0; i < n; ++i) {
-        xs[idx[i]] += c * ys[i];
+        xs[idx[i] - off] += c * ys[i];
     }
 }
 

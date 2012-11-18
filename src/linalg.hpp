@@ -28,12 +28,13 @@ float dotlog(const float* xs, const float* ys, const size_t n);
  * If xs is a dense vector and ys a sparse vector with n non-zero entries at
  * indexes idx[0], ..., idx[n - 1], compute:
  *
- *     xs[idx[i]] += c * ys[i]
+ *     xs[idx[i] - off] += c * ys[i]
  *
  *  For all 0 <= i < n.
  */
 void asxpy(float* xs, const float* ys, const float c,
-           const unsigned int* idx, const size_t n);
+           const unsigned int* idx, const unsigned int off,
+           const size_t n);
 
 
 #endif

@@ -36,15 +36,16 @@ void print_quantify_help(FILE* fout)
     print_quantify_usage(fout);
     fprintf(fout,
             "\nOptions:\n"
-            "-h, --help                print this help message\n"
-            "-o, --out=FILE            output results to the given file (default: fpkm.tab)\n"
-            "-g, --genomic-seq=FILE    correct for sequence bias, given the a the sequence\n"
+            "-h, --help                Print this help message\n"
+            "-o, --out=FILE            Output results to the given file (default: fpkm.tab)\n"
+            "-g, --genomic-seq=FILE    Correct for sequence bias, given the a the sequence\n"
             "                          against which the reads are aligned, in FAST format.\n"
             "-p, --threads=N           number of threads to use.\n"
-            "-T, --trans-ids=FILE      a file listing transcript id's of transcripts that\n"
+            "-T, --trans-ids=FILE      A file listing transcript id's of transcripts that\n"
             "                          will be quantified (by default, every transcript).\n"
-            "-G, --gene-ids=FILE       a file listing gene id's of transcripts that\n"
-            "                          will be quantified (by default, every transcript).\n\n"
+            "-G, --gene-ids=FILE       A file listing gene id's of transcripts that\n"
+            "                          will be quantified (by default, every transcript).\n"
+            "-N, --num-samples         Generate this number of samples (by default: 10000).\n\n"
             "See 'isolator help quantify' for more.\n");
 }
 
@@ -59,18 +60,20 @@ int quantify(int argc, char* argv[])
         {"trans-ids",   required_argument, NULL, 'T'},
         {"gene-ids",    required_argument, NULL, 'G'},
         {"genomic-seq", required_argument, NULL, 'g'},
+        {"num-samples", required_argument, NULL, 'N'},
         {0, 0, 0, 0}
     };
 
     const char* fa_fn  = NULL;
     const char* out_fn = "isolator.db";
     constants::num_threads = boost::thread::hardware_concurrency();
+    unsigned int num_samples = 10000;
 
     int opt;
     int opt_idx;
 
     while (true) {
-        opt = getopt_long(argc, argv, "ho:p:g:", long_options, &opt_idx);
+        opt = getopt_long(argc, argv, "ho:p:g:N:", long_options, &opt_idx);
 
         if (opt == -1) break;
 
@@ -89,6 +92,10 @@ int quantify(int argc, char* argv[])
 
             case 'g':
                 fa_fn = optarg;
+                break;
+
+            case 'N':
+                num_samples = strtoul(optarg, NULL, 10);
                 break;
 
             case '?':
@@ -140,12 +147,13 @@ int quantify(int argc, char* argv[])
     SampleDB db(out_fn, true);
 
     /* Initialize the fragment model. */
-    FragmentModel fm;
-    fm.estimate(ts, bam_fn, fa_fn);
+    FragmentModel* fm = new FragmentModel();
+    fm->estimate(ts, bam_fn, fa_fn);
 
     /* Initialize the sampler. */
-    Sampler sampler(bam_fn, fa_fn, ts, fm);
-    /* TODO: run the sampler */
+    Sampler sampler(bam_fn, fa_fn, ts, *fm);
+    delete fm; /* free a little memory */
+    sampler.run(num_samples);
 
     Logger::info("Finished. Have a nice day!");
     Logger::end();

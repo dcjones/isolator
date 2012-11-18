@@ -10,6 +10,8 @@
 
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
+#include <gsl/gsl_randist.h>
+#include <gsl/gsl_rng.h>
 
 #include "constants.hpp"
 #include "hat-trie/hat-trie.h"
@@ -216,6 +218,15 @@ class WeightMatrix
 
         unsigned int nrow, ncol;
 
+        /* Number of entries in each row. */
+        unsigned int* rowlens;
+
+        /* Row data. */
+        float** rows;
+
+        /* Columns indexed for each row. */
+        unsigned int** idxs;
+
     private:
         unsigned int median_of_three(const unsigned int* idx,
                                      unsigned int a,
@@ -296,17 +307,8 @@ class WeightMatrix
             }
         }
 
-        /* Number of entries in each row. */
-        unsigned int* rowlens;
-
         /* Entries reserved in each row. */
         unsigned int* reserved;
-
-        /* Row data. */
-        float** rows;
-
-        /* Columns indexed for each row. */
-        unsigned int** idxs;
 
         /* Have arrays been resized to fit with aligned blocks of memory. */
         bool compacted;
@@ -1156,16 +1158,39 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     Logger::info("Components: %lu", (unsigned long) num_components);
 
     /* Label transcript components */
+    component_num_transcripts = new unsigned int [num_components];
+    std::fill(component_num_transcripts,
+              component_num_transcripts + num_components,
+              0);
     transcript_component = new unsigned int [ts.size()];
     for (size_t i = 0; i < ts.size(); ++i) {
-        transcript_component[i] = ds[weight_matrix->ncol + i];
+        unsigned int c = ds[weight_matrix->ncol + i];
+        transcript_component[i] = c;
+        component_num_transcripts[c]++;
+    }
+
+    component_transcripts = new unsigned int* [num_components];
+    for (size_t i = 0; i < num_components; ++i) {
+        component_transcripts[i] = new unsigned int [component_num_transcripts[i]];
+    }
+
+    std::fill(component_num_transcripts,
+              component_num_transcripts + num_components,
+              0);
+
+    for (size_t i = 0; i < ts.size(); ++i) {
+        unsigned int c = ds[weight_matrix->ncol + i];
+        component_transcripts[c][component_num_transcripts[c]++] = i;
     }
 
     /* Now, reorder columns by component. */
+    unsigned int* idxord = new unsigned int [weight_matrix->ncol];
+    for (size_t i = 0; i < weight_matrix->ncol; ++i) idxord[i] = i;
+    std::sort(idxord, idxord + weight_matrix->ncol, ComponentCmp(ds));
     idxmap = new unsigned int [weight_matrix->ncol];
-    for (size_t i = 0; i < weight_matrix->ncol; ++i) idxmap[i] = i;
+    for (size_t i = 0; i < weight_matrix->ncol; ++i) idxmap[idxord[i]] = i;
+    delete [] idxord;
 
-    std::sort(idxmap, idxmap + weight_matrix->ncol, ComponentCmp(ds));
     std::sort(ds, ds + weight_matrix->ncol);
     weight_matrix->reorder_columns(idxmap);
 
@@ -1177,16 +1202,18 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     std::sort(nz_frag_counts.begin(), nz_frag_counts.end());
 
     /* Build fragment count array. */
-    component_frag = new unsigned int [num_components];
+    component_frag = new unsigned int [num_components + 1];
     frag_counts = new float* [num_components];
     std::fill(frag_counts, frag_counts + num_components, (float*) NULL);
+    frag_probs = new float* [num_components];
+    std::fill(frag_probs, frag_probs + num_components, (float*) NULL);
     TSVec<FragIdxCount>::iterator fc = nz_frag_counts.begin();
     for (size_t i = 0, j = 0; i < num_components; ++i) {
         component_frag[i] = j;
         assert(ds[j] <= i);
         if (ds[j] > i) continue;
         size_t k;
-        for (k = j + 1; k < weight_matrix->ncol && ds[j] == ds[k]; ++k) {}
+        for (k = j; k < weight_matrix->ncol && ds[j] == ds[k]; ++k) {}
         size_t component_size = k - j;
 
         if (component_size == 0) continue;
@@ -1195,11 +1222,17 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
             reinterpret_cast<float*>(aalloc(component_size * sizeof(float)));
         std::fill(frag_counts[i], frag_counts[i] + component_size, 1.0f);
 
+        frag_probs[i] =
+            reinterpret_cast<float*>(aalloc(component_size * sizeof(float)));
+
         while (fc != nz_frag_counts.end() && fc->first < k) {
             frag_counts[i][fc->first - j] = (float) fc->second;
             ++fc;
         }
+
+        j = k;
     }
+    component_frag[num_components] = weight_matrix->ncol;
 
     delete [] ds;
     delete [] idxmap;
@@ -1211,12 +1244,265 @@ Sampler::~Sampler()
     delete [] transcript_component;
     for (size_t i = 0; i < num_components; ++i) {
         afree(frag_counts[i]);
+        afree(frag_probs[i]);
+        delete [] component_transcripts[i];
     }
+    delete [] component_transcripts;
+    delete [] component_num_transcripts;
     delete [] frag_counts;
+    delete [] frag_probs;
     delete [] component_frag;
     delete weight_matrix;
     delete [] transcript_weights;
 }
 
+/* TODO:
+ * Ugh. How do I do this in parallel?
+ *
+ * I don't want a much of threads all working towards the same solution.
+ * If I figure out how to do this properly I could do the same with MCMC
+ * threads without running k seperate chains.
+ */
+
+
+/* A groups of components. The full set of components is randomly partioned to
+ * divide work among threads. */
+struct ComponentSubset
+{
+    /* A permutation of the component labels. */
+    const unsigned int* comp_perm;
+
+    /* An interval [i, j] within comp_perm giving the subset of components. */
+    unsigned int i, j;
+
+    /* Return true iff this is the special end of queue marker. */
+    bool is_end_of_queue()
+    {
+        return comp_perm == NULL;
+    }
+};
+
+
+/* Abstract base class for sampler threads. This is specialized in
+ * MaxPostThread, and MCMCThread, which estimate maximum posterior and draw
+ * samples respectively.
+ * */
+class SamplerThread
+{
+    public:
+        /* Constructor.
+         *
+         * Args:
+         *   num_componets: Number of connected components.
+         *   component_num_transcripts: Number of transcripts in each component.
+         *   component_transcripts: An array of transcript indexes for each
+         *                          component.
+         *   weight_matrix: sparse transcript/fragment weight matrix.
+         *   cmix: Component mixture coefficients.
+         *   tmix: Within-component transcript mixture coefficients.
+         */;
+        SamplerThread(Queue<ComponentSubset>& q,
+                      unsigned int num_components,
+                      const unsigned int* component_num_transcripts,
+                      unsigned int** component_transcripts,
+                      const WeightMatrix& weight_matrix,
+                      float* cmix,
+                      float* tmix)
+            : num_components(num_components)
+            , component_num_transcripts(component_num_transcripts)
+            , component_transcripts(component_transcripts)
+            , weight_matrix(weight_matrix)
+            , cmix(cmix)
+            , tmix(tmix)
+            , q(q)
+            , thread(NULL)
+        {
+            rng = gsl_rng_alloc(gsl_rng_mt19937);
+            unsigned long seed = reinterpret_cast<unsigned long>(this) *
+                                 (unsigned long) time(NULL);
+            gsl_rng_set(rng, seed);
+        }
+
+        ~SamplerThread()
+        {
+            gsl_rng_free(rng);
+        }
+
+        void run()
+        {
+            ComponentSubset cs;
+            while (true) {
+                cs = q.pop();
+                if (cs.is_end_of_queue()) break;
+
+                for (unsigned int k = cs.i; k <= cs.j; ++k) {
+                    run_intra_component(k);
+                }
+
+                for (unsigned int k = cs.i; k <= cs.j - 1; ++k) {
+                    run_components(k, k + 1);
+                }
+            }
+        }
+
+        void start()
+        {
+            if (thread != NULL) return;
+            thread = new boost::thread(boost::bind(&SamplerThread::run, this));
+        }
+
+        void join()
+        {
+            thread->join();
+            delete thread;
+            thread = NULL;
+        }
+
+        /* Process a single component. */
+        void run_intra_component(unsigned int u)
+        {
+            if (component_num_transcripts[u] == 0) return;
+
+            gsl_ran_shuffle(rng, component_transcripts[u], 
+                            component_num_transcripts[u],
+                            sizeof(unsigned int));
+            for (unsigned int i = 0; i < component_num_transcripts[u] - 1; ++i) {
+                run_transcripts(component_transcripts[u][i],
+                                component_transcripts[u][i + 1]);
+            }
+        }
+
+        /* Process a pair of transcripts. */
+        virtual void run_transcripts(unsigned int u, unsigned int v) = 0;
+
+        /* Process a pair of a components. */
+        virtual void run_components(unsigned int u, unsigned int v) = 0;;
+
+    private:
+        unsigned int num_components;
+        const unsigned int* component_num_transcripts;
+        unsigned int** component_transcripts;
+        const WeightMatrix& weight_matrix;
+
+        /* Mixture coefficients of each component. */
+        float* cmix;
+
+        /* Within-component mixture coefficients for each transcripts. */
+        float* tmix;
+
+        gsl_rng* rng;
+        Queue<ComponentSubset>& q;
+        boost::thread* thread;
+};
+
+
+/* A thread that works on finding the maximum a posteriori isoform mixture. */
+class MaxPostThread : public SamplerThread
+{
+    public:
+        MaxPostThread(Queue<ComponentSubset>& q,
+                      unsigned int num_components,
+                      const unsigned int* component_num_transcripts,
+                      unsigned int** component_transcripts,
+                      const WeightMatrix& weight_matrix,
+                      float* cmix,
+                      float* tmix)
+            : SamplerThread(q,
+                            num_components,
+                            component_num_transcripts,
+                            component_transcripts,
+                            weight_matrix,
+                            cmix,
+                            tmix)
+        {
+        }
+
+        void run_transcripts(unsigned int u, unsigned int v)
+        {
+            /* TODO: Hill climb on (tmix[u], tmix[v]). */
+        }
+
+        void run_components(unsigned int u, unsigned int v)
+        {
+            /* TODO: Hill climb on (cmix[u], cmix[v]) */
+        }
+
+    private:
+};
+
+
+void Sampler::run(unsigned int num_samples)
+{
+    /* Within-component transcript mixture coefficients */
+    float* tmix = new float [weight_matrix->nrow];
+    std::fill(tmix, tmix + weight_matrix->nrow,
+              1.0f / (float) weight_matrix->nrow);
+
+    /* Component mixture coefficients. */
+    float* cmix = new float [num_components];
+    for (unsigned int i = 0; i < num_components; ++i) {
+        cmix[i] = 0.0f;
+        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
+            cmix[i] += tmix[component_transcripts[i][j]];
+        }
+    }
+
+    init_frag_probs(tmix);
+
+
+    /* 
+     * 2. Eval posterier.
+     * 3. Copy this information to num_threads threads.
+     * 4. Launch threads.
+     * 5. 
+     */
+
+#if 0
+    std::vector<SamplerThread*> threads;
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        threads.push_back(new SamplerThread());
+        threads.back()->start();
+    }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        threads[i]->join();
+    }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        delete threads[i];
+    }
+#endif
+
+    delete [] tmix;
+    delete [] cmix;
+}
+
+
+void Sampler::init_frag_probs(const float* tmix)
+{
+    for (unsigned int i = 0; i < num_components; ++i) {
+        unsigned component_size = component_frag[i + 1] - component_frag[i];
+        std::fill(frag_probs[i], frag_probs[i] + component_size, 0.0f);
+    }
+
+    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+        unsigned int c = transcript_component[i];
+        asxpy(frag_probs[c],
+              weight_matrix->rows[i],
+              tmix[i], 
+              weight_matrix->idxs[i],
+              component_frag[c],
+              weight_matrix->rowlens[i]);
+    }
+
+    /* TODO: to compute the overall posterior */
+#if 0
+    float logp = 0.0;
+    for (unsigned int i = 0; i < num_components; ++i) {
+        unsigned component_size = component_frag[i + 1] - component_frag[i];
+        logp += dotlog(frag_counts[i], frag_probs[i], component_size);
+    }
+#endif
+}
 
 
