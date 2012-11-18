@@ -13,6 +13,12 @@
 void* aalloc(size_t n);
 void afree(void*);
 
+/* Fast copying of aligned arrays.
+ * Probably most memcpy implementations will do this sort of optimization
+ * automatically, but being able to assume alignment might buy us a little.
+ * */
+void acopy(void* dest, const void* src, size_t n);
+
 
 /* Dot product of xs and log(ys).
  *

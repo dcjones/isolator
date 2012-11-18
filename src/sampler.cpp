@@ -1236,11 +1236,16 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
 
     delete [] ds;
     delete [] idxmap;
+
+    tmix = new float [weight_matrix->nrow];
+    cmix = new float [num_components];
 }
 
 
 Sampler::~Sampler()
 {
+    delete [] tmix;
+    delete [] cmix;
     delete [] transcript_component;
     for (size_t i = 0; i < num_components; ++i) {
         afree(frag_counts[i]);
@@ -1255,14 +1260,6 @@ Sampler::~Sampler()
     delete weight_matrix;
     delete [] transcript_weights;
 }
-
-/* TODO:
- * Ugh. How do I do this in parallel?
- *
- * I don't want a much of threads all working towards the same solution.
- * If I figure out how to do this properly I could do the same with MCMC
- * threads without running k seperate chains.
- */
 
 
 /* A groups of components. The full set of components is randomly partioned to
@@ -1301,19 +1298,9 @@ class SamplerThread
          *   cmix: Component mixture coefficients.
          *   tmix: Within-component transcript mixture coefficients.
          */;
-        SamplerThread(Queue<ComponentSubset>& q,
-                      unsigned int num_components,
-                      const unsigned int* component_num_transcripts,
-                      unsigned int** component_transcripts,
-                      const WeightMatrix& weight_matrix,
-                      float* cmix,
-                      float* tmix)
-            : num_components(num_components)
-            , component_num_transcripts(component_num_transcripts)
-            , component_transcripts(component_transcripts)
-            , weight_matrix(weight_matrix)
-            , cmix(cmix)
-            , tmix(tmix)
+        SamplerThread(Sampler& S,
+                      Queue<ComponentSubset>& q)
+            : S(S)
             , q(q)
             , thread(NULL)
         {
@@ -1361,14 +1348,14 @@ class SamplerThread
         /* Process a single component. */
         void run_intra_component(unsigned int u)
         {
-            if (component_num_transcripts[u] == 0) return;
+            if (S.component_num_transcripts[u] == 0) return;
 
-            gsl_ran_shuffle(rng, component_transcripts[u], 
-                            component_num_transcripts[u],
+            gsl_ran_shuffle(rng, S.component_transcripts[u], 
+                            S.component_num_transcripts[u],
                             sizeof(unsigned int));
-            for (unsigned int i = 0; i < component_num_transcripts[u] - 1; ++i) {
-                run_transcripts(component_transcripts[u][i],
-                                component_transcripts[u][i + 1]);
+            for (unsigned int i = 0; i < S.component_num_transcripts[u] - 1; ++i) {
+                run_transcripts(S.component_transcripts[u][i],
+                                S.component_transcripts[u][i + 1]);
             }
         }
 
@@ -1378,18 +1365,46 @@ class SamplerThread
         /* Process a pair of a components. */
         virtual void run_components(unsigned int u, unsigned int v) = 0;;
 
+    protected:
+        /* To set new mixtures for u and v, tmix'[u] and tmix'[v], we introduce
+         * a new variable t, where tmix'[u] = t * (tmix[u] + tmix[v]) and
+         * tmix'[v] = (1 - t) * (tmix[u] + tmix[v]).
+         *
+         * This function computes the derivative of t at the current mix point.
+         */
+        float transcript_shift_derivative(unsigned int u, unsigned int v)
+        {
+            unsigned int c = S.transcript_component[u];
+            assert(c == S.transcript_component[v]);
+
+            unsigned int component_size =
+                S.component_frag[c + 1] - S.component_frag[c];
+            float dt = 0.0;
+            for (unsigned int j = 0; j < S.weight_matrix->rowlens[u]; ++j) {
+                float denom = 
+                    S.frag_probs[c][
+                        S.weight_matrix->idxs[u][j] - S.component_frag[c]];
+                denom *= M_LN2;
+
+                dt += S.weight_matrix->rows[u][j] / denom;
+            }
+
+            for (unsigned int j = 0; j < S.weight_matrix->rowlens[v]; ++j) {
+                float denom = 
+                    S.frag_probs[c][
+                        S.weight_matrix->idxs[v][j] - S.component_frag[c]];
+                denom *= M_LN2;
+
+                dt -= S.weight_matrix->rows[v][j] / denom;
+            }
+
+            dt *= S.tmix[u] + S.tmix[v];
+
+            return finite(dt) ? dt : 0.0;
+        }
+
     private:
-        unsigned int num_components;
-        const unsigned int* component_num_transcripts;
-        unsigned int** component_transcripts;
-        const WeightMatrix& weight_matrix;
-
-        /* Mixture coefficients of each component. */
-        float* cmix;
-
-        /* Within-component mixture coefficients for each transcripts. */
-        float* tmix;
-
+        Sampler& S;
         gsl_rng* rng;
         Queue<ComponentSubset>& q;
         boost::thread* thread;
@@ -1400,25 +1415,28 @@ class SamplerThread
 class MaxPostThread : public SamplerThread
 {
     public:
-        MaxPostThread(Queue<ComponentSubset>& q,
-                      unsigned int num_components,
-                      const unsigned int* component_num_transcripts,
-                      unsigned int** component_transcripts,
-                      const WeightMatrix& weight_matrix,
-                      float* cmix,
-                      float* tmix)
-            : SamplerThread(q,
-                            num_components,
-                            component_num_transcripts,
-                            component_transcripts,
-                            weight_matrix,
-                            cmix,
-                            tmix)
+        MaxPostThread(Sampler& S,
+                      Queue<ComponentSubset>& q)
+            : SamplerThread(S, q)
         {
         }
 
         void run_transcripts(unsigned int u, unsigned int v)
         {
+            /* TODO:
+             * 1. We need scratch space of the same size and shape as
+             *    frag_probs.
+             * 2. Before doing this sort of search, copy the component in
+             *    question to the scratch space and compute updates on that.
+             *
+             * 3. Each thread should allocate its own 2d nlopt solver that it
+             *    should run for each of these sub-problems.
+             */
+
+            /* We want to do this as fast as possible.
+             * Let's not fuck around with a shitty custom gradient ascent thing.
+             * Just use nlopt or gsl.. */
+
             /* TODO: Hill climb on (tmix[u], tmix[v]). */
         }
 
@@ -1434,12 +1452,10 @@ class MaxPostThread : public SamplerThread
 void Sampler::run(unsigned int num_samples)
 {
     /* Within-component transcript mixture coefficients */
-    float* tmix = new float [weight_matrix->nrow];
     std::fill(tmix, tmix + weight_matrix->nrow,
               1.0f / (float) weight_matrix->nrow);
 
     /* Component mixture coefficients. */
-    float* cmix = new float [num_components];
     for (unsigned int i = 0; i < num_components; ++i) {
         cmix[i] = 0.0f;
         for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {

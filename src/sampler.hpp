@@ -26,6 +26,12 @@ class Sampler
         TranscriptSet& ts;
         FragmentModel& fm;
 
+        /* Transcript mixture coefficients. */
+        float* tmix;
+
+        /* Component mixture coefficients. */
+        float* cmix;
+
         WeightMatrix* weight_matrix;
         float* transcript_weights;
 
@@ -51,6 +57,8 @@ class Sampler
         /* component_frag[i] given the index of the first fragment in component
          * i */
         unsigned int* component_frag;
+
+        friend class SamplerThread;
 };
 
 

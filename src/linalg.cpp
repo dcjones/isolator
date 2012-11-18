@@ -61,6 +61,34 @@ void afree(void* xs)
 }
 
 
+void acopy(void* dest_, const void* src_, size_t n)
+{
+    assert(n % 4 == 0);
+    n /= 4; /* bytes to 4-byte words */
+
+    float* dest = reinterpret_cast<float*>(dest_);
+    const float* src = reinterpret_cast<const float*>(src_);
+
+    __m256 x;
+    size_t i;
+    for (i = 0; i < n / 8; ++i) {
+        x = _mm256_load_ps(src + 8 * i);
+        _mm256_store_ps(dest + 8 * i, x);
+    }
+
+    i *= 8;
+    switch (n % 8) {
+        case 7: dest[i] = src[i]; ++i;
+        case 6: dest[i] = src[i]; ++i;
+        case 5: dest[i] = src[i]; ++i;
+        case 4: dest[i] = src[i]; ++i;
+        case 3: dest[i] = src[i]; ++i;
+        case 2: dest[i] = src[i]; ++i;
+        case 1: dest[i] = src[i];
+    }
+}
+
+
 typedef union {
     __m256i a;
     __m128i b[2];
@@ -156,7 +184,7 @@ float dotlog(const float* xs, const float* ys, const size_t n)
         case 4: fans += xs[i] * fastlog2(ys[i]); ++i;
         case 3: fans += xs[i] * fastlog2(ys[i]); ++i;
         case 2: fans += xs[i] * fastlog2(ys[i]); ++i;
-        case 1: fans += xs[i] * fastlog2(ys[i]); ++i;
+        case 1: fans += xs[i] * fastlog2(ys[i]);
     }
 
     return fans;
@@ -221,7 +249,7 @@ void asxpy(float* xs, const float* ys, const float c,
         case 4: xs[idx[i] - off] += c * ys[i]; ++i;
         case 3: xs[idx[i] - off] += c * ys[i]; ++i;
         case 2: xs[idx[i] - off] += c * ys[i]; ++i;
-        case 1: xs[idx[i] - off] += c * ys[i]; ++i;
+        case 1: xs[idx[i] - off] += c * ys[i];
     }
 }
 
@@ -245,6 +273,30 @@ void* aalloc(size_t n)
 void afree(void* xs)
 {
     _mm_free(xs);
+}
+
+
+void acopy(void* dest_, const void* src_, size_t n)
+{
+    assert(n % 4 == 0);
+    n /= 4; /* bytes to 4-byte words */
+
+    float* dest = reinterpret_cast<float*>(dest_);
+    const float* src = reinterpret_cast<const float*>(src_);
+
+    __m128 x;
+    size_t i;
+    for (i = 0; i < n / 4; ++i) {
+        x = _mm_load_ps(src + 4 * i);
+        _mm_store_ps(dest + 4 * i, x);
+    }
+
+    i *= 4;
+    switch (n % 4) {
+        case 3: dest[i] = src[i]; ++i;
+        case 2: dest[i] = src[i]; ++i;
+        case 1: dest[i] = src[i];
+    }
 }
 
 
@@ -325,7 +377,7 @@ float dotlog(const float* xs, const float* ys, const size_t n)
     switch (n % 4) {
         case 3: fans += xs[i] * fastlog2(ys[i]); ++i;
         case 2: fans += xs[i] * fastlog2(ys[i]); ++i;
-        case 1: fans += xs[i] * fastlog2(ys[i]); ++i;
+        case 1: fans += xs[i] * fastlog2(ys[i]);
     }
 
     return fans;
@@ -376,7 +428,7 @@ void asxpy(float* xs, const float* ys, const float c,
     switch (n % 4) {
         case 3: xs[idx[i] - off] += c * ys[i]; ++i;
         case 2: xs[idx[i] - off] += c * ys[i]; ++i;
-        case 1: xs[idx[i] - off] += c * ys[i]; ++i;
+        case 1: xs[idx[i] - off] += c * ys[i];
     }
 }
 
@@ -399,6 +451,12 @@ void* aalloc(size_t n)
 void afree(void* xs)
 {
     free(xs);
+}
+
+
+void acopy(void* dest, const void* src, size_t n)
+{
+    memcpy(dest, src, n);
 }
 
 
