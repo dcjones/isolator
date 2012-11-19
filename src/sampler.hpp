@@ -58,7 +58,7 @@ class Sampler
          * i */
         unsigned int* component_frag;
 
-        friend class SamplerThread;
+        friend class MaxPostThread;
         friend double posterior_objf(unsigned int n, const double* xs,
                                      double* grad, void* params);
 };
