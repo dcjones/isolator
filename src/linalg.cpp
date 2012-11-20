@@ -89,19 +89,6 @@ void acopy(void* dest_, const void* src_, size_t n)
 }
 
 
-// TODO: write/test this function.
-/*
-void pdpscpy(float* dest, const double* src, size_t n)
-{
-    size_t i;
-    for (i = 0; i < n / 4; ++i) {
-        __m256d x = _mm256_load_pd(src + 4 * i);
-    }
-
-}
-*/
-
-
 typedef union {
     __m256i a;
     __m128i b[2];
@@ -198,6 +185,43 @@ float dotlog(const float* xs, const float* ys, const size_t n)
         case 3: fans += xs[i] * fastlog2(ys[i]); ++i;
         case 2: fans += xs[i] * fastlog2(ys[i]); ++i;
         case 1: fans += xs[i] * fastlog2(ys[i]);
+    }
+
+    return fans;
+}
+
+
+float dotlogc(const float* xs, const float* ys, const size_t n, const float c)
+{
+    union {
+        __m256 v;
+        float f[8];
+    } ans;
+    ans.v = _mm256_setzero_ps();
+
+    __m256 cv = _mm256_set1_ps(c);
+
+    __m256 xv, yv;
+    size_t i;
+    for (i = 0; i < n / 8; ++i) {
+        xv = _mm256_load_ps(xs + 8 * i);
+        yv = _mm256_mul_ps(cv, _mm256_load_ps(ys + 8 * i));
+        ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(xv, avx_log2(yv)));
+    }
+
+    float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3] +
+                 ans.f[4] + ans.f[5] + ans.f[6] + ans.f[7];
+
+    /* handle any overhang */
+    i *= 8;
+    switch (n % 8) {
+        case 7: fans += xs[i] * fastlog2(c * ys[i]); ++i;
+        case 6: fans += xs[i] * fastlog2(c * ys[i]); ++i;
+        case 5: fans += xs[i] * fastlog2(c * ys[i]); ++i;
+        case 4: fans += xs[i] * fastlog2(c * ys[i]); ++i;
+        case 3: fans += xs[i] * fastlog2(c * ys[i]); ++i;
+        case 2: fans += xs[i] * fastlog2(c * ys[i]); ++i;
+        case 1: fans += xs[i] * fastlog2(c * ys[i]);
     }
 
     return fans;
@@ -397,6 +421,39 @@ float dotlog(const float* xs, const float* ys, const size_t n)
 }
 
 
+float dotlog(const float* xs, const float* ys, const size_t n, const float c)
+{
+    __m128 xv, yv;
+    union ans_t
+    {
+        __m128  v;
+        float   f[4];
+    } ans;
+    ans.v = _mm_setzero_ps();
+
+    __m128 cv = _mm_set1_ps(c);
+
+    size_t i;
+    for (i = 0; i < n / 4; ++i) {
+        xv = _mm_load_ps(xs + 4 * i);
+        yv = _mm_mul_ps(cv, _mm_load_ps(ys + 4 * i));
+        ans.v = _mm_add_ps(ans.v, _mm_mul_ps(xv, sse_log2(yv)));
+    }
+
+    float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3];
+
+    /* handle any overhang */
+    i *= 4;
+    switch (n % 4) {
+        case 3: fans += xs[i] * fastlog2(c * ys[i]); ++i;
+        case 2: fans += xs[i] * fastlog2(c * ys[i]); ++i;
+        case 1: fans += xs[i] * fastlog2(c * ys[i]);
+    }
+
+    return fans;
+}
+
+
 void asxpy(float* xs, const float* ys, const float c,
             const unsigned int* idx, const unsigned int off,
             const size_t n)
@@ -481,6 +538,18 @@ float dotlog(const float* xs, const float* ys, const size_t n)
         ans += xs[i] * fastlog2(ys[i]);
     }
     return ans;
+}
+
+
+float dotlogc(const float* xs, const float* ys, const size_t n, const float c)
+{
+    float ans = 0.0;
+    size_t i;
+    for (i = 0; i < n; ++i) {
+        ans += xs[i] * fastlog2(c * ys[i]);
+    }
+    return ans;
+
 }
 
 

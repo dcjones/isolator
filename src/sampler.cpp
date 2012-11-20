@@ -1226,11 +1226,20 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     }
     component_frag[num_components] = weight_matrix->ncol;
 
+    frag_count_sums = new float [num_components];
+    std::fill(frag_count_sums, frag_count_sums + num_components, 0.0f);
+    for (size_t i = 0; i < num_components; ++i) {
+        unsigned int component_size = component_frag[i + 1] - component_frag[i];
+        for (unsigned int j = 0; j < component_size; ++j) {
+            frag_count_sums[i] += frag_counts[i][j];
+        }
+    }
+
     delete [] ds;
     delete [] idxmap;
 
-    tmix = new float [weight_matrix->nrow];
-    cmix = new float [num_components];
+    tmix = new double [weight_matrix->nrow];
+    cmix = new double [num_components];
 }
 
 
@@ -1247,6 +1256,7 @@ Sampler::~Sampler()
     delete [] component_transcripts;
     delete [] component_num_transcripts;
     delete [] frag_counts;
+    delete [] frag_count_sums;
     delete [] frag_probs;
     delete [] component_frag;
     delete weight_matrix;
@@ -1438,17 +1448,7 @@ static double simplex_constraint(unsigned int n, const double* xs,
     }
     if (grad != NULL) std::fill(grad, grad + n, 1.0);
 
-#if 0
-    double z = xs[0] + xs[1];
-    if (grad != NULL) {
-        std::fill(grad, grad + n, 0.0);
-        grad[0] = 1;
-        grad[1] = 1;
-    }
-#endif
-
     return z - 1.0;
-
 }
 
 
@@ -1459,8 +1459,8 @@ struct ObjFuncParam
 };
 
 
-double posterior_objf(unsigned int n, const double* xs,
-                      double* grad, void* param)
+double transcript_posterior_objf(unsigned int n, const double* xs,
+                                 double* grad, void* param)
 {
     ObjFuncParam* objfuncparam =
         reinterpret_cast<ObjFuncParam*>(param);
@@ -1499,17 +1499,31 @@ double posterior_objf(unsigned int n, const double* xs,
                                 S.frag_probs[c][k - off];
             }
             grad[i] /= M_LN2;
-            grad[i] += 1.0; // XXX: gradient of dummy term
             assert(grad[i] > 0.0);
             assert(finite(grad[i]));
         }
     }
 
-    /* An extra term attempting to force a unique optimum.
-     * We would remove this once there is some sort of prior over transcript
-     * expression that would serve a similar purpose. */
-    for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
-        p += xs[i];
+    return p;
+}
+
+
+double component_posterior_objf(unsigned int num_components, const double* cmix,
+                                double* grad, void* param)
+{
+    Sampler& S = *reinterpret_cast<Sampler*>(param);
+
+    double p = 0.0;
+    for (unsigned int c = 0; c < num_components; ++c) {
+        unsigned component_size = S.component_frag[c + 1] - S.component_frag[c];
+        p += dotlogc(S.frag_counts[c], S.frag_probs[c], component_size, cmix[c]);
+    }
+
+    if (grad != NULL) {
+        std::fill(grad, grad + num_components, 0.0);
+        for (unsigned int c = 0; c < num_components; ++c) {
+            grad[c] = S.frag_count_sums[c] / (M_LN2 * cmix[c]);
+        }
     }
 
     return p;
@@ -1539,33 +1553,15 @@ void MaxPostThread::run()
 
         param.c = c;
 
-#if 0
-        nlopt_opt opt = nlopt_create(NLOPT_AUGLAG_EQ,
-                S.component_num_transcripts[c]);
-        nlopt_set_lower_bounds1(opt, 1e-8);
-        nlopt_set_upper_bounds1(opt, 1.0);
-        nlopt_add_inequality_constraint(opt, simplex_constraint, NULL, 1e-2);
-        nlopt_set_xtol_abs1(opt, 1e-4);
-        nlopt_set_ftol_abs(opt, 1e-1);
-        nlopt_set_max_objective(opt, posterior_objf,
-                reinterpret_cast<void*>(&param));
-
-        nlopt_opt local_opt = nlopt_create(NLOPT_LD_LBFGS,
-                S.component_num_transcripts[c]);
-        nlopt_set_xtol_abs1(local_opt, 1e-4);
-        nlopt_set_ftol_abs(local_opt, 1e-1);
-        nlopt_set_local_optimizer(opt, local_opt);
-#endif
-
-
+        /* TODO: move constants to constants.cpp */
         nlopt_opt opt = nlopt_create(NLOPT_LD_MMA,
                 S.component_num_transcripts[c]);
         nlopt_add_inequality_constraint(opt, simplex_constraint, NULL, 1e-2);
-        nlopt_set_xtol_abs1(opt, 1e-4);
-        nlopt_set_ftol_abs(opt, 1e-1);
+        nlopt_set_xtol_abs1(opt, 1e-6);
+        nlopt_set_ftol_abs(opt, 1e-2);
         nlopt_set_lower_bounds1(opt, 1e-8);
         nlopt_set_upper_bounds1(opt, 1.0);
-        nlopt_set_max_objective(opt, posterior_objf,
+        nlopt_set_max_objective(opt, transcript_posterior_objf,
                 reinterpret_cast<void*>(&param));
 
         double* xs = new double [S.component_num_transcripts[c]];
@@ -1584,65 +1580,15 @@ void MaxPostThread::run()
         delete [] xs;
 
         nlopt_destroy(opt);
-        //nlopt_destroy(local_opt);
         Logger::get_task(task_name).inc();
     }
 }
-
-
-/* NLopt maximum posterior objective function. */
-#if 0
-double posterior_objf(unsigned int n, const double* tmix,
-                      double* grad, void* params)
-{
-    Sampler& S = *reinterpret_cast<Sampler*>(params);
-
-    for (unsigned int i = 0; i < S.num_components; ++i) {
-        unsigned component_size = S.component_frag[i + 1] - S.component_frag[i];
-        std::fill(S.frag_probs[i], S.frag_probs[i] + component_size, 0.0f);
-    }
-
-    for (unsigned int i = 0; i < S.weight_matrix->nrow; ++i) {
-        unsigned int c = S.transcript_component[i];
-        asxpy(S.frag_probs[c],
-              S.weight_matrix->rows[i],
-              tmix[i], 
-              S.weight_matrix->idxs[i],
-              S.component_frag[c],
-              S.weight_matrix->rowlens[i]);
-    }
-
-    double p = 0.0;
-    for (unsigned int i = 0; i < S.num_components; ++i) {
-        unsigned int component_size = S.component_frag[i + 1] - S.component_frag[i];
-        p += dotlog(S.frag_counts[i], S.frag_probs[i], component_size);
-    }
-
-    if (grad != NULL) {
-        std::fill(grad, grad + n, 0.0);
-        for (unsigned int i = 0; i < S.weight_matrix->nrow; ++i) {
-            unsigned int c = S.transcript_component[i];
-            unsigned int off = S.component_frag[c];
-            for (unsigned int j = 0; j < S.weight_matrix->rowlens[i]; ++j) {
-                unsigned int k = S.weight_matrix->idxs[i][j];
-                grad[i] += S.frag_counts[c][k - off] * S.weight_matrix->rows[i][j] /
-                                S.frag_probs[c][k - off];
-            }
-            grad[i] /= M_LN2;
-        }
-    }
-
-    fprintf(stderr, "%f\n", p);
-
-    return p;
-}
-#endif
-
 
 void Sampler::run(unsigned int num_samples)
 {
     UNUSED(num_samples); // TODO: delete me
 
+    /* Optimize transcript mixtures within components in parallel. */
     Logger::push_task(MaxPostThread::task_name, num_components);
     Queue<unsigned int> component_queue;
     std::vector<MaxPostThread*> max_post_threads;
@@ -1657,78 +1603,44 @@ void Sampler::run(unsigned int num_samples)
     for (size_t i = 0; i < constants::num_threads; ++i) delete max_post_threads[i];
     Logger::pop_task(MaxPostThread::task_name);
 
-    /* TODO: optimize component mixtures */
+    /* Optimize component mixtures. */
+    std::fill(cmix, cmix + num_components,
+              1.0 / (double) num_components);
+    init_frag_probs();
 
-
-#if 0
-    /* Within-component transcript mixture coefficients */
-    std::fill(tmix, tmix + weight_matrix->nrow,
-              1.0f / (float) weight_matrix->nrow);
-
-    /* Component mixture coefficients. */
-    for (unsigned int i = 0; i < num_components; ++i) {
-        cmix[i] = 0.0f;
-        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
-            cmix[i] += tmix[component_transcripts[i][j]];
-        }
-    }
-
-    init_frag_probs(tmix);
-#endif
-
-#if 0
-    /* Find the maximum pasterior */
-    nlopt_opt opt = nlopt_create(NLOPT_AUGLAG, weight_matrix->nrow);
-    //nlopt_opt local_opt = nlopt_create(NLOPT_LD_LBFGS, weight_matrix->nrow);
-    nlopt_opt local_opt = nlopt_create(NLOPT_LD_VAR1, weight_matrix->nrow);
-    //nlopt_opt local_opt = nlopt_create(NLOPT_LD_VAR2, weight_matrix->nrow);
-    //nlopt_opt local_opt = nlopt_create(NLOPT_LD_TNEWTON, weight_matrix->nrow);
-    nlopt_set_local_optimizer(opt, local_opt);
-    nlopt_set_lower_bounds1(opt, 0.0);
+    nlopt_opt opt = nlopt_create(NLOPT_LD_MMA, num_components);
+    nlopt_add_inequality_constraint(opt, simplex_constraint, NULL, 1e-2);
+    nlopt_set_xtol_abs1(opt, 1e-6);
+    nlopt_set_ftol_abs(opt, 1e-2);
+    nlopt_set_lower_bounds1(opt, 1e-8);
     nlopt_set_upper_bounds1(opt, 1.0);
-    nlopt_add_equality_constraint(opt, simplex_constraint, NULL, 1e-6);
-    nlopt_set_max_objective(opt, posterior_objf, reinterpret_cast<void*>(this));
-    nlopt_set_xtol_abs1(opt, 1e-8);
-
-    double* dtmix = new double [weight_matrix->nrow];
-    std::fill(dtmix, dtmix + weight_matrix->nrow,
-              1.0 / (double) weight_matrix->nrow);
-
+    nlopt_set_max_objective(opt, component_posterior_objf,
+                            reinterpret_cast<void*>(this));
     double optf;
-    nlopt_result res = nlopt_optimize(opt, dtmix, &optf);
+    nlopt_result res = nlopt_optimize(opt, cmix, &optf);
+
+    if (res <= 0) {
+        Logger::warn("Posterior probability optimization of components failed with code %d.",
+                     (int) res);
+    }
 
     nlopt_destroy(opt);
-    nlopt_destroy(local_opt);
 
-    delete [] dtmix;
-#endif
-
-    /* 
-     * 2. Eval posterier.
-     * 3. Copy this information to num_threads threads.
-     * 4. Launch threads.
-     * 5. 
-     */
-
-#if 0
-    std::vector<SamplerThread*> threads;
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        threads.push_back(new SamplerThread());
-        threads.back()->start();
+    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+        tmix[i] *= cmix[transcript_component[i]];
     }
 
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        threads[i]->join();
+    /* Temporary result reporting. */
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        fprintf(stderr, "%s\t%s\t%e\n",
+                t->gene_id.get().c_str(),
+                t->transcript_id.get().c_str(),
+                tmix[t->id]);
     }
-
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        delete threads[i];
-    }
-#endif
 }
 
 
-void Sampler::init_frag_probs(const float* tmix)
+void Sampler::init_frag_probs()
 {
     for (unsigned int i = 0; i < num_components; ++i) {
         unsigned component_size = component_frag[i + 1] - component_frag[i];
@@ -1739,20 +1651,11 @@ void Sampler::init_frag_probs(const float* tmix)
         unsigned int c = transcript_component[i];
         asxpy(frag_probs[c],
               weight_matrix->rows[i],
-              tmix[i], 
+              tmix[i],
               weight_matrix->idxs[i],
               component_frag[c],
               weight_matrix->rowlens[i]);
     }
-
-    /* TODO: to compute the overall posterior */
-#if 0
-    float logp = 0.0;
-    for (unsigned int i = 0; i < num_components; ++i) {
-        unsigned component_size = component_frag[i + 1] - component_frag[i];
-        logp += dotlog(frag_counts[i], frag_probs[i], component_size);
-    }
-#endif
 }
 
 

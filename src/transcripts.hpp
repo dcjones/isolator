@@ -140,11 +140,16 @@ class TranscriptSet
          * beginnings or ends of chromosomes. */
         void get_intergenic(std::vector<Interval>&);
 
+        /* Acess to std::set::iterator */
+        typedef std::set<Transcript>::const_iterator iterator;
+        iterator begin();
+        iterator end();
 
     private:
         /* Transcripts ordered by position. */
         std::set<Transcript> transcripts;
 
+        friend class TranscriptSetIterator;
         friend class TranscriptSetLocusIterator;
 };
 

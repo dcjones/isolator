@@ -19,12 +19,6 @@ void afree(void*);
  * */
 void acopy(void* dest, const void* src, size_t n);
 
-/* Copy an array of n aligned doubles to an array of n aligned floats. */
-void pdpscpy(float* dest, const double* src, size_t n);
-
-/* Copy an array of n aligned floats to an array of n aligned doubles. */
-void pspscpy(float* dest, const double* src, size_t n);
-
 
 /* Dot product of xs and log(ys).
  *
@@ -33,6 +27,13 @@ void pspscpy(float* dest, const double* src, size_t n);
  *
  * */
 float dotlog(const float* xs, const float* ys, const size_t n);
+
+
+/* Dot product of xs and log(c * ys).
+ * That is,
+ *  xs[0] * log(c * ys[0]) + ... + xs[n - 1] * log(c * ys[n - 1])
+ */
+float dotlogc(const float* xs, const float* ys, const size_t n, const float c);
 
 
 /* Weighted sparse vector addition.

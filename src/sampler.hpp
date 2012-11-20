@@ -21,16 +21,18 @@ class Sampler
         void run(unsigned int num_samples);
 
     private:
-        void init_frag_probs(const float* tmix);
+        /* Compute all the entries in frag_probs, given the current value of
+         * tmix. */
+        void init_frag_probs();
 
         TranscriptSet& ts;
         FragmentModel& fm;
 
         /* Transcript mixture coefficients. */
-        float* tmix;
+        double* tmix;
 
         /* Component mixture coefficients. */
-        float* cmix;
+        double* cmix;
 
         WeightMatrix* weight_matrix;
         float* transcript_weights;
@@ -50,6 +52,10 @@ class Sampler
          * in component i. */
         float** frag_counts;
 
+        /* Row sums of frag_counts, used to compute gradients when optimizing
+         * over component mixtures. */
+        float* frag_count_sums;
+
         /* frag_probs[i][j] holds the probability of the jth fragment in
          * component i, given the component and transcript mixtures. */
         float** frag_probs;
@@ -59,8 +65,10 @@ class Sampler
         unsigned int* component_frag;
 
         friend class MaxPostThread;
-        friend double posterior_objf(unsigned int n, const double* xs,
-                                     double* grad, void* params);
+        friend double transcript_posterior_objf(unsigned int n, const double* xs,
+                                                double* grad, void* params);
+        friend double component_posterior_objf(unsigned int n, const double* xs,
+                                               double* grad, void* params);
 };
 
 

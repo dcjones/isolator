@@ -453,6 +453,18 @@ void TranscriptSet::get_intergenic(std::vector<Interval>& intervals)
 }
 
 
+TranscriptSet::iterator TranscriptSet::begin()
+{
+    return transcripts.begin();
+}
+
+
+TranscriptSet::iterator TranscriptSet::end()
+{
+    return transcripts.end();
+}
+
+
 TranscriptSetLocus::TranscriptSetLocus()
     : min_start(-1)
     , max_end(-1)
