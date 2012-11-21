@@ -1265,6 +1265,259 @@ Sampler::~Sampler()
 }
 
 
+struct ComponentSubset
+{
+    ComponentSubset()
+        : cs(NULL)
+        , len(0)
+    {
+    }
+
+    ComponentSubset(unsigned int* cs, unsigned int len)
+        : cs(cs)
+        , len(len)
+    {
+    }
+
+    /* A sequence of components */
+    unsigned int* cs;
+
+    /* Number of components in the sequence */
+    unsigned int len;
+
+    /* Is this a special value marking the end of the queue. */
+    bool is_end_of_queue() const
+    {
+        return len == 0;
+    }
+};
+
+
+
+/* The interface that MaxPostThread and MCMCThread implement. */
+class InferenceThread
+{
+    public:
+        InferenceThread(Sampler& S,
+                       Queue<ComponentSubset>& q)
+            : S(S)
+            , q(q)
+            , thread(NULL)
+        {
+            rng = gsl_rng_alloc(gsl_rng_mt19937);
+            unsigned long seed = reinterpret_cast<unsigned long>(this) *
+                                 (unsigned long) time(NULL);
+            gsl_rng_set(rng, seed);
+        }
+
+        ~InferenceThread()
+        {
+            gsl_rng_free(rng);
+            if (thread) delete thread;
+        }
+
+        /* Inference of relative expression of two transcripts a and b.. */
+        virtual void run_inter_transcript(unsigned int a, unsigned int b) = 0;
+
+        /* Inference relative expression of two components a and b. */
+        virtual void run_inter_component(unsigned int a, unsigned int b) = 0;
+
+        void run_intra_component(unsigned int c)
+        {
+            if (S.component_num_transcripts[c] == 0) return;
+
+            gsl_ran_shuffle(rng, S.component_transcripts[c], 
+                            S.component_num_transcripts[c],
+                            sizeof(unsigned int));
+            for (unsigned int i = 0; i < S.component_num_transcripts[c] - 1; ++i) {
+                run_inter_transcript(S.component_transcripts[c][i],
+                                     S.component_transcripts[c][i + 1]);
+            }
+        }
+
+        void run()
+        {
+            ComponentSubset s;
+            while (true) {
+                s = q.pop();
+                if (s.is_end_of_queue()) break;
+
+                for (unsigned int i = 0; i < s.len; ++i) {
+                    run_intra_component(s.cs[i]);
+                }
+
+                for (unsigned int i = 0; i < s.len - 1; ++i) {
+                    run_inter_component(s.cs[i], s.cs[i + 1]);
+                }
+            }
+        }
+
+        void start()
+        {
+            if (thread != NULL) return;
+            thread = new boost::thread(boost::bind(&InferenceThread::run, this));
+        }
+
+        void join()
+        {
+            thread->join();
+            delete thread;
+            thread = NULL;
+        }
+
+
+    protected:
+        gsl_rng* rng;
+        Sampler& S;
+
+    private:
+        Queue<ComponentSubset>& q;
+        boost::thread* thread;
+};
+
+
+/* The parameter passed to nlopt objective functions. */
+struct PairwiseObjFuncParam
+{
+    Sampler* S;
+    unsigned int u, v;
+};
+
+
+double transcript_pair_objf(unsigned int n, const double* theta,
+                            double* grad, void* param)
+{
+    assert(n == 1);
+    assert(finite(*theta));
+    UNUSED(n);
+
+    PairwiseObjFuncParam* objfuncparam =
+        reinterpret_cast<PairwiseObjFuncParam*>(param);
+    unsigned int u = objfuncparam->u;
+    unsigned int v = objfuncparam->v;
+    Sampler& S = *objfuncparam->S;
+
+    unsigned int c = S.transcript_component[u];
+    assert(c == S.transcript_component[v]);
+
+    double z = S.tmix[u] + S.tmix[v];
+    S.tmix[u] = *theta * z;
+    S.tmix[v] = (1.0 - *theta) * z;
+
+    size_t component_size = S.component_frag[c + 1] - S.component_frag[c];
+    std::fill(S.frag_probs[c], S.frag_probs[c] + component_size, 0.0);
+
+    /* TODO: avoid totally recomputing fragment probabilities by subtracting the
+     * previous value and adding the new one. */
+    for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
+        unsigned int t = S.component_transcripts[c][i];
+        asxpy(S.frag_probs[c],
+              S.weight_matrix->rows[t],
+              S.tmix[t],
+              S.weight_matrix->idxs[t],
+              S.component_frag[c],
+              S.weight_matrix->rowlens[t]);
+    }
+
+    double p = dotlog(S.frag_counts[c], S.frag_probs[c], component_size);
+    assert(finite(p));
+
+    if (grad != NULL) {
+        *grad = 0.0;
+
+        for (unsigned int j = 0; j < S.weight_matrix->rowlens[u]; ++j) {
+            float denom = 
+                S.frag_probs[c][
+                    S.weight_matrix->idxs[u][j] - S.component_frag[c]];
+            denom *= M_LN2;
+            *grad += S.weight_matrix->rows[u][j] / denom;
+            assert(finite(*grad));
+        }
+
+        for (unsigned int j = 0; j < S.weight_matrix->rowlens[v]; ++j) {
+            float denom = 
+                S.frag_probs[c][
+                    S.weight_matrix->idxs[v][j] - S.component_frag[c]];
+            denom *= M_LN2;
+            *grad -= S.weight_matrix->rows[v][j] / denom;
+            assert(finite(*grad));
+        }
+
+        *grad *= S.tmix[u] + S.tmix[v];
+        assert(finite(*grad));
+    }
+
+    return p;
+}
+
+
+class MaxPostThread : public InferenceThread
+{
+    public:
+        MaxPostThread(Sampler& S, Queue<ComponentSubset>& q)
+            : InferenceThread(S, q)
+        {
+            topt = nlopt_create(NLOPT_LD_MMA, 1);
+            nlopt_set_lower_bounds1(topt, constants::zero_eps);
+            nlopt_set_upper_bounds1(topt, 1.0 - constants::zero_eps);
+            nlopt_set_xtol_abs1(topt, constants::max_post_x_tolerance);
+            nlopt_set_ftol_abs(topt, constants::max_post_objf_tolerance);
+            nlopt_set_max_objective(topt, transcript_pair_objf,
+                                    reinterpret_cast<void*>(&objfunparam));
+
+            objfunparam.S = &S;
+        }
+
+        ~MaxPostThread()
+        {
+            nlopt_destroy(topt);
+        }
+
+        void run_inter_transcript(unsigned int a, unsigned int b);
+        void run_inter_component(unsigned int a, unsigned int b);
+
+    private:
+        PairwiseObjFuncParam objfunparam;
+
+        /* Optimizer for transcript pair and component pairs, resp. */
+        nlopt_opt topt, copt;
+};
+
+
+
+void MaxPostThread::run_inter_transcript(unsigned int u, unsigned int v)
+{
+    // XXX: some debug output
+    unsigned int c = S.transcript_component[u];
+    unsigned int component_size =
+        S.component_frag[c + 1] - S.component_frag[c];
+    Logger::info("run_inter_transcript: component_size = %u",
+                 component_size); 
+
+    if (S.tmix[u] + S.tmix[v] < constants::zero_eps) return;
+
+    objfunparam.u = u;
+    objfunparam.v = v;
+    double theta = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
+    double optf;
+    nlopt_result res = nlopt_optimize(topt, &theta, &optf);
+    if (res < 0) {
+        Logger::warn("Optimization of transcript %u and %u failed.", u, v);
+    }
+    double z = S.tmix[u] + S.tmix[v];
+    S.tmix[u] = theta * z;
+    S.tmix[v] = (1.0 - theta) * z;
+}
+
+
+void MaxPostThread::run_inter_component(unsigned int u, unsigned int v)
+{
+    UNUSED(u);
+    UNUSED(v);
+    // TODO
+}
+
+
 #if 0
 /* Abstract base class for sampler threads. This is specialized in
  * MaxPostThread, and MCMCThread, which estimate maximum posterior and draw
@@ -1398,6 +1651,7 @@ class SamplerThread
 #endif
 
 
+#if 0
 /* A thread that works on finding the maximum a posteriori isoform mixture. */
 class MaxPostThread
 {
@@ -1613,83 +1867,61 @@ void MaxPostThread::run()
         Logger::get_task(task_name).inc();
     }
 }
+#endif
+
+
 
 void Sampler::run(unsigned int num_samples)
 {
     UNUSED(num_samples); // TODO: delete me
 
-    /* Optimize transcript mixtures within components in parallel. */
-    Logger::push_task(MaxPostThread::task_name, num_components);
-    Queue<unsigned int> component_queue;
-    std::vector<MaxPostThread*> max_post_threads;
+    std::fill(tmix, tmix + ts.size(), 1.0 / (double) ts.size());
+
+    gsl_rng* rng = gsl_rng_alloc(gsl_rng_mt19937);
+    unsigned long seed = reinterpret_cast<unsigned long>(this) *
+                         (unsigned long) time(NULL);
+    gsl_rng_set(rng, seed);
+
+    Queue<ComponentSubset> q;
+    std::vector<InferenceThread*> threads(constants::num_threads);
     for (size_t i = 0; i < constants::num_threads; ++i) {
-        max_post_threads.push_back(new MaxPostThread(*this, component_queue));
-        max_post_threads.back()->start();
+        threads[i] = new MaxPostThread(*this, q);
     }
 
-    for (unsigned int c = 0; c < num_components; ++c) component_queue.push(c);
-    for (size_t i = 0; i < constants::num_threads; ++i) component_queue.push(num_components);
-    for (size_t i = 0; i < constants::num_threads; ++i) max_post_threads[i]->join();
-    for (size_t i = 0; i < constants::num_threads; ++i) delete max_post_threads[i];
-    Logger::pop_task(MaxPostThread::task_name);
+    unsigned int* cs = new unsigned int [num_components];
+    for (unsigned int c = 0; c < num_components; ++c) cs[c] = c;
 
-    /* Optimize component mixtures. */
+    // TODO: constant.cpp number of rounds
+    for (unsigned int r = 0; r < 10; ++r) {
+        gsl_ran_shuffle(rng, cs, num_components, sizeof(unsigned int));
+        for (size_t i = 0; i < constants::num_threads; ++i) {
+            threads[i]->start();
+        }
 
-    /* Choose a reasonable starting point. */
-    double z = 0.0;
-    for (unsigned int c = 0; c < num_components; ++c) {
-        cmix[c] = (double) (component_frag[c + 1] - component_frag[c]);
-        z += cmix[c];
-    }
-    for (unsigned int c = 0; c < num_components; ++c) {
-        cmix[c] /= z;
-        //cmix[c] = cmix[c] < constants::zero_eps ? constants::zero_eps : cmix[c];
-    }
+        // TODO: constants.cpp
+        unsigned int c;
+        for (c = 0; c + 10 < num_components; c += 10)
+        {
+            q.push(ComponentSubset(cs + c, 10));
+        }
 
-#if 0
-    init_frag_probs();
+        if (c < num_components) {
+            q.push(ComponentSubset(cs + c, num_components - c));
+        }
 
-    nlopt_opt opt = nlopt_create(NLOPT_LD_MMA, num_components);
-    nlopt_add_inequality_constraint(opt, simplex_constraint, NULL, 1e-2);
-    nlopt_set_xtol_abs1(opt, constants::max_post_x_tolerance);
-    nlopt_set_ftol_abs(opt, constants::max_post_objf_tolerance);
-    nlopt_set_lower_bounds1(opt, constants::zero_eps);
-    nlopt_set_upper_bounds1(opt, 1.0);
-    nlopt_set_max_objective(opt, component_posterior_objf,
-                            reinterpret_cast<void*>(this));
-    double optf;
-    nlopt_result res = nlopt_optimize(opt, cmix, &optf);
+        /* Mark the end. */
+        for (size_t i = 0; i < constants::num_threads; ++i) {
+            q.push(ComponentSubset());
+        }
 
-    if (res <= 0) {
-        Logger::warn("Posterior probability optimization of components failed with code %d.",
-                     (int) res);
+        for (size_t i = 0; i < constants::num_threads; ++i) {
+            threads[i]->join();
+        }
     }
 
-    nlopt_destroy(opt);
-
-    /* Round tiny numbers to 0 */
-    for (unsigned int i = 0; i < num_components; ++i) {
-        if (cmix[i] < 2 * constants::zero_eps) cmix[i] = 0.0;
-    }
-#endif
-
-    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-        tmix[i] *= cmix[transcript_component[i]];
-    }
-
-    /* Renormalize tmix */
-    z = 0.0;
-    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-        z += tmix[i];
-    }
-
-    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-        tmix[i] /= z;
-    }
-
-    /* Temporary result reporting. */
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        fprintf(stderr, "%s\t%s\t%e\t%e\t%d\n",
+        fprintf(stderr,
+                "%s\t%s\t%e\t%e\t%d\n",
                 t->gene_id.get().c_str(),
                 t->transcript_id.get().c_str(),
                 tmix[t->id],

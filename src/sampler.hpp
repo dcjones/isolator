@@ -64,11 +64,12 @@ class Sampler
          * i */
         unsigned int* component_frag;
 
+        friend class InferenceThread;
         friend class MaxPostThread;
-        friend double transcript_posterior_objf(unsigned int n, const double* xs,
-                                                double* grad, void* params);
-        friend double component_posterior_objf(unsigned int n, const double* xs,
-                                               double* grad, void* params);
+        friend double transcript_pair_objf(unsigned int n, const double* xs,
+                                           double* grad, void* params);
+        friend double component_pair_objf(unsigned int n, const double* xs,
+                                          double* grad, void* params);
 };
 
 
