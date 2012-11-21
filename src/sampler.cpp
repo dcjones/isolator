@@ -848,7 +848,8 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
     for (TranscriptSetLocus::iterator t = locus->ts.begin();
             t != locus->ts.end(); ++t) {
         transcript_sequence_bias(*locus, *t);
-        transcript_weights[t->id] = transcript_weight(*t);
+        transcript_weights[t->id] = std::max(constants::min_transcript_weight,
+                                             transcript_weight(*t));
 
         for (MultireadSet::iterator r = multiread_set.begin();
              r != multiread_set.end(); ++r) {
@@ -1482,6 +1483,11 @@ double transcript_posterior_objf(unsigned int n, const double* xs,
 
     double p = dotlog(S.frag_counts[c], S.frag_probs[c], component_size);
 
+    /* extra term to force a unique solution. */
+    for (unsigned int i = 0; i < n; ++i) {
+        p += xs[i];
+    }
+
     for (unsigned int i = 0; i < component_size; ++i) {
         assert(S.frag_probs[c][i] > 0.0);
         assert(S.frag_probs[c][i] <= 1.0);
@@ -1501,7 +1507,11 @@ double transcript_posterior_objf(unsigned int n, const double* xs,
             grad[i] /= M_LN2;
             assert(grad[i] > 0.0);
             assert(finite(grad[i]));
+
+            /* extra term to force a unique solution. */
+            grad[i] += 1.0;
         }
+
     }
 
     return p;
@@ -1543,35 +1553,55 @@ void MaxPostThread::run()
             S.component_frag[c + 1] - S.component_frag[c];
 
         if (S.component_num_transcripts[c] <= 1 || component_size == 0) {
+            /* Set a reasonable starting point. */
+            double z = 0.0;
             for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
                 S.tmix[S.component_transcripts[c][i]] =
-                    1.0 / (double) S.component_num_transcripts[c];
+                    (double) S.weight_matrix->rowlens[S.component_transcripts[c][i]] +
+                    constants::zero_eps;
+                z += S.tmix[S.component_transcripts[c][i]];
             }
+
+            for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
+                S.tmix[S.component_transcripts[c][i]] /= z;
+            }
+
             Logger::get_task(task_name).inc();
             continue;
         }
 
         param.c = c;
 
-        /* TODO: move constants to constants.cpp */
-        nlopt_opt opt = nlopt_create(NLOPT_LD_MMA,
+        nlopt_opt opt = nlopt_create(NLOPT_LD_SLSQP,
                 S.component_num_transcripts[c]);
-        nlopt_add_inequality_constraint(opt, simplex_constraint, NULL, 1e-2);
-        nlopt_set_xtol_abs1(opt, 1e-6);
-        nlopt_set_ftol_abs(opt, 1e-2);
-        nlopt_set_lower_bounds1(opt, 1e-8);
+        nlopt_add_inequality_constraint(opt, simplex_constraint,
+                                        NULL, constants::simplex_constraint_eps);
+        nlopt_set_xtol_abs1(opt, constants::max_post_x_tolerance);
+        nlopt_set_ftol_abs(opt, constants::max_post_objf_tolerance);
+        nlopt_set_lower_bounds1(opt, constants::zero_eps);
         nlopt_set_upper_bounds1(opt, 1.0);
         nlopt_set_max_objective(opt, transcript_posterior_objf,
                 reinterpret_cast<void*>(&param));
 
         double* xs = new double [S.component_num_transcripts[c]];
         std::fill(xs, xs + S.component_num_transcripts[c],
-                0.9 / (double) S.component_num_transcripts[c]);
+                1.0 / (double) S.component_num_transcripts[c]);
         double optf;
         nlopt_result res = nlopt_optimize(opt, xs, &optf);
         if (res <= 0) {
             Logger::warn("Posterior probability optimization of component %d failed with code %d.",
                          (int) c, (int) res);
+        }
+
+        /* Round tiny numbers to zero and re-normalize. */
+        double z = 0.0;
+        for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
+            if (xs[i] <= 2.0 * constants::zero_eps) xs[i] = 0.0;
+            z += xs[i];
+        }
+
+        for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
+            xs[i] /= z;
         }
 
         for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
@@ -1604,15 +1634,26 @@ void Sampler::run(unsigned int num_samples)
     Logger::pop_task(MaxPostThread::task_name);
 
     /* Optimize component mixtures. */
-    std::fill(cmix, cmix + num_components,
-              1.0 / (double) num_components);
+
+    /* Choose a reasonable starting point. */
+    double z = 0.0;
+    for (unsigned int c = 0; c < num_components; ++c) {
+        cmix[c] = (double) (component_frag[c + 1] - component_frag[c]);
+        z += cmix[c];
+    }
+    for (unsigned int c = 0; c < num_components; ++c) {
+        cmix[c] /= z;
+        //cmix[c] = cmix[c] < constants::zero_eps ? constants::zero_eps : cmix[c];
+    }
+
+#if 0
     init_frag_probs();
 
     nlopt_opt opt = nlopt_create(NLOPT_LD_MMA, num_components);
     nlopt_add_inequality_constraint(opt, simplex_constraint, NULL, 1e-2);
-    nlopt_set_xtol_abs1(opt, 1e-6);
-    nlopt_set_ftol_abs(opt, 1e-2);
-    nlopt_set_lower_bounds1(opt, 1e-8);
+    nlopt_set_xtol_abs1(opt, constants::max_post_x_tolerance);
+    nlopt_set_ftol_abs(opt, constants::max_post_objf_tolerance);
+    nlopt_set_lower_bounds1(opt, constants::zero_eps);
     nlopt_set_upper_bounds1(opt, 1.0);
     nlopt_set_max_objective(opt, component_posterior_objf,
                             reinterpret_cast<void*>(this));
@@ -1626,16 +1667,34 @@ void Sampler::run(unsigned int num_samples)
 
     nlopt_destroy(opt);
 
+    /* Round tiny numbers to 0 */
+    for (unsigned int i = 0; i < num_components; ++i) {
+        if (cmix[i] < 2 * constants::zero_eps) cmix[i] = 0.0;
+    }
+#endif
+
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         tmix[i] *= cmix[transcript_component[i]];
     }
 
+    /* Renormalize tmix */
+    z = 0.0;
+    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+        z += tmix[i];
+    }
+
+    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+        tmix[i] /= z;
+    }
+
     /* Temporary result reporting. */
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        fprintf(stderr, "%s\t%s\t%e\n",
+        fprintf(stderr, "%s\t%s\t%e\t%e\t%d\n",
                 t->gene_id.get().c_str(),
                 t->transcript_id.get().c_str(),
-                tmix[t->id]);
+                tmix[t->id],
+                transcript_weights[t->id],
+                (int) transcript_component[t->id]);
     }
 }
 

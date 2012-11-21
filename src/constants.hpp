@@ -72,6 +72,33 @@ namespace constants
     /* Discard fragments with weight lower than this, that might otherwise
      * introduce zeros into the posterior probability. */
     extern float min_frag_weight;
+
+    /* Various epsilons used during numerical optimization of posterior
+     * probability. */
+
+    /* During optimization we forbid any transcript from having expression zero
+     * as we migth otherwise run into issues with inf/nan values. Instead we use
+     * the following number as a lower bound, then round anything near it to 0.0
+     * after optimization. */
+    extern float zero_eps;
+
+    /* Mixtures must sum to 1. This is a tolerance giving the absolute allowable
+     * divergence from that constraint. */
+    extern float simplex_constraint_eps;
+
+    /* Absolute convergence epsilon for the log posterior objective function. */
+    extern float max_post_objf_tolerance;
+
+    /* Absolute convergence epsilon for the mixtures */
+    extern float max_post_x_tolerance;
+
+    /* It's possible for a transcript to get assigned exceedingly low weight,
+     * given the fragment length distribution. Then when a single read lands
+     * there, it is assumed that the trascript is very highly expressed. More
+     * likely is that the annotation is not correct. (E.g. frequently miRNA are
+     * annotated, but pre-miRNA is actually what's being sequenced.) This is a
+     * minimum transcript weight that is applied to avoid these situations. */
+    extern float min_transcript_weight;
 }
 
 #endif
