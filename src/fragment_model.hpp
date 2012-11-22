@@ -107,6 +107,10 @@ class FragmentModel
          * of alignments for each read. */
         AlnIndex multireads;
 
+        /* A set of reads that have a very large number of alignments, that if
+         * included would dramatically increase the run time. */
+        AlnIndex blacklist;
+
         /* Probability of a read being from the same strand as the transcript it
          * originates from. */
         float strand_specificity;

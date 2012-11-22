@@ -48,6 +48,9 @@ namespace constants
 
     extern libtype_t libtype;
 
+    /* Blacklist reads with more than this many alignments. */
+    extern unsigned int max_alignments;
+
     /* When estimating fragment length distributions, throw out anything larger
      * than this, assuming it's an artifact. */
     extern pos_t max_frag_len;
@@ -91,6 +94,9 @@ namespace constants
 
     /* Absolute convergence epsilon for the mixtures */
     extern float max_post_x_tolerance;
+
+    /* Maximum number of objective function evaluations. */
+    extern unsigned int max_post_max_eval;
 
     /* It's possible for a transcript to get assigned exceedingly low weight,
      * given the fragment length distribution. Then when a single read lands

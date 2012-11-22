@@ -12,7 +12,7 @@
 #define POLY4(x, c0, c1, c2, c3, c4) (x * POLY3(x, c1, c2, c3, c4) + c0)
 #define POLY5(x, c0, c1, c2, c3, c4, c5) (x * POLY4(x, c1, c2, c3, c4, c5) + c0)
 
-static float fastlog2(float x_)
+float fastlog2(float x_)
 {
     if (x_ <= 0.0f) return -INFINITY;
 

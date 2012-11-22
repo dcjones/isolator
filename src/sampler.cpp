@@ -797,6 +797,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
      * transcript. */
     for (ReadSetIterator r(locus->rs); r != ReadSetIterator(); ++r) {
         /* Skip multireads for now. */
+        if (fm.blacklist.get(r->first) >= 0) continue;
         int multiread_num = fm.multireads.get(r->first);
         if (multiread_num >= 0) {
             multiread_set.insert(std::make_pair((unsigned int) multiread_num,
@@ -1199,6 +1200,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     frag_counts = new float* [num_components];
     std::fill(frag_counts, frag_counts + num_components, (float*) NULL);
     frag_probs = new float* [num_components];
+    frag_probs_prop = new float * [num_components];
     std::fill(frag_probs, frag_probs + num_components, (float*) NULL);
     TSVec<FragIdxCount>::iterator fc = nz_frag_counts.begin();
     for (size_t i = 0, j = 0; i < num_components; ++i) {
@@ -1216,6 +1218,8 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
         std::fill(frag_counts[i], frag_counts[i] + component_size, 1.0f);
 
         frag_probs[i] =
+            reinterpret_cast<float*>(aalloc(component_size * sizeof(float)));
+        frag_probs_prop[i] =
             reinterpret_cast<float*>(aalloc(component_size * sizeof(float)));
 
         while (fc != nz_frag_counts.end() && fc->first < k) {
@@ -1252,6 +1256,7 @@ Sampler::~Sampler()
     for (size_t i = 0; i < num_components; ++i) {
         afree(frag_counts[i]);
         afree(frag_probs[i]);
+        afree(frag_probs_prop[i]);
         delete [] component_transcripts[i];
     }
     delete [] component_transcripts;
@@ -1259,6 +1264,7 @@ Sampler::~Sampler()
     delete [] frag_counts;
     delete [] frag_count_sums;
     delete [] frag_probs;
+    delete [] frag_probs_prop;
     delete [] component_frag;
     delete weight_matrix;
     delete [] transcript_weights;
@@ -1401,49 +1407,52 @@ double transcript_pair_objf(unsigned int n, const double* theta,
     assert(c == S.transcript_component[v]);
 
     double z = S.tmix[u] + S.tmix[v];
-    S.tmix[u] = *theta * z;
-    S.tmix[v] = (1.0 - *theta) * z;
+    /* proposed values */
+    double tmixu = *theta * z;
+    double tmixv = (1.0 - *theta) * z;
+    double tmix_delta_u = tmixu - S.tmix[u];
+    double tmix_delta_v = tmixv - S.tmix[v];
 
     size_t component_size = S.component_frag[c + 1] - S.component_frag[c];
-    std::fill(S.frag_probs[c], S.frag_probs[c] + component_size, 0.0);
+    acopy(S.frag_probs_prop[c], S.frag_probs[c], component_size * sizeof(float));
 
-    /* TODO: avoid totally recomputing fragment probabilities by subtracting the
-     * previous value and adding the new one. */
-    for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
-        unsigned int t = S.component_transcripts[c][i];
-        asxpy(S.frag_probs[c],
-              S.weight_matrix->rows[t],
-              S.tmix[t],
-              S.weight_matrix->idxs[t],
-              S.component_frag[c],
-              S.weight_matrix->rowlens[t]);
-    }
+    asxpy(S.frag_probs_prop[c],
+          S.weight_matrix->rows[u],
+          tmix_delta_u,
+          S.weight_matrix->idxs[u],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[u]);
 
-    double p = dotlog(S.frag_counts[c], S.frag_probs[c], component_size);
+    asxpy(S.frag_probs_prop[c],
+          S.weight_matrix->rows[v],
+          tmix_delta_v,
+          S.weight_matrix->idxs[v],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[v]);
+
+    double p = dotlog(S.frag_counts[c], S.frag_probs_prop[c], component_size);
     assert(finite(p));
 
     if (grad != NULL) {
         *grad = 0.0;
 
         for (unsigned int j = 0; j < S.weight_matrix->rowlens[u]; ++j) {
-            float denom = 
-                S.frag_probs[c][
-                    S.weight_matrix->idxs[u][j] - S.component_frag[c]];
+            unsigned int f = S.weight_matrix->idxs[u][j] - S.component_frag[c];
+            float denom = S.frag_probs_prop[c][f];
             denom *= M_LN2;
-            *grad += S.weight_matrix->rows[u][j] / denom;
+            *grad += S.frag_counts[c][f] * S.weight_matrix->rows[u][j] / denom;
             assert(finite(*grad));
         }
 
         for (unsigned int j = 0; j < S.weight_matrix->rowlens[v]; ++j) {
-            float denom = 
-                S.frag_probs[c][
-                    S.weight_matrix->idxs[v][j] - S.component_frag[c]];
+            unsigned int f = S.weight_matrix->idxs[v][j] - S.component_frag[c];
+            float denom = S.frag_probs_prop[c][f];
             denom *= M_LN2;
-            *grad -= S.weight_matrix->rows[v][j] / denom;
+            *grad -= S.frag_counts[c][f] * S.weight_matrix->rows[v][j] / denom;
             assert(finite(*grad));
         }
 
-        *grad *= S.tmix[u] + S.tmix[v];
+        *grad *= tmixu + tmixv;
         assert(finite(*grad));
     }
 
@@ -1457,11 +1466,12 @@ class MaxPostThread : public InferenceThread
         MaxPostThread(Sampler& S, Queue<ComponentSubset>& q)
             : InferenceThread(S, q)
         {
-            topt = nlopt_create(NLOPT_LD_MMA, 1);
+            topt = nlopt_create(NLOPT_LN_SBPLX, 1);
             nlopt_set_lower_bounds1(topt, constants::zero_eps);
             nlopt_set_upper_bounds1(topt, 1.0 - constants::zero_eps);
             nlopt_set_xtol_abs1(topt, constants::max_post_x_tolerance);
             nlopt_set_ftol_abs(topt, constants::max_post_objf_tolerance);
+            nlopt_set_maxeval(topt, constants::max_post_max_eval);
             nlopt_set_max_objective(topt, transcript_pair_objf,
                                     reinterpret_cast<void*>(&objfunparam));
 
@@ -1504,9 +1514,29 @@ void MaxPostThread::run_inter_transcript(unsigned int u, unsigned int v)
     if (res < 0) {
         Logger::warn("Optimization of transcript %u and %u failed.", u, v);
     }
+
     double z = S.tmix[u] + S.tmix[v];
-    S.tmix[u] = theta * z;
-    S.tmix[v] = (1.0 - theta) * z;
+    double tmixu = theta * z;
+    double tmixv = (1.0 - theta) * z;
+    double tmix_delta_u = tmixu - S.tmix[u];
+    double tmix_delta_v = tmixv - S.tmix[v];
+
+    asxpy(S.frag_probs[c],
+          S.weight_matrix->rows[u],
+          tmix_delta_u,
+          S.weight_matrix->idxs[u],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[u]);
+
+    asxpy(S.frag_probs[c],
+          S.weight_matrix->rows[v],
+          tmix_delta_v,
+          S.weight_matrix->idxs[v],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[v]);
+
+    S.tmix[u] = tmixu;
+    S.tmix[v] = tmixv;
 }
 
 
@@ -1518,364 +1548,258 @@ void MaxPostThread::run_inter_component(unsigned int u, unsigned int v)
 }
 
 
-#if 0
-/* Abstract base class for sampler threads. This is specialized in
- * MaxPostThread, and MCMCThread, which estimate maximum posterior and draw
- * samples respectively.
- * */
-class SamplerThread
+class MCMCThread : public InferenceThread
 {
     public:
-        /* Constructor.
-         *
-         * Args:
-         *   num_componets: Number of connected components.
-         *   component_num_transcripts: Number of transcripts in each component.
-         *   component_transcripts: An array of transcript indexes for each
-         *                          component.
-         *   weight_matrix: sparse transcript/fragment weight matrix.
-         *   cmix: Component mixture coefficients.
-         *   tmix: Within-component transcript mixture coefficients.
-         */;
-        SamplerThread(Sampler& S,
-                      Queue<ComponentSubset>& q)
-            : S(S)
-            , q(q)
-            , thread(NULL)
-        {
-            rng = gsl_rng_alloc(gsl_rng_mt19937);
-            unsigned long seed = reinterpret_cast<unsigned long>(this) *
-                                 (unsigned long) time(NULL);
-            gsl_rng_set(rng, seed);
-        }
-
-        ~SamplerThread()
-        {
-            gsl_rng_free(rng);
-        }
-
-        void run()
-        {
-            ComponentSubset cs;
-            while (true) {
-                cs = q.pop();
-                if (cs.is_end_of_queue()) break;
-
-                for (unsigned int k = cs.i; k <= cs.j; ++k) {
-                    run_intra_component(k);
-                }
-
-                for (unsigned int k = cs.i; k <= cs.j - 1; ++k) {
-                    run_components(k, k + 1);
-                }
-            }
-        }
-
-        void start()
-        {
-            if (thread != NULL) return;
-            thread = new boost::thread(boost::bind(&SamplerThread::run, this));
-        }
-
-        void join()
-        {
-            thread->join();
-            delete thread;
-            thread = NULL;
-        }
-
-        /* Process a single component. */
-        void run_intra_component(unsigned int u)
-        {
-            if (S.component_num_transcripts[u] == 0) return;
-
-            gsl_ran_shuffle(rng, S.component_transcripts[u], 
-                            S.component_num_transcripts[u],
-                            sizeof(unsigned int));
-            for (unsigned int i = 0; i < S.component_num_transcripts[u] - 1; ++i) {
-                run_transcripts(S.component_transcripts[u][i],
-                                S.component_transcripts[u][i + 1]);
-            }
-        }
-
-        /* Process a pair of transcripts. */
-        virtual void run_transcripts(unsigned int u, unsigned int v) = 0;
-
-        /* Process a pair of a components. */
-        virtual void run_components(unsigned int u, unsigned int v) = 0;;
-
-    protected:
-        /* To set new mixtures for u and v, tmix'[u] and tmix'[v], we introduce
-         * a new variable t, where tmix'[u] = t * (tmix[u] + tmix[v]) and
-         * tmix'[v] = (1 - t) * (tmix[u] + tmix[v]).
-         *
-         * This function computes the derivative of t at the current mix point.
-         */
-        float transcript_shift_derivative(unsigned int u, unsigned int v)
-        {
-            unsigned int c = S.transcript_component[u];
-            assert(c == S.transcript_component[v]);
-
-            unsigned int component_size =
-                S.component_frag[c + 1] - S.component_frag[c];
-            float dt = 0.0;
-            for (unsigned int j = 0; j < S.weight_matrix->rowlens[u]; ++j) {
-                float denom = 
-                    S.frag_probs[c][
-                        S.weight_matrix->idxs[u][j] - S.component_frag[c]];
-                denom *= M_LN2;
-
-                dt += S.weight_matrix->rows[u][j] / denom;
-            }
-
-            for (unsigned int j = 0; j < S.weight_matrix->rowlens[v]; ++j) {
-                float denom = 
-                    S.frag_probs[c][
-                        S.weight_matrix->idxs[v][j] - S.component_frag[c]];
-                denom *= M_LN2;
-
-                dt -= S.weight_matrix->rows[v][j] / denom;
-            }
-
-            dt *= S.tmix[u] + S.tmix[v];
-
-            return finite(dt) ? dt : 0.0;
-        }
-
-    private:
-        Sampler& S;
-        gsl_rng* rng;
-        Queue<ComponentSubset>& q;
-        boost::thread* thread;
-};
-#endif
-
-
-#if 0
-/* A thread that works on finding the maximum a posteriori isoform mixture. */
-class MaxPostThread
-{
-    public:
-        MaxPostThread(Sampler& S,
-                      Queue<unsigned int>& q)
-            : S(S)
-            , q(q)
-            , thread(NULL)
+        MCMCThread(Sampler& S,
+                   Queue<ComponentSubset>& q)
+            : InferenceThread(S, q)
         {
         }
 
-        void run();
+        void run_inter_transcript(unsigned int a, unsigned int b);
+        void run_inter_component(unsigned int a, unsigned int b);
 
-        void start()
-        {
-            if (thread != NULL) return;
-            thread = new boost::thread(boost::bind(&MaxPostThread::run, this));
-        }
+    private: 
+        float recompute_component_probability(unsigned int u, unsigned int v,
+                                              float tmixu, float tmixv);
 
-        void join()
-        {
-            thread->join();
-            delete thread;
-            thread = NULL;
-        }
-
-        static const char* task_name;
-
-
-    private:
-        Sampler& S;
-        Queue<unsigned int>& q;
-        boost::thread* thread;
+        float slice_sample_search(float slice_height,
+                                  unsigned int u, unsigned int v,
+                                  float z0, float p0, bool left);
 };
 
 
-const char* MaxPostThread::task_name = "Optimizing posterior probability";
-
-
-/* Constrain xs to be on a simplex for nlopt. */
-static double simplex_constraint(unsigned int n, const double* xs,
-                                 double* grad, void* params)
+float MCMCThread::recompute_component_probability(unsigned int u, unsigned int v,
+                                                  float tmixu, float tmixv)
 {
-    UNUSED(params);
-    double z = 0.0;
-    for (unsigned int i = 0; i < n; ++i) {
-        z += xs[i];
-    }
-    if (grad != NULL) std::fill(grad, grad + n, 1.0);
+    unsigned c = S.transcript_component[u];
+    assert(c = S.transcript_component[v]);
+    unsigned int component_size = S.component_frag[c + 1] - S.component_frag[c];
 
-    return z - 1.0;
+    acopy(S.frag_probs_prop[c], S.frag_probs[c], component_size * sizeof(float));
+
+    asxpy(S.frag_probs_prop[c],
+          S.weight_matrix->rows[u],
+          tmixu - S.tmix[u],
+          S.weight_matrix->idxs[u],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[u]);
+
+    asxpy(S.frag_probs_prop[c],
+          S.weight_matrix->rows[v],
+          tmixv - S.tmix[v],
+          S.weight_matrix->idxs[v],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[v]);
+
+    return dotlog(S.frag_counts[c], S.frag_probs_prop[c], component_size);
 }
 
 
-struct ObjFuncParam
+/* Use essentialy the Brent-Dekker algorithm to find slice extents. */
+float MCMCThread::slice_sample_search(float slice_height,
+                                      unsigned int u, unsigned int v,
+                                      float z0, float p0, bool left)
 {
-    unsigned int c; /* component */
-    Sampler* S;
-};
+    const float tmixuv = S.tmix[u] + S.tmix[v];
 
+    static const float xmin  = 1e-12f;
+    static const float xmax  = 1.0f - 1e-12f;
+    static const float xeps  = 1e-4f;
+    static const float leps  = 1e-10f;
+    static const float delta = xeps;
 
-double transcript_posterior_objf(unsigned int n, const double* xs,
-                                 double* grad, void* param)
-{
-    ObjFuncParam* objfuncparam =
-        reinterpret_cast<ObjFuncParam*>(param);
-    unsigned int c = objfuncparam->c;
-    Sampler& S = *objfuncparam->S;
+    float low, high;
 
-    unsigned component_size = S.component_frag[c + 1] - S.component_frag[c];
-    std::fill(S.frag_probs[c], S.frag_probs[c] + component_size, 0.0f);
-
-    for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
-        unsigned int t = S.component_transcripts[c][i];
-        asxpy(S.frag_probs[c],
-              S.weight_matrix->rows[t],
-              xs[i],
-              S.weight_matrix->idxs[t],
-              S.component_frag[c],
-              S.weight_matrix->rowlens[t]);
+    if (left) {
+        low  = xmin;
+        high = z0;
+    }
+    else {
+        low  = z0;
+        high = xmax;
     }
 
-    double p = dotlog(S.frag_counts[c], S.frag_probs[c], component_size);
+    // probabilities
+    float lowp, highp;
 
-    /* extra term to force a unique solution. */
-    for (unsigned int i = 0; i < n; ++i) {
-        p += xs[i];
+    // low end probability
+    if (left) {
+        lowp = recompute_component_probability(
+                u, v, low * tmixuv, (1.0f - low) * tmixuv);
+    }
+    else {
+        lowp = p0;
+    }
+    lowp -= slice_height;
+
+    if (left && lowp >= 0) return low;
+
+    // high end likelihood
+    if (!left) {
+        highp = recompute_component_probability(u, v,
+                high * tmixuv, (1.0f - high) * tmixuv);
+    }
+    else {
+        highp = p0; 
+    }
+    highp -= slice_height;
+
+    if (!left && highp >= 0) return high;
+
+    assert(lowL * highL < 0 || lowL == 0.0 || highL == 0.0);
+
+    float c, d, s, cL, dL, sL;
+
+    if (abs(lowp) < abs(highp)) {
+        std::swap(low, high);
+        std::swap(lowp, highp);
     }
 
-    for (unsigned int i = 0; i < component_size; ++i) {
-        assert(S.frag_probs[c][i] > 0.0);
-        assert(S.frag_probs[c][i] <= 1.0);
-        assert(finite(S.frag_probs[c][i]));
-    }
+    bool mflag = true;
+    s = high;
+    d = dL = 0;
+    c  = low;
+    cL = lowp;
 
-    if (grad != NULL) {
-        unsigned int off = S.component_frag[c];
-        std::fill(grad, grad + n, 0.0);
-        for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
-            unsigned int t = S.component_transcripts[c][i];
-            for (unsigned int j = 0; j < S.weight_matrix->rowlens[t]; ++j) {
-                unsigned int k = S.weight_matrix->idxs[t][j];
-                grad[i] += S.frag_counts[c][k - off] * S.weight_matrix->rows[t][j] /
-                                S.frag_probs[c][k - off];
-            }
-            grad[i] /= M_LN2;
-            assert(grad[i] > 0.0);
-            assert(finite(grad[i]));
+    /* TODO:
+     * Often the slice edge is extremely close to the current value.
+     * Instead of doing bisection, we should do some sort of adjustable
+     * bisection that first looks very close to the current value.
+     *
+     * Yeah right. What I should do is a gradient based search.
+     * Figure out how to evaluated the gradient, then just do newton's method
+     * from the mid point.
+     */
 
-            /* extra term to force a unique solution. */
-            grad[i] += 1.0;
+    while (fabs(high - low) > xeps &&
+           fabs(lowp) > leps &&
+           fabs(highp) > leps) {
+
+        if (!finite(lowp) || !finite(highp)) {
+            /* bisection */
+            s = (high + low) / 2.0;
+            goto slice_sample_search_test;
+        }
+        else if (lowp != cL && highp != cL) {
+            /* inverse quadratic interpolation */
+            s  = (low  * highp * cL)    / ((lowp  - highp) * (lowp  - cL));
+            s += (high * lowp  * cL)    / ((highp -  lowp) * (highp - cL));
+            s += (c    * lowp  * highp) / ((cL    -  lowp) * (cL    - highp));
+        }
+        else {
+            /* secant rule */
+            s = high - highp * (high - low) / (highp - lowp);
         }
 
+        if ((s < (3 * low + high) / 4.0 || s > high)        || /* cond 1 */
+            (mflag && abs(s - high) >= abs(high - c) / 2.0) || /* cond 2 */
+            (!mflag && abs(s - high) >= abs(c - d) / 2.0)   || /* cond 3 */
+            (mflag && abs(high - c) < delta)                || /* cond 4 */
+            (!mflag && abs(c - d) < delta)) {
+
+            /* bisection */
+            s = (high + low) / 2.0;
+            mflag = true;
+        }
+
+slice_sample_search_test:
+        mflag = false;
+
+        sL = recompute_component_probability(
+                u, v, s * tmixuv, (1.0 - s) * tmixuv);
+        sL -= slice_height;
+
+        d = c;
+        c  = high;
+        cL = highp;
+
+        if (lowp * sL < 0.0) {
+            high  = s;
+            highp = sL;
+        }
+        else {
+            low  = s;
+            lowp = sL;
+        }
+
+        if (abs(lowp) < abs(highp)) {
+            std::swap(low, high);
+            std::swap(lowp, highp);
+        }
     }
 
-    return p;
+    return std::min(xmax, std::max(xmin, s));
 }
 
 
-double component_posterior_objf(unsigned int num_components, const double* cmix,
-                                double* grad, void* param)
+void MCMCThread::run_inter_transcript(unsigned int u, unsigned int v)
 {
-    Sampler& S = *reinterpret_cast<Sampler*>(param);
+    if (S.tmix[u] + S.tmix[v] < constants::zero_eps) return;
 
-    double p = 0.0;
-    for (unsigned int c = 0; c < num_components; ++c) {
-        unsigned component_size = S.component_frag[c + 1] - S.component_frag[c];
-        p += dotlogc(S.frag_counts[c], S.frag_probs[c], component_size, cmix[c]);
+    unsigned int c = S.transcript_component[u];
+
+    //Logger::info("run_inter_transcript: c = %u", c); 
+
+    assert(c == S.transcript_component[v]);
+    unsigned int component_size = S.component_frag[c + 1] - S.component_frag[c];
+
+    double p0 = dotlog(S.frag_counts[c], S.frag_probs_prop[c], component_size);
+    float slice_height = fastlog2(gsl_rng_uniform(rng)) + p0;
+
+    float z0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
+
+    float z;
+    if (finite(slice_height)) {
+        float s0 = slice_sample_search(slice_height, u, v, z0, p0, true);
+        float s1 = slice_sample_search(slice_height, u, v, z0, p0, false);
+        z = s0 + gsl_rng_uniform(rng) * (s1 - s0);
+    }
+    else {
+        z = gsl_rng_uniform(rng);
     }
 
-    if (grad != NULL) {
-        std::fill(grad, grad + num_components, 0.0);
-        for (unsigned int c = 0; c < num_components; ++c) {
-            grad[c] = S.frag_count_sums[c] / (M_LN2 * cmix[c]);
-        }
-    }
+    /* proposed tmix[u], tmix[v] values */
+    float tmixu = z * (S.tmix[u] + S.tmix[v]);
+    float tmixv = (1.0 - z) * (S.tmix[u] + S.tmix[v]);
+    float tmix_delta_u = tmixu - S.tmix[u];
+    float tmix_delta_v = tmixv - S.tmix[v];
 
-    return p;
+    /* recompute fragment probabilities */
+    asxpy(S.frag_probs[c],
+          S.weight_matrix->rows[u],
+          tmix_delta_u,
+          S.weight_matrix->idxs[u],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[u]);
+
+    asxpy(S.frag_probs[c],
+          S.weight_matrix->rows[v],
+          tmix_delta_v,
+          S.weight_matrix->idxs[v],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[v]);
+
+    S.tmix[u] = tmixu;
+    S.tmix[v] = tmixv;
 }
 
 
-void MaxPostThread::run()
+void MCMCThread::run_inter_component(unsigned int u, unsigned int v)
 {
-    unsigned int c;
-    ObjFuncParam param;
-    param.S = &S;
-    while (true) {
-        c = q.pop();
-        if (c >= S.num_components) break;
+    //unsigned int component_size = S.component_frag[c + 1] - S.component_frag[c];
 
-        unsigned int component_size =
-            S.component_frag[c + 1] - S.component_frag[c];
-
-        if (S.component_num_transcripts[c] <= 1 || component_size == 0) {
-            /* Set a reasonable starting point. */
-            double z = 0.0;
-            for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
-                S.tmix[S.component_transcripts[c][i]] =
-                    (double) S.weight_matrix->rowlens[S.component_transcripts[c][i]] +
-                    constants::zero_eps;
-                z += S.tmix[S.component_transcripts[c][i]];
-            }
-
-            for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
-                S.tmix[S.component_transcripts[c][i]] /= z;
-            }
-
-            Logger::get_task(task_name).inc();
-            continue;
-        }
-
-        param.c = c;
-
-        nlopt_opt opt = nlopt_create(NLOPT_LD_SLSQP,
-                S.component_num_transcripts[c]);
-        nlopt_add_inequality_constraint(opt, simplex_constraint,
-                                        NULL, constants::simplex_constraint_eps);
-        nlopt_set_xtol_abs1(opt, constants::max_post_x_tolerance);
-        nlopt_set_ftol_abs(opt, constants::max_post_objf_tolerance);
-        nlopt_set_lower_bounds1(opt, constants::zero_eps);
-        nlopt_set_upper_bounds1(opt, 1.0);
-        nlopt_set_max_objective(opt, transcript_posterior_objf,
-                reinterpret_cast<void*>(&param));
-
-        double* xs = new double [S.component_num_transcripts[c]];
-        std::fill(xs, xs + S.component_num_transcripts[c],
-                1.0 / (double) S.component_num_transcripts[c]);
-        double optf;
-        nlopt_result res = nlopt_optimize(opt, xs, &optf);
-        if (res <= 0) {
-            Logger::warn("Posterior probability optimization of component %d failed with code %d.",
-                         (int) c, (int) res);
-        }
-
-        /* Round tiny numbers to zero and re-normalize. */
-        double z = 0.0;
-        for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
-            if (xs[i] <= 2.0 * constants::zero_eps) xs[i] = 0.0;
-            z += xs[i];
-        }
-
-        for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
-            xs[i] /= z;
-        }
-
-        for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
-            S.tmix[S.component_transcripts[c][i]] = xs[i];
-        }
-        delete [] xs;
-
-        nlopt_destroy(opt);
-        Logger::get_task(task_name).inc();
-    }
+    UNUSED(u);
+    UNUSED(v);
+    // TODO
 }
-#endif
-
 
 
 void Sampler::run(unsigned int num_samples)
 {
-    UNUSED(num_samples); // TODO: delete me
-
     std::fill(tmix, tmix + ts.size(), 1.0 / (double) ts.size());
+    init_frag_probs();
 
     gsl_rng* rng = gsl_rng_alloc(gsl_rng_mt19937);
     unsigned long seed = reinterpret_cast<unsigned long>(this) *
@@ -1885,14 +1809,15 @@ void Sampler::run(unsigned int num_samples)
     Queue<ComponentSubset> q;
     std::vector<InferenceThread*> threads(constants::num_threads);
     for (size_t i = 0; i < constants::num_threads; ++i) {
-        threads[i] = new MaxPostThread(*this, q);
+        threads[i] = new MCMCThread(*this, q);
     }
 
     unsigned int* cs = new unsigned int [num_components];
     for (unsigned int c = 0; c < num_components; ++c) cs[c] = c;
 
     // TODO: constant.cpp number of rounds
-    for (unsigned int r = 0; r < 10; ++r) {
+    for (unsigned int r = 0; r < num_samples; ++r) {
+        Logger::info("round %u", r);
         gsl_ran_shuffle(rng, cs, num_components, sizeof(unsigned int));
         for (size_t i = 0; i < constants::num_threads; ++i) {
             threads[i]->start();

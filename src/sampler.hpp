@@ -60,12 +60,17 @@ class Sampler
          * component i, given the component and transcript mixtures. */
         float** frag_probs;
 
+        /* A mirror of frag_probs for non-desctructively evaluating proposals.
+         * */
+        float** frag_probs_prop;
+
         /* component_frag[i] given the index of the first fragment in component
          * i */
         unsigned int* component_frag;
 
         friend class InferenceThread;
         friend class MaxPostThread;
+        friend class MCMCThread;
         friend double transcript_pair_objf(unsigned int n, const double* xs,
                                            double* grad, void* params);
         friend double component_pair_objf(unsigned int n, const double* xs,

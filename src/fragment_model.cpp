@@ -524,7 +524,11 @@ void FragmentModel::estimate(TranscriptSet& ts,
     /* Index multireads. */
     unsigned long total_reads = alncnt->size();
     for (AlnCountTrieIterator i(*alncnt); i != AlnCountTrieIterator(); ++i) {
-        if (i->second.first > 1 || i->second.second > 1) {
+        if (i->second.first > constants::max_alignments ||
+            i->second.second > constants::max_alignments) {
+            blacklist.add(i->first);
+        }
+        else if (i->second.first > 1 || i->second.second > 1) {
             multireads.add(i->first);
         }
     }
