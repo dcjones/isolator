@@ -105,6 +105,9 @@ namespace constants
      * annotated, but pre-miRNA is actually what's being sequenced.) This is a
      * minimum transcript weight that is applied to avoid these situations. */
     extern float min_transcript_weight;
+
+    /* Symmetric-dirchlet prior precision for transcript mixtures. */
+    extern float tmix_prior_prec;
 }
 
 #endif

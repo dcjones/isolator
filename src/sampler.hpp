@@ -52,6 +52,25 @@ class Sampler
          * in component i. */
         float** frag_counts;
 
+        /* Number of multireads. */
+        unsigned num_multireads;
+
+        /* Number of alignments for each multiread. */
+        unsigned int* multiread_num_alignments;
+
+        /* A single multiread alignment. */
+        struct MultireadAlignment
+        {
+            float* prob;
+            float* count;
+        };
+
+        /* A flat array of all the multiread alignments */
+        MultireadAlignment* multiread_alignment_pool;
+
+        /* Pointers into multiread_alignment_poll for each multiread. */
+        MultireadAlignment** multiread_alignments;
+
         /* Row sums of frag_counts, used to compute gradients when optimizing
          * over component mixtures. */
         float* frag_count_sums;
@@ -71,6 +90,7 @@ class Sampler
         friend class InferenceThread;
         friend class MaxPostThread;
         friend class MCMCThread;
+        friend class MultireadSamplerThread;
         friend double transcript_pair_objf(unsigned int n, const double* xs,
                                            double* grad, void* params);
         friend double component_pair_objf(unsigned int n, const double* xs,
