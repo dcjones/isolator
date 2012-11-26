@@ -459,14 +459,11 @@ class FragmentModelThread
         void measure_strand_bias(strand_t strand,
                                  const ReadSet::UniqueReadCounts& counts)
         {
-            //Logger::info("A");
             ReadSet::UniqueReadCounts::const_iterator i;
             for (i = counts.begin(); i != counts.end(); ++i) {
-                //Logger::info("B");
                 AlignedReadIterator j(*i->first);
                 for (; j != AlignedReadIterator(); ++j) {
                     if (!j->mate1) continue;
-                    //Logger::info("C");
                     strand_bias[j->mate1->strand == strand ? 0 : 1]++;
                 }
             }

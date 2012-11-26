@@ -85,19 +85,6 @@ namespace constants
      * after optimization. */
     extern float zero_eps;
 
-    /* Mixtures must sum to 1. This is a tolerance giving the absolute allowable
-     * divergence from that constraint. */
-    extern float simplex_constraint_eps;
-
-    /* Absolute convergence epsilon for the log posterior objective function. */
-    extern float max_post_objf_tolerance;
-
-    /* Absolute convergence epsilon for the mixtures */
-    extern float max_post_x_tolerance;
-
-    /* Maximum number of objective function evaluations. */
-    extern unsigned int max_post_max_eval;
-
     /* It's possible for a transcript to get assigned exceedingly low weight,
      * given the fragment length distribution. Then when a single read lands
      * there, it is assumed that the trascript is very highly expressed. More
@@ -108,6 +95,25 @@ namespace constants
 
     /* Symmetric-dirchlet prior precision for transcript mixtures. */
     extern float tmix_prior_prec;
+
+    /* Worker threads for the sampler process blocks of this many components and
+     * multireads, respectively, at a time. */
+    extern unsigned int sampler_component_block_size;
+    extern unsigned int sampler_multiread_block_size;
+
+    /* When doing maximum posterior estimation, we halt when either the relative
+     * or absolute error are below respective cutoffs. */
+    extern float maxpost_rel_error;
+    extern float maxpost_abs_error;
+
+    /* Once consecutive iterations of maximum posterior estimation change the
+     * overall probability by less than this amount, the process halts. */
+    extern float maxpost_abs_peps;
+
+    /* When maximizing the posterior, halt if the posterior has not been
+     * improved in this many iterations. */
+    extern unsigned int p_max_it_limit;
+
 }
 
 #endif

@@ -3,10 +3,13 @@
 #define ISOLATOR_SAMPLER_HPP
 
 #include "fragment_model.hpp"
+#include "sample_db.hpp"
 #include "sparse_mat.hpp"
 #include "transcripts.hpp"
 
 class WeightMatrix;
+class MCMCThread;
+class MultireadSamplerThread;
 
 
 /* This is the sampler, Isolator's warp-core, so to speak.
@@ -18,7 +21,7 @@ class Sampler
                 TranscriptSet& ts, FragmentModel& fm);
         ~Sampler();
 
-        void run(unsigned int num_samples);
+        void run(unsigned int num_samples, SampleDB& out);
 
     private:
         /* Compute all the entries in frag_probs, given the current value of
@@ -87,14 +90,12 @@ class Sampler
          * i */
         unsigned int* component_frag;
 
+        /* Samples indexed by transcript id */
+        float** samples;
+
         friend class InferenceThread;
-        friend class MaxPostThread;
         friend class MCMCThread;
         friend class MultireadSamplerThread;
-        friend double transcript_pair_objf(unsigned int n, const double* xs,
-                                           double* grad, void* params);
-        friend double component_pair_objf(unsigned int n, const double* xs,
-                                          double* grad, void* params);
 };
 
 
