@@ -2,9 +2,10 @@
 //#include <google/profiler.h>
 
 #include <cstdlib>
+#include <ctime>
 #include <getopt.h>
-#include <unistd.h>
 #include <gsl/gsl_statistics_float.h>
+#include <unistd.h>
 
 #include "config.h"
 #include "constants.hpp"
@@ -156,8 +157,16 @@ int quantify(int argc, char* argv[])
 
     /* Prepare output database. */
     SampleDB db(out_fn, true);
-
-    //ProfilerStart("isolator.prof");
+    db.insert_meta("version", VERSION);
+    time_t current_time = time(NULL);
+    tm current_time_struct;
+    localtime_r(&current_time, &current_time_struct);
+    char time_str[200];
+    strftime(time_str, sizeof(time_str), "%a, %d %b %Y %T %z",
+             &current_time_struct);
+    db.insert_meta("time", time_str);
+    // TODO: insert command line into meta
+    db.insert_param("num_samples", (double) num_samples);
 
     /* Initialize the fragment model. */
     FragmentModel* fm = new FragmentModel();
@@ -167,8 +176,6 @@ int quantify(int argc, char* argv[])
     Sampler sampler(bam_fn, fa_fn, ts, *fm);
     delete fm; /* free a little memory */
     sampler.run(num_samples, db);
-
-    //ProfilerStop();
 
     Logger::info("Finished. Have a nice day!");
     Logger::end();

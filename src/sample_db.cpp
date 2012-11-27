@@ -33,6 +33,8 @@ SampleDB::SampleDB(const char* fn, bool writeable)
     /* prepared statements */
     meta_ins_stmt   = prep("insert into meta values (?, ?)");
     param_ins_stmt  = prep("insert into parameters values (?, ?)");
+    sample_ins_stmt = prep("insert into samples values (?, ?, ?, ?)");
+    id_ins_stmt     = prep("insert into ids values (?, ?)");
 }
 
 
@@ -40,6 +42,8 @@ SampleDB::~SampleDB()
 {
     sqlite3_finalize(meta_ins_stmt);
     sqlite3_finalize(param_ins_stmt);
+    sqlite3_finalize(sample_ins_stmt);
+    sqlite3_finalize(id_ins_stmt);
     sqlite3_close(db);
 }
 
@@ -56,6 +60,30 @@ void SampleDB::commit_transaction()
 }
 
 
+void SampleDB::insert_meta(const char* key, const char* val)
+{
+    sqlite3_bind_text(meta_ins_stmt, 1, key, -1, SQLITE_STATIC);
+    sqlite3_bind_text(meta_ins_stmt, 2, val, -1, SQLITE_STATIC);
+    int result = sqlite3_step(meta_ins_stmt);
+    if (result != SQLITE_DONE) {
+        Logger::abort("Sqlite3 error: '%s'.", sqlite3_errmsg(db));
+    }
+    sqlite3_reset(meta_ins_stmt);
+}
+
+
+void SampleDB::insert_param(const char* key, double val)
+{
+    sqlite3_bind_text(param_ins_stmt, 1, key, -1, SQLITE_STATIC);
+    sqlite3_bind_double(param_ins_stmt, 2, val);
+    int result = sqlite3_step(param_ins_stmt);
+    if (result != SQLITE_DONE) {
+        Logger::abort("Sqlite3 error: '%s'.", sqlite3_errmsg(db));
+    }
+    sqlite3_reset(param_ins_stmt);
+}
+
+
 void SampleDB::insert_sampler_result(TranscriptID transcript_id,
                                      GeneID gene_id,
                                      float effective_length,
@@ -63,11 +91,11 @@ void SampleDB::insert_sampler_result(TranscriptID transcript_id,
                                      float* samples,
                                      size_t num_samples)
 {
-    sqlite3_stmt* s = prep("insert into samples values (?, ?, ?, ?)");
 
-    sqlite3_bind_text(s, 1, transcript_id.get().c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_double(s, 2, effective_length);
-    sqlite3_bind_double(s, 3, map_estimate);
+    sqlite3_bind_text(sample_ins_stmt, 1, transcript_id.get().c_str(),
+                      -1, SQLITE_STATIC);
+    sqlite3_bind_double(sample_ins_stmt, 2, effective_length);
+    sqlite3_bind_double(sample_ins_stmt, 3, map_estimate);
     Bytef* zbuf = NULL;
 
     size_t N  = num_samples * sizeof(float);
@@ -81,11 +109,11 @@ void SampleDB::insert_sampler_result(TranscriptID transcript_id,
         Logger::abort("Error compressing results: %d.", ret);
     }
 
-    sqlite3_bind_blob(s, 4,
+    sqlite3_bind_blob(sample_ins_stmt, 4,
                      reinterpret_cast<const void*>(zbuf),
                      (int) readsize,
                      SQLITE_STATIC);
-    int result = sqlite3_step(s);
+    int result = sqlite3_step(sample_ins_stmt);
 
     if (result != SQLITE_DONE) {
         Logger::abort("Sqlite3 error: '%s'.", sqlite3_errmsg(db));
@@ -93,21 +121,21 @@ void SampleDB::insert_sampler_result(TranscriptID transcript_id,
 
     delete [] zbuf;
 
-    sqlite3_finalize(s);
+    sqlite3_reset(sample_ins_stmt);
 
     /* insert gene_id / transcript_id */
-    s = prep("insert into ids values (?, ?)");
+    sqlite3_bind_text(id_ins_stmt, 1, transcript_id.get().c_str(),
+                      -1, SQLITE_STATIC);
+    sqlite3_bind_text(id_ins_stmt, 2, gene_id.get().c_str(),
+                      -1, SQLITE_STATIC);
 
-    sqlite3_bind_text(s, 1, transcript_id.get().c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(s, 2, gene_id.get().c_str(), -1, SQLITE_STATIC);
-
-    result = sqlite3_step(s);
+    result = sqlite3_step(id_ins_stmt);
 
     if (result != SQLITE_DONE) {
         Logger::abort("Sqlite3 error: '%s'.", sqlite3_errmsg(db));
     }
 
-    sqlite3_finalize(s);
+    sqlite3_reset(id_ins_stmt);
 }
 
 
@@ -146,13 +174,17 @@ SampleDBIterator::SampleDBIterator()
 SampleDBIterator::SampleDBIterator(SampleDB& owner)
     : owner(&owner)
 {
-    int result = sqlite3_prepare_v2(owner.db, "select num_samples from meta",
-                                -1, &s, NULL);
+    int result = sqlite3_prepare_v2(owner.db,
+            "select value from parameters where name = \"num_samples\"", -1, &s, NULL);
+    if (result != SQLITE_OK) {
+        Logger::abort("Sqlite3 error: '%s'.", sqlite3_errmsg(owner.db));
+    }
+
+    result = sqlite3_step(s);
     if (result != SQLITE_ROW) {
         Logger::abort("Malformed sampler results.");
     }
-
-    num_samples = strtoul(reinterpret_cast<const char*>(sqlite3_column_text(s, 0)), NULL, 10);
+    num_samples = (unsigned int) sqlite3_column_double(s, 0);
     sqlite3_finalize(s);
     entry.samples.resize(num_samples);
 

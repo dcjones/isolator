@@ -24,6 +24,9 @@ class SampleDB
         void begin_transaction();
         void commit_transaction();
 
+        void insert_meta(const char* key, const char* val);
+        void insert_param(const char* key, double param);
+
         void insert_sampler_result(TranscriptID transcript_id,
                                    GeneID gene_id,
                                    float effective_length,
@@ -40,6 +43,8 @@ class SampleDB
         /* prepared statements */
         sqlite3_stmt* meta_ins_stmt;
         sqlite3_stmt* param_ins_stmt;
+        sqlite3_stmt* sample_ins_stmt;
+        sqlite3_stmt* id_ins_stmt;
 
         friend class SampleDBIterator;
 };
