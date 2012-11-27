@@ -21,6 +21,8 @@ struct Alignment
     bool operator == (const bam1_t* b) const;
     bool operator != (const bam1_t* b) const;
 
+    bool operator < (const Alignment& other) const;
+
     pos_t start;
     pos_t end;
     uint16_t  cigar_len;

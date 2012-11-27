@@ -838,7 +838,9 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 
         if (has_compatible_transcript) {
             FragIdxCount& f = frag_idx[*a];
-            f.first = read_indexer.get();
+            /* we assign a read index later so we can have indexes roughly
+             * ordered by position. */
+            f.first = 0;
             f.second = 1;
         }
         else {
@@ -847,6 +849,11 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 
         /* This is not a multiread, so there must be at most one alignment. */
         assert(++a == AlignedReadIterator());
+    }
+
+    /* Asign indexes */
+    for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
+        f->second.first = read_indexer.get();
     }
 
     for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
@@ -1467,26 +1474,25 @@ class MCMCThread : public InferenceThread
 
     private:
         float recompute_component_probability(unsigned int u, unsigned int v,
-                                              float tmixu, float tmixv);
+                                              float tmixu, float tmixv,
+                                              unsigned int f0, unsigned int f1,
+                                              float pf01, float p0);
 
         float transcript_slice_sample_search(float slice_height,
                                              unsigned int u, unsigned int v,
                                              float z0, float p0, bool left);
-
-        float component_slice_sample_search(float slice_height,
-                                            unsigned int u, unsigned int v,
-                                            float z0, float p0, bool left);
 };
 
 
 float MCMCThread::recompute_component_probability(unsigned int u, unsigned int v,
-                                                  float tmixu, float tmixv)
+                                                  float tmixu, float tmixv,
+                                                  unsigned int f0, unsigned int f1,
+                                                  float pf01, float p0)
 {
-    unsigned c = S.transcript_component[u];
+    unsigned int c = S.transcript_component[u];
     assert(c = S.transcript_component[v]);
-    unsigned int component_size = S.component_frag[c + 1] - S.component_frag[c];
 
-    acopy(S.frag_probs_prop[c], S.frag_probs[c], component_size * sizeof(float));
+    acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0, (f1 - f0) * sizeof(float));
 
     asxpy(S.frag_probs_prop[c],
           S.weight_matrix->rows[u],
@@ -1502,15 +1508,50 @@ float MCMCThread::recompute_component_probability(unsigned int u, unsigned int v
           S.component_frag[c],
           S.weight_matrix->rowlens[v]);
 
-    return dotlog(S.frag_counts[c], S.frag_probs_prop[c], component_size);
+    return p0 - pf01 + dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0);
 }
 
-
-/* Use essentialy the Brent-Dekker algorithm to find slice extents. */
+/* Find slice extents for drawing inter transcript samples at the given slice
+ * height. How fast this function executes is the major bottleneck to sampler
+ * speed so a lot of optimization has gone into it. Consequently, it is probably
+ * the hairiest code in isolator, so tread lightly.
+ *
+ * This is essentially the Brent-Dekker algorithm which uses bisection and
+ * secant rule updates to find the point where p - slice_height = 0 with as few
+ * evaluations of the posterior as possible.
+ *
+ * There is also a bunch of work to recompute as little as possible when
+ * revaluating the posterior.
+ */
 float MCMCThread::transcript_slice_sample_search(float slice_height,
                                                  unsigned int u, unsigned int v,
                                                  float z0, float p0, bool left)
 {
+    /* Find the range of fragment indexes that are affected by updating the u/v
+     * mixture, so we can recompute as little as possible. */
+    unsigned int comp = S.transcript_component[u];
+    unsigned int f0 = S.component_frag[comp+1];
+    unsigned int f1 = S.component_frag[comp];
+    if (S.weight_matrix->rowlens[u] > 0) {
+        f0 = S.weight_matrix->idxs[u][0];
+        f1 = 1 + S.weight_matrix->idxs[u][S.weight_matrix->rowlens[u] - 1];
+    }
+
+    if (S.weight_matrix->rowlens[v] > 0) {
+        f0 = std::min(f0, S.weight_matrix->idxs[v][0]);
+        f1 = std::max(f1,  1 + S.weight_matrix->idxs[v][S.weight_matrix->rowlens[v] - 1]);
+    }
+
+    if (f0 > f1) f0 = f1 = S.component_frag[comp];
+    f0 -= S.component_frag[comp];
+    f1 -= S.component_frag[comp];
+
+    /* Round f0 down to the nearst 32-byte boundry so we can use avx/sse. */
+    f0 &= 0xfffffff8;
+
+    /* Current probability over [f0, f1). */
+    float pf01 = dotlog(S.frag_counts[comp] + f0, S.frag_probs[comp] + f0, f1 - f0);
+
     const float tmixuv = S.tmix[u] + S.tmix[v];
 
     static const float xmin  = constants::zero_eps;
@@ -1536,11 +1577,11 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
     // low end probability
     if (left) {
         lowp = recompute_component_probability(
-                u, v, low * tmixuv, (1.0f - low) * tmixuv);
+                u, v, low * tmixuv, (1.0f - low) * tmixuv, f0, f1, pf01, p0);
         while (!finite(lowp)) {
             low = std::min(xmax, low + xeps);
             lowp = recompute_component_probability(
-                    u, v, low * tmixuv, (1.0f - low) * tmixuv);
+                    u, v, low * tmixuv, (1.0f - low) * tmixuv, f0, f1, pf01, p0);
         }
     }
     else {
@@ -1553,11 +1594,11 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
     // high end likelihood
     if (!left) {
         highp = recompute_component_probability(u, v,
-                high * tmixuv, (1.0f - high) * tmixuv);
+                high * tmixuv, (1.0f - high) * tmixuv, f0, f1, pf01, p0);
         while (!finite(highp)) {
             high = std::max(xmin, high - xeps);
             highp = recompute_component_probability(u, v,
-                    high * tmixuv, (1.0f - high) * tmixuv);
+                    high * tmixuv, (1.0f - high) * tmixuv, f0, f1, pf01, p0);
         }
     }
     else {
@@ -1627,7 +1668,7 @@ slice_sample_search_test:
         mflag = false;
 
         sL = recompute_component_probability(
-                u, v, s * tmixuv, (1.0 - s) * tmixuv);
+                u, v, s * tmixuv, (1.0 - s) * tmixuv, f0, f1, pf01, p0);
         sL -= slice_height;
 
         d = c;

@@ -57,6 +57,18 @@ bool Alignment::operator != (const bam1_t* b) const
 }
 
 
+bool Alignment::operator < (const Alignment& other) const
+{
+    if      (start  != other.start)  return start < other.start;
+    else if (end    != other.end)    return end < other.end;
+    else if (strand != other.strand) return strand < other.strand;
+    else if (cigar_len != other.cigar_len) return cigar_len < other.cigar_len;
+    else {
+        return memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t));
+    }
+}
+
+
 CigarIterator::CigarIterator()
     : owner(NULL)
     , i(0)
@@ -166,8 +178,19 @@ AlignmentPair::AlignmentPair()
 
 bool AlignmentPair::operator < (const AlignmentPair& other) const
 {
-    if (this->mate1 != other.mate1) return this->mate1 < other.mate1;
-    else                            return this->mate2 < other.mate2;
+    if (mate1 == NULL || other.mate1 == NULL) {
+        return mate1 < other.mate1;
+    }
+
+    if (mate1 != other.mate1) {
+        return *mate1 < *other.mate1;
+    }
+
+    if (mate2 == NULL || other.mate2 == NULL) {
+        return mate2 < other.mate2;
+    }
+
+    return *mate2 < *other.mate2;
 }
 
 
