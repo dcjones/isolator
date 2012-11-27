@@ -1476,7 +1476,12 @@ class MCMCThread : public InferenceThread
         float recompute_component_probability(unsigned int u, unsigned int v,
                                               float tmixu, float tmixv,
                                               unsigned int f0, unsigned int f1,
-                                              float pf01, float p0);
+                                              float pf01, float p0, float *d);
+
+        //float recompute_component_probability(unsigned int u, unsigned int v,
+                                              //float tmixu, float tmixv,
+                                              //unsigned int f0, unsigned int f1,
+                                              //float pf01, float p0);
 
         float transcript_slice_sample_search(float slice_height,
                                              unsigned int u, unsigned int v,
@@ -1487,7 +1492,7 @@ class MCMCThread : public InferenceThread
 float MCMCThread::recompute_component_probability(unsigned int u, unsigned int v,
                                                   float tmixu, float tmixv,
                                                   unsigned int f0, unsigned int f1,
-                                                  float pf01, float p0)
+                                                  float pf01, float p0, float* d)
 {
     unsigned int c = S.transcript_component[u];
     assert(c = S.transcript_component[v]);
@@ -1508,9 +1513,119 @@ float MCMCThread::recompute_component_probability(unsigned int u, unsigned int v
           S.component_frag[c],
           S.weight_matrix->rowlens[v]);
 
+    *d = 0.0;
+    for (unsigned int k = 0; k < S.weight_matrix->rowlens[u]; ++k) {
+        unsigned int j = S.weight_matrix->idxs[u][k];
+        float t = S.frag_counts[c][j - S.component_frag[c]] * S.weight_matrix->rows[u][k];
+        t /= S.frag_probs_prop[c][j - S.component_frag[c]];
+        *d += t;
+    }
+
+    for (unsigned int k = 0; k < S.weight_matrix->rowlens[v]; ++k) {
+        unsigned int j = S.weight_matrix->idxs[v][k];
+        float t = S.frag_counts[c][j - S.component_frag[c]] * S.weight_matrix->rows[v][k];
+        t /= S.frag_probs_prop[c][j - S.component_frag[c]];
+        *d -= t;
+    }
+
+    *d *= tmixu + tmixv;
+    *d /= M_LN2;
+
     return p0 - pf01 + dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0);
 }
 
+
+/* An experimental implementation using newton's method. */
+float MCMCThread::transcript_slice_sample_search(float slice_height,
+                                                 unsigned int u, unsigned int v,
+                                                 float z0, float p0, bool left)
+{
+    static const float peps = 1e-2f;
+    static const float zeps = 1e-6f;
+
+    /* Find the range of fragment indexes that are affected by updating the u/v
+     * mixture, so we can recompute as little as possible. */
+    unsigned int comp = S.transcript_component[u];
+    unsigned int f0 = S.component_frag[comp+1];
+    unsigned int f1 = S.component_frag[comp];
+    if (S.weight_matrix->rowlens[u] > 0) {
+        f0 = S.weight_matrix->idxs[u][0];
+        f1 = 1 + S.weight_matrix->idxs[u][S.weight_matrix->rowlens[u] - 1];
+    }
+
+    if (S.weight_matrix->rowlens[v] > 0) {
+        f0 = std::min(f0, S.weight_matrix->idxs[v][0]);
+        f1 = std::max(f1,  1 + S.weight_matrix->idxs[v][S.weight_matrix->rowlens[v] - 1]);
+    }
+
+    if (f0 > f1) f0 = f1 = S.component_frag[comp];
+    f0 -= S.component_frag[comp];
+    f1 -= S.component_frag[comp];
+
+    /* Round f0 down to the nearst 32-byte boundry so we can use avx/sse. */
+    f0 &= 0xfffffff8;
+
+    /* Current probability over [f0, f1). */
+    float pf01 = dotlog(S.frag_counts[comp] + f0, S.frag_probs[comp] + f0, f1 - f0);
+
+    const float tmixuv = S.tmix[u] + S.tmix[v];
+
+    /* current estimate */
+    float z = left ? constants::zero_eps : 1.0f - constants::zero_eps;
+
+    /* log probability minus slice height */
+    float p;
+
+    /* derivative */
+    float d;
+
+    p = recompute_component_probability(
+            u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
+
+    while (!finite(p)) {
+        if (left) z = std::min(1.0f, z + zeps);
+        else z = std::max(constants::zero_eps, z - zeps);
+        p = recompute_component_probability(
+                u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
+    }
+    p -= slice_height;
+
+    while (fabs(p) > peps) {
+        // Try to void converging to the wrong zero, use bisection when newton
+        // tells us to go too far.
+        if (left && z - p / d > z0) {
+            // bisection
+            if (p > 0) {
+                z /= 2.0;
+            }
+            else {
+                z = (z + z0) / 2.0;
+            }
+        }
+        else if (!left && z - p / d < z0) {
+            // bisection
+            if (p > 0) {
+                z = (z + 1.0) / 2.0;
+            }
+            else {
+                z = (z + z0) / 2.0;
+            }
+        }
+        else z = z - p / d;
+
+        if (z < 0.0) z = zeps;
+        else if (z > 1.0) z = 1.0 - zeps;
+
+        p = recompute_component_probability(
+                u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
+        p -= slice_height;
+    }
+
+    return z;
+}
+
+
+#if 0
 /* Find slice extents for drawing inter transcript samples at the given slice
  * height. How fast this function executes is the major bottleneck to sampler
  * speed so a lot of optimization has gone into it. Consequently, it is probably
@@ -1661,6 +1776,7 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
 
             /* bisection */
             s = (high + low) / 2.0;
+
             mflag = true;
         }
 
@@ -1692,6 +1808,7 @@ slice_sample_search_test:
 
     return std::min(xmax, std::max(xmin, s));
 }
+#endif
 
 
 void MCMCThread::run_inter_transcript(unsigned int u, unsigned int v)
@@ -1699,8 +1816,7 @@ void MCMCThread::run_inter_transcript(unsigned int u, unsigned int v)
     unsigned int c = S.transcript_component[u];
     assert(c == S.transcript_component[v]);
 
-    if (S.cmix[c] < constants::zero_eps ||
-        S.tmix[u] + S.tmix[v] < constants::zero_eps) return;
+    if (S.cmix[c] * (S.tmix[u] + S.tmix[v]) < constants::zero_eps) return;
 
     unsigned int component_size = S.component_frag[c + 1] - S.component_frag[c];
 
