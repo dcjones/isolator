@@ -1,4 +1,6 @@
 
+//#include <google/profiler.h>
+
 #include <cstdlib>
 #include <getopt.h>
 #include <unistd.h>
@@ -70,7 +72,7 @@ int quantify(int argc, char* argv[])
     const char* fa_fn  = NULL;
     const char* out_fn = "isolator.db";
     constants::num_threads = boost::thread::hardware_concurrency();
-    unsigned int num_samples = 1000;
+    unsigned int num_samples = 50;
     Logger::level logger_level = Logger::INFO;
 
     int opt;
@@ -155,6 +157,8 @@ int quantify(int argc, char* argv[])
     /* Prepare output database. */
     SampleDB db(out_fn, true);
 
+    //ProfilerStart("isolator.prof");
+
     /* Initialize the fragment model. */
     FragmentModel* fm = new FragmentModel();
     fm->estimate(ts, bam_fn, fa_fn);
@@ -163,6 +167,8 @@ int quantify(int argc, char* argv[])
     Sampler sampler(bam_fn, fa_fn, ts, *fm);
     delete fm; /* free a little memory */
     sampler.run(num_samples, db);
+
+    //ProfilerStop();
 
     Logger::info("Finished. Have a nice day!");
     Logger::end();

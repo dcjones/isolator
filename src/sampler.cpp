@@ -3,7 +3,6 @@
 #include <boost/thread.hpp>
 #include <gsl/gsl_randist.h>
 #include <gsl/gsl_rng.h>
-#include <nlopt.h>
 
 #include "constants.hpp"
 #include "hat-trie/hat-trie.h"
@@ -314,6 +313,13 @@ class WeightMatrix
 
 struct WeightMatrixEntry
 {
+    WeightMatrixEntry()
+        : i(-1)
+        , j(-1)
+        , w(NAN)
+    {
+    }
+
     unsigned int i, j;
     float w;
 };
@@ -336,15 +342,14 @@ class WeightMatrixIterator :
         {
             i = 0;
             k = 0;
-            while (i < owner.nrow && k >= owner.rowlens[i]) {
+            while (i < owner.nrow && 0 >= owner.rowlens[i]) {
                 ++i;
-                k = 0;
             }
 
             if (i < owner.nrow) {
                 entry.i = i;
-                entry.j = owner.idxs[i][k];
-                entry.w = owner.rows[i][k];
+                entry.j = owner.idxs[i][0];
+                entry.w = owner.rows[i][0];
             }
         }
 
@@ -1123,6 +1128,12 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     for (TSVec<FragIdxCount>::iterator i = nz_frag_counts.begin();
             i != nz_frag_counts.end(); ++i) {
         i->first = idxmap[i->first];
+    }
+
+    /* Update multiread fragment indexes */
+    for (TSVec<MultireadFrag>::iterator i = multiread_frags.begin();
+            i != multiread_frags.end(); ++i) {
+        i->second = idxmap[i->second];
     }
 
     delete [] idxmap;
@@ -1974,6 +1985,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
     Logger::pop_task(task_name);
 
+    out.begin_transaction();
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         out.insert_sampler_result(
                 t->transcript_id, t->gene_id,
@@ -1982,6 +1994,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
                 samples[t->id],
                 num_samples);
     }
+    out.commit_transaction();
 
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         delete [] samples[i];

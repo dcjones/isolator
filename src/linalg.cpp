@@ -122,13 +122,15 @@ static __m256 avx_log2(__m256 x)
      * */
 
     /* extract the exponent */
-    const __m128 c127 = _mm_set1_epi32(127);
+    const __m128i c127 = _mm_set1_epi32(127);
     m256i_m128i_t i;
     m256_m128_t e;
     i.a = _mm256_castps_si256(x);
-    e.b[0] = _mm_sub_epi32(_mm_srli_epi32(i.b[0], 23), c127);
-    e.b[1] = _mm_sub_epi32(_mm_srli_epi32(i.b[1], 23), c127);
-    e.a = _mm256_cvtepi32_ps(e.a);
+
+    m256i_m128i_t j;
+    j.b[0] = _mm_sub_epi32(_mm_srli_epi32(i.b[0], 23), c127);
+    j.b[1] = _mm_sub_epi32(_mm_srli_epi32(i.b[1], 23), c127);
+    e.a = _mm256_cvtepi32_ps(j.a);
 
     /* extract the mantissa */
     m256_m128_t m;
@@ -245,36 +247,41 @@ void asxpy(float* xs, const float* ys, const float c,
         unsigned int i[8];
     } iv;
 
+    union {
+        __m128i w;
+        unsigned int i[4];
+    } iv0, iv1;
+
     __m128i voff = _mm_set1_epi32((int) off);
 
     size_t i;
     for (i = 0; i < 8 * (n / 8); i += 8) {
         yv = _mm256_mul_ps(cv, _mm256_load_ps(ys + i));
-        iv.v = _mm256_load_si256(reinterpret_cast<const __m256i*>(idx + i));
-        iv.w[0] = _mm_sub_epi32(iv.w[0], voff);
-        iv.w[1] = _mm_sub_epi32(iv.w[1], voff);
+        iv.v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(idx + i));
+        iv0.w = _mm_sub_epi32(iv.w[0], voff);
+        iv1.w = _mm_sub_epi32(iv.w[1], voff);
 
         /* load from xs */
-        x.f[0] = xs[iv.i[0]];
-        x.f[1] = xs[iv.i[1]];
-        x.f[2] = xs[iv.i[2]];
-        x.f[3] = xs[iv.i[3]];
-        x.f[4] = xs[iv.i[4]];
-        x.f[5] = xs[iv.i[5]];
-        x.f[6] = xs[iv.i[6]];
-        x.f[7] = xs[iv.i[7]];
+        x.f[0] = xs[iv0.i[0]];
+        x.f[1] = xs[iv0.i[1]];
+        x.f[2] = xs[iv0.i[2]];
+        x.f[3] = xs[iv0.i[3]];
+        x.f[4] = xs[iv1.i[0]];
+        x.f[5] = xs[iv1.i[1]];
+        x.f[6] = xs[iv1.i[2]];
+        x.f[7] = xs[iv1.i[3]];
 
         x.v = _mm256_add_ps(x.v, yv);
 
         /* store in xs */
-        xs[iv.i[0]] = x.f[0];
-        xs[iv.i[1]] = x.f[1];
-        xs[iv.i[2]] = x.f[2];
-        xs[iv.i[3]] = x.f[3];
-        xs[iv.i[4]] = x.f[4];
-        xs[iv.i[5]] = x.f[5];
-        xs[iv.i[6]] = x.f[6];
-        xs[iv.i[7]] = x.f[7];
+        xs[iv0.i[0]] = x.f[0];
+        xs[iv0.i[1]] = x.f[1];
+        xs[iv0.i[2]] = x.f[2];
+        xs[iv0.i[3]] = x.f[3];
+        xs[iv1.i[0]] = x.f[4];
+        xs[iv1.i[1]] = x.f[5];
+        xs[iv1.i[2]] = x.f[6];
+        xs[iv1.i[3]] = x.f[7];
     }
 
     /* handle overhang */

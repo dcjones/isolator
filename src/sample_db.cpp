@@ -44,6 +44,18 @@ SampleDB::~SampleDB()
 }
 
 
+void SampleDB::begin_transaction()
+{
+    exec("begin transaction");
+}
+
+
+void SampleDB::commit_transaction()
+{
+    exec("commit transaction");
+}
+
+
 void SampleDB::insert_sampler_result(TranscriptID transcript_id,
                                      GeneID gene_id,
                                      float effective_length,

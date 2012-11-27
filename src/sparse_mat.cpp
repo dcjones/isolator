@@ -1,5 +1,6 @@
 
 #include <algorithm>
+#include <climits>
 
 #include "sparse_mat.hpp"
 #include "linalg.hpp"

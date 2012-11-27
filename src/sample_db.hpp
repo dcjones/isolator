@@ -21,6 +21,9 @@ class SampleDB
         SampleDB(const char* fn, bool writable);
         ~SampleDB();
 
+        void begin_transaction();
+        void commit_transaction();
+
         void insert_sampler_result(TranscriptID transcript_id,
                                    GeneID gene_id,
                                    float effective_length,
