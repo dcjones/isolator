@@ -26,7 +26,6 @@ isolator_LDADD = gtf/libgtf.la \
                  samtools/libbam.la \
                  seqbias/libseqbias.la \
                  sqlite3/libsqlite3.la \
-				 -lnlopt \
                  $(BOOST_THREAD_LIBS) \
                  $(BOOST_SYSTEM_LIBS) \
                  $(BOOST_TIMER_LIBS)

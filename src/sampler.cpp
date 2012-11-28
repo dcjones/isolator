@@ -1495,7 +1495,7 @@ float MCMCThread::recompute_component_probability(unsigned int u, unsigned int v
                                                   float pf01, float p0, float* d)
 {
     unsigned int c = S.transcript_component[u];
-    assert(c = S.transcript_component[v]);
+    assert(c == S.transcript_component[v]);
 
     acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0, (f1 - f0) * sizeof(float));
 
@@ -1542,6 +1542,7 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
 {
     static const float peps = 1e-2f;
     static const float zeps = 1e-6f;
+    static const float deps = 1e-4f;
 
     /* Find the range of fragment indexes that are affected by updating the u/v
      * mixture, so we can recompute as little as possible. */
@@ -1590,31 +1591,48 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
     }
     p -= slice_height;
 
-    while (fabs(p) > peps) {
+    /* upper or lower bound on z (depending on 'left') */
+    float z_bound = z0;
+
+    while (fabs(p) > peps && fabs(p/d) > deps) {
+        float z1 = z - p / d;
+
+        // Handle the case when the zero is out of bounds.
+        if (left && z <= zeps && (z1 < z || p > 0.0)) break;
+        if (!left && z >= 1.0 - zeps && (z1 > z || p > 0.0)) break;
+
+        if (p > 0) z_bound = z;
+
         // Try to void converging to the wrong zero, use bisection when newton
         // tells us to go too far.
-        if (left && z - p / d > z0) {
-            // bisection
-            if (p > 0) {
+        if (left) {
+            if (z1 > z0) {
+                if (p > 0) {
+                    z /= 2.0;
+                }
+                else {
+                    z = (z + z_bound) / 2.0;
+                }
+            }
+            else if (z1 < 0.0) {
                 z /= 2.0;
             }
-            else {
-                z = (z + z0) / 2.0;
-            }
+            else z = z1;
         }
-        else if (!left && z - p / d < z0) {
-            // bisection
-            if (p > 0) {
+        else {
+            if (z1 < z0) {
+                if (p > 0) {
+                    z = (z + 1.0) / 2.0;
+                }
+                else {
+                    z = (z + z_bound) / 2.0;
+                }
+            }
+            else if (z1 > 1.0) {
                 z = (z + 1.0) / 2.0;
             }
-            else {
-                z = (z + z0) / 2.0;
-            }
+            else z = z1;
         }
-        else z = z - p / d;
-
-        if (z < 0.0) z = zeps;
-        else if (z > 1.0) z = 1.0 - zeps;
 
         p = recompute_component_probability(
                 u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
