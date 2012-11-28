@@ -39,7 +39,7 @@ float fastlog2(float x_)
 
 
 /* AVX versions */
-#if defined(HAVE_AVX) && defined(HAVE_IMMINTRIN_H) && defined(__AVX__)
+#if defined(HAVE_IMMINTRIN_H) && defined(USE_AVX) && defined(__AVX__)
 
 #include <immintrin.h>
 
@@ -367,7 +367,7 @@ float asxtydsz(const float* xs, const float* ys, const float* zs,
 
 
 /* SSE2 versions */
-#elif defined(HAVE_IMMINTRIN_H) && defined(HAVE_SSE2) && defined(__SSE2__)
+#elif defined(HAVE_IMMINTRIN_H) && defined(USE_SSE2) && defined(__SSE2__)
 
 #include <immintrin.h>
 
@@ -453,7 +453,7 @@ static __m128 sse_log2(__m128 x)
     p = _mm_add_ps(_mm_mul_ps(p, _mm_sub_ps(m, one)), e);
 
     /* handle the case with x= < 0.0 */
-#if (defined(HAVE_SSE41) && defined(__SSE41__)) || (defined(HAVE_SSE42) && defined(__SSE42__))
+#if (defined(__SSE41__) && defined(USE_SSE4_1)) || (defined(__SSE42__) && defined(USE_SSE4_2))
     p = _mm_blendv_ps(p, _mm_set1_ps(-INFINITY), _mm_cmple_ps(x, _mm_setzero_ps()));
 #else
     // TODO: test this
@@ -575,6 +575,14 @@ void asxpy(float* xs, const float* ys, const float c,
         case 2: xs[idx[i] - off] += c * ys[i]; ++i;
         case 1: xs[idx[i] - off] += c * ys[i];
     }
+}
+
+float asxtydsz(const float* xs, const float* ys, const float* zs,
+               const unsigned int* idx, const unsigned int off,
+               const size_t n)
+{
+    // TODO: write this
+    return 0.0;
 }
 
 
