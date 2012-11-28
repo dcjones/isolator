@@ -1514,6 +1514,16 @@ float MCMCThread::recompute_component_probability(unsigned int u, unsigned int v
           S.weight_matrix->rowlens[v]);
 
     *d = 0.0;
+    *d += asxtydsz(S.frag_counts[c], S.weight_matrix->rows[u], S.frag_probs_prop[c],
+                   S.weight_matrix->idxs[u], S.component_frag[c],
+                   S.weight_matrix->rowlens[u]);
+
+    *d -= asxtydsz(S.frag_counts[c], S.weight_matrix->rows[v], S.frag_probs_prop[c],
+                   S.weight_matrix->idxs[v], S.component_frag[c],
+                   S.weight_matrix->rowlens[v]);
+
+
+#if 0
     for (unsigned int k = 0; k < S.weight_matrix->rowlens[u]; ++k) {
         unsigned int j = S.weight_matrix->idxs[u][k];
         float t = S.frag_counts[c][j - S.component_frag[c]] * S.weight_matrix->rows[u][k];
@@ -1527,6 +1537,7 @@ float MCMCThread::recompute_component_probability(unsigned int u, unsigned int v
         t /= S.frag_probs_prop[c][j - S.component_frag[c]];
         *d -= t;
     }
+#endif
 
     *d *= tmixu + tmixv;
     *d /= M_LN2;
@@ -1594,6 +1605,7 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
     /* upper or lower bound on z (depending on 'left') */
     float z_bound = z0;
 
+    unsigned int iter = 0;
     while (fabs(p) > peps && fabs(p/d) > deps) {
         float z1 = z - p / d;
 
@@ -1637,6 +1649,8 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
         p = recompute_component_probability(
                 u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
         p -= slice_height;
+
+        if (++iter > constants::max_newton_iter) break;
     }
 
     return z;

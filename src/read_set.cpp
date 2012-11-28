@@ -37,7 +37,7 @@ Alignment::Alignment(const bam1_t* b)
 
 Alignment::~Alignment()
 {
-    delete cigar;
+    delete [] cigar;
 }
 
 

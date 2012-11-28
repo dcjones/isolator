@@ -247,41 +247,36 @@ void asxpy(float* xs, const float* ys, const float c,
         unsigned int i[8];
     } iv;
 
-    union {
-        __m128i w;
-        unsigned int i[4];
-    } iv0, iv1;
-
     __m128i voff = _mm_set1_epi32((int) off);
 
     size_t i;
     for (i = 0; i < 8 * (n / 8); i += 8) {
         yv = _mm256_mul_ps(cv, _mm256_load_ps(ys + i));
-        iv.v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(idx + i));
-        iv0.w = _mm_sub_epi32(iv.w[0], voff);
-        iv1.w = _mm_sub_epi32(iv.w[1], voff);
+        iv.v = _mm256_load_si256(reinterpret_cast<const __m256i*>(idx + i));
+        iv.w[0] = _mm_sub_epi32(iv.w[0], voff);
+        iv.w[1] = _mm_sub_epi32(iv.w[1], voff);
 
         /* load from xs */
-        x.f[0] = xs[iv0.i[0]];
-        x.f[1] = xs[iv0.i[1]];
-        x.f[2] = xs[iv0.i[2]];
-        x.f[3] = xs[iv0.i[3]];
-        x.f[4] = xs[iv1.i[0]];
-        x.f[5] = xs[iv1.i[1]];
-        x.f[6] = xs[iv1.i[2]];
-        x.f[7] = xs[iv1.i[3]];
+        x.f[0] = xs[iv.i[0]];
+        x.f[1] = xs[iv.i[1]];
+        x.f[2] = xs[iv.i[2]];
+        x.f[3] = xs[iv.i[3]];
+        x.f[4] = xs[iv.i[4]];
+        x.f[5] = xs[iv.i[5]];
+        x.f[6] = xs[iv.i[6]];
+        x.f[7] = xs[iv.i[7]];
 
         x.v = _mm256_add_ps(x.v, yv);
 
         /* store in xs */
-        xs[iv0.i[0]] = x.f[0];
-        xs[iv0.i[1]] = x.f[1];
-        xs[iv0.i[2]] = x.f[2];
-        xs[iv0.i[3]] = x.f[3];
-        xs[iv1.i[0]] = x.f[4];
-        xs[iv1.i[1]] = x.f[5];
-        xs[iv1.i[2]] = x.f[6];
-        xs[iv1.i[3]] = x.f[7];
+        xs[iv.i[0]] = x.f[0];
+        xs[iv.i[1]] = x.f[1];
+        xs[iv.i[2]] = x.f[2];
+        xs[iv.i[3]] = x.f[3];
+        xs[iv.i[4]] = x.f[4];
+        xs[iv.i[5]] = x.f[5];
+        xs[iv.i[6]] = x.f[6];
+        xs[iv.i[7]] = x.f[7];
     }
 
     /* handle overhang */
@@ -296,6 +291,75 @@ void asxpy(float* xs, const float* ys, const float c,
         case 1: xs[idx[i] - off] += c * ys[i];
     }
 }
+
+
+float asxtydsz(const float* xs, const float* ys, const float* zs,
+               const unsigned int* idx, const unsigned int off,
+               const size_t n)
+{
+    union {
+        __m256 v;
+        float f[8];
+    } ans, x, z;
+    ans.v = _mm256_setzero_ps();
+
+    union {
+        __m256i v;
+        __m128i w[2];
+        unsigned int i[8];
+    } iv;
+
+    __m128i voff = _mm_set1_epi32((int) off);
+
+    size_t i;
+    for (i = 0; i < 8 * (n / 8); i += 8) {
+        __m256 y = _mm256_load_ps(ys + i);
+        iv.v = _mm256_load_si256(reinterpret_cast<const __m256i*>(idx + i));
+        iv.w[0] = _mm_sub_epi32(iv.w[0], voff);
+        iv.w[1] = _mm_sub_epi32(iv.w[1], voff);
+
+        /* load from xs */
+        x.f[0] = xs[iv.i[0]];
+        x.f[1] = xs[iv.i[1]];
+        x.f[2] = xs[iv.i[2]];
+        x.f[3] = xs[iv.i[3]];
+        x.f[4] = xs[iv.i[4]];
+        x.f[5] = xs[iv.i[5]];
+        x.f[6] = xs[iv.i[6]];
+        x.f[7] = xs[iv.i[7]];
+
+        /* load from zs */
+        z.f[0] = zs[iv.i[0]];
+        z.f[1] = zs[iv.i[1]];
+        z.f[2] = zs[iv.i[2]];
+        z.f[3] = zs[iv.i[3]];
+        z.f[4] = zs[iv.i[4]];
+        z.f[5] = zs[iv.i[5]];
+        z.f[6] = zs[iv.i[6]];
+        z.f[7] = zs[iv.i[7]];
+
+        ans.v = _mm256_add_ps(ans.v, _mm256_div_ps(_mm256_mul_ps(x.v, y), z.v));
+    }
+
+    float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3] +
+                 ans.f[4] + ans.f[5] + ans.f[6] + ans.f[7];
+
+
+    /* handle overhang */
+    i = 8 * (n / 8);
+    switch (n % 8) {
+        case 7: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
+        case 6: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
+        case 5: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
+        case 4: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
+        case 3: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
+        case 2: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
+        case 1: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off];
+    }
+
+    return fans;
+}
+
 
 
 /* SSE2 versions */
@@ -571,5 +635,16 @@ void asxpy(float* xs, const float* ys, const float c,
     }
 }
 
+
+float asxtydsz(const float* xs, const float* ys, const float* zs
+               const unsigned int* idx, const unsigned int off,
+               const size_t n)
+{
+    float ans = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        ans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off];
+    }
+    return ans;
+}
 
 #endif

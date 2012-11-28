@@ -49,6 +49,20 @@ void asxpy(float* xs, const float* ys, const float c,
            const unsigned int* idx, const unsigned int off,
            const size_t n);
 
+/* ssxtydsz: sum of sparse x times y divided by sparse z.
+ *
+ * ...I know, I know, but ou try coming up with a better name!
+ *
+ * This computes the sum of
+ *   xs[idx[i] - off] * ys[i] / zs[idx[i] - off]
+ *
+ * for 0 <= i < n.
+ */
+float asxtydsz(const float* xs, const float* ys, const float* zs,
+               const unsigned int* idx, const unsigned int off,
+               const size_t n);
+
+
 /* Fast log2 approximation. */
 float fastlog2(float x);
 

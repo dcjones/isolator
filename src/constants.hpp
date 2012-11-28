@@ -114,6 +114,10 @@ namespace constants
      * improved in this many iterations. */
     extern unsigned int p_max_it_limit;
 
+    /* When using newton's method to find slice extents, only allow so many
+     * iterations to avoid cycles. */
+    extern unsigned int max_newton_iter;
+
 }
 
 #endif
