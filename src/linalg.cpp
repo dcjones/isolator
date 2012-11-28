@@ -43,6 +43,42 @@ float fastlog2(float x_)
 
 #include <immintrin.h>
 
+#ifdef _MSC_VER
+  #define ALIGN32_START __declspec(align(32))
+  #define ALIGN32_END
+  #define ALIGN32_START __declspec(align(16))
+  #define ALIGN32_END
+#else
+  #define ALIGN32_START
+  #define ALIGN32_END __attribute__((aligned(32)))
+  #define ALIGN16_START
+  #define ALIGN16_END __attribute__((aligned(16)))
+#endif
+
+#define PS32_CONST(name, c) \
+    static const ALIGN32_START float ps32_##name[8] ALIGN32_END = {c, c, c, c, c, c, c, c}
+
+#define PI32_CONST(name, c) \
+    static const ALIGN32_START int pi32_##name[8] ALIGN32_END = {c, c, c, c, c, c, c, c}
+
+#define PS16_CONST(name, c) \
+    static const ALIGN16_START float ps16_##name[8] ALIGN16_END = {c, c, c, c}
+
+#define PI16_CONST(name, c) \
+    static const ALIGN16_START int pi16_##name[8] ALIGN16_END = {c, c, c, c}
+
+PS32_CONST(1, 1.0f);
+PI32_CONST(inv_mant_mask, ~0x7f800000);
+PI16_CONST(0x7f, 0x7f);
+
+PS32_CONST(log2_c0, 3.1157899f);
+PS32_CONST(log2_c1, -3.3241990f);
+PS32_CONST(log2_c2, 2.5988452f);
+PS32_CONST(log2_c3, -1.2315303f);
+PS32_CONST(log2_c4, 3.1821337e-1f);
+PS32_CONST(log2_c5, -3.4436006e-2f);
+PS32_CONST(neginf, (float) -INFINITY);
+
 
 void* aalloc(size_t n)
 {
@@ -89,72 +125,36 @@ void acopy(void* dest_, const void* src_, size_t n)
 }
 
 
-typedef union {
-    __m256i a;
-    __m128i b[2];
-} m256i_m128i_t;
-
-typedef union {
-    __m256 a;
-    __m128 b[2];
-} m256_m128_t;
-
-/* Macros for evaluating ploynomials. */
-#define AVX_POLY0(x, c0) _mm256_set1_ps(c0)
-#define AVX_POLY1(x, c0, c1) \
-    _mm256_add_ps(_mm256_mul_ps(AVX_POLY0(x, c1), x), _mm256_set1_ps(c0))
-#define AVX_POLY2(x, c0, c1, c2) \
-    _mm256_add_ps(_mm256_mul_ps(AVX_POLY1(x, c1, c2), x), _mm256_set1_ps(c0))
-#define AVX_POLY3(x, c0, c1, c2, c3) \
-    _mm256_add_ps(_mm256_mul_ps(AVX_POLY2(x, c1, c2, c3), x), _mm256_set1_ps(c0))
-#define AVX_POLY4(x, c0, c1, c2, c3, c4) \
-    _mm256_add_ps(_mm256_mul_ps(AVX_POLY3(x, c1, c2, c3, c4), x), _mm256_set1_ps(c0))
-#define AVX_POLY5(x, c0, c1, c2, c3, c4, c5) \
-    _mm256_add_ps(_mm256_mul_ps(AVX_POLY4(x, c1, c2, c3, c4, c5), x), _mm256_set1_ps(c0))
-
-
-/* Comptue log2 over an avx single vector. */
+/* Hopefully a cleaner version of avx_log2, following intels' amaths. */
 static __m256 avx_log2(__m256 x)
 {
-    /* TODO: this can be written using avx2 instructions, without resorting to
-     * SSE for integer operations, but I won't bother until I actually have an
-     * cpu I can test that on.
-     * */
-
     /* extract the exponent */
-    const __m128i c127 = _mm_set1_epi32(127);
-    m256i_m128i_t i;
-    m256_m128_t e;
-    i.a = _mm256_castps_si256(x);
-
-    m256i_m128i_t j;
-    j.b[0] = _mm_sub_epi32(_mm_srli_epi32(i.b[0], 23), c127);
-    j.b[1] = _mm_sub_epi32(_mm_srli_epi32(i.b[1], 23), c127);
-    e.a = _mm256_cvtepi32_ps(j.a);
+    union {
+        __m256i a;
+        __m128i b[2];
+    } xi;
+    xi.a = _mm256_castps_si256(x);
+    xi.b[0] = _mm_sub_epi32(_mm_srli_epi32(xi.b[0], 23), *(__m128i*) pi16_0x7f);
+    xi.b[1] = _mm_sub_epi32(_mm_srli_epi32(xi.b[1], 23), *(__m128i*) pi16_0x7f);
+    __m256 e = _mm256_cvtepi32_ps(xi.a);
 
     /* extract the mantissa */
-    m256_m128_t m;
-    const __m256 c1 = _mm256_set1_ps(1.0f);
-    const __m128i mant_mask = _mm_set1_epi32(0x007FFFFF);
-    m.b[0] = _mm_castsi128_ps(_mm_and_si128(i.b[0], mant_mask));
-    m.b[1] = _mm_castsi128_ps(_mm_and_si128(i.b[1], mant_mask));
-    m.a = _mm256_or_ps(m.a, c1);
+    __m256 m = _mm256_and_ps(x, *(__m256*) pi32_inv_mant_mask);
+    m = _mm256_or_ps(m, *(__m256*) ps32_1);
 
-    /* polynomial approximation on the mantissa */
-    __m256 p = AVX_POLY5(m.a, 3.1157899f,
-                             -3.3241990f,
-                              2.5988452f,
-                             -1.2315303f,
-                              3.1821337e-1f,
-                             -3.4436006e-2f);
+    __m256 a = *(__m256*) ps32_log2_c5;
+    a = _mm256_add_ps(_mm256_mul_ps(m, a), *(__m256*) ps32_log2_c4);
+    a = _mm256_add_ps(_mm256_mul_ps(m, a), *(__m256*) ps32_log2_c3);
+    a = _mm256_add_ps(_mm256_mul_ps(m, a), *(__m256*) ps32_log2_c2);
+    a = _mm256_add_ps(_mm256_mul_ps(m, a), *(__m256*) ps32_log2_c1);
+    a = _mm256_add_ps(_mm256_mul_ps(m, a), *(__m256*) ps32_log2_c0);
 
-    p = _mm256_add_ps(_mm256_mul_ps(p, _mm256_sub_ps(m.a, c1)), e.a);
+    a = _mm256_add_ps(_mm256_mul_ps(a, _mm256_sub_ps(m, *(__m256*) ps32_1)), e);
 
     /* Handle the log(x) = -INFINITY, for x <= 0 cases. */
-    p = _mm256_blendv_ps(p, _mm256_set1_ps(-INFINITY),
+    a = _mm256_blendv_ps(a, *(__m256*) ps32_neginf,
                          _mm256_cmp_ps(x, _mm256_setzero_ps(), _CMP_LE_OQ));
-
-    return p;
+    return a;
 }
 
 
@@ -242,41 +242,43 @@ void asxpy(float* xs, const float* ys, const float c,
     } x;
 
     union {
-        __m256i v;
-        __m128i w[2];
-        unsigned int i[8];
-    } iv;
+        __m128i a;
+        unsigned int b[4];
+    } i0, i1;
 
     __m128i voff = _mm_set1_epi32((int) off);
 
     size_t i;
     for (i = 0; i < 8 * (n / 8); i += 8) {
         yv = _mm256_mul_ps(cv, _mm256_load_ps(ys + i));
-        iv.v = _mm256_load_si256(reinterpret_cast<const __m256i*>(idx + i));
-        iv.w[0] = _mm_sub_epi32(iv.w[0], voff);
-        iv.w[1] = _mm_sub_epi32(iv.w[1], voff);
+
+        i0.a = _mm_load_si128((__m128i*)(idx + i));
+        i0.a = _mm_sub_epi32(i0.a, voff);
+
+        i1.a = _mm_load_si128((__m128i*)(idx + i + 4));
+        i1.a = _mm_sub_epi32(i1.a, voff);
 
         /* load from xs */
-        x.f[0] = xs[iv.i[0]];
-        x.f[1] = xs[iv.i[1]];
-        x.f[2] = xs[iv.i[2]];
-        x.f[3] = xs[iv.i[3]];
-        x.f[4] = xs[iv.i[4]];
-        x.f[5] = xs[iv.i[5]];
-        x.f[6] = xs[iv.i[6]];
-        x.f[7] = xs[iv.i[7]];
+        x.f[0] = xs[i0.b[0]];
+        x.f[1] = xs[i0.b[1]];
+        x.f[2] = xs[i0.b[2]];
+        x.f[3] = xs[i0.b[3]];
+        x.f[4] = xs[i1.b[0]];
+        x.f[5] = xs[i1.b[1]];
+        x.f[6] = xs[i1.b[2]];
+        x.f[7] = xs[i1.b[3]];
 
         x.v = _mm256_add_ps(x.v, yv);
 
         /* store in xs */
-        xs[iv.i[0]] = x.f[0];
-        xs[iv.i[1]] = x.f[1];
-        xs[iv.i[2]] = x.f[2];
-        xs[iv.i[3]] = x.f[3];
-        xs[iv.i[4]] = x.f[4];
-        xs[iv.i[5]] = x.f[5];
-        xs[iv.i[6]] = x.f[6];
-        xs[iv.i[7]] = x.f[7];
+        xs[i0.b[0]] = x.f[0];
+        xs[i0.b[1]] = x.f[1];
+        xs[i0.b[2]] = x.f[2];
+        xs[i0.b[3]] = x.f[3];
+        xs[i1.b[0]] = x.f[4];
+        xs[i1.b[1]] = x.f[5];
+        xs[i1.b[2]] = x.f[6];
+        xs[i1.b[3]] = x.f[7];
     }
 
     /* handle overhang */
@@ -304,39 +306,41 @@ float asxtydsz(const float* xs, const float* ys, const float* zs,
     ans.v = _mm256_setzero_ps();
 
     union {
-        __m256i v;
-        __m128i w[2];
-        unsigned int i[8];
-    } iv;
+        __m128i a;
+        unsigned int b[4];
+    } i0, i1;
 
     __m128i voff = _mm_set1_epi32((int) off);
 
     size_t i;
     for (i = 0; i < 8 * (n / 8); i += 8) {
         __m256 y = _mm256_load_ps(ys + i);
-        iv.v = _mm256_load_si256(reinterpret_cast<const __m256i*>(idx + i));
-        iv.w[0] = _mm_sub_epi32(iv.w[0], voff);
-        iv.w[1] = _mm_sub_epi32(iv.w[1], voff);
+
+        i0.a = _mm_load_si128((__m128i*)(idx + i));
+        i0.a = _mm_sub_epi32(i0.a, voff);
+
+        i1.a = _mm_load_si128((__m128i*)(idx + i + 4));
+        i1.a = _mm_sub_epi32(i1.a, voff);
 
         /* load from xs */
-        x.f[0] = xs[iv.i[0]];
-        x.f[1] = xs[iv.i[1]];
-        x.f[2] = xs[iv.i[2]];
-        x.f[3] = xs[iv.i[3]];
-        x.f[4] = xs[iv.i[4]];
-        x.f[5] = xs[iv.i[5]];
-        x.f[6] = xs[iv.i[6]];
-        x.f[7] = xs[iv.i[7]];
+        x.f[0] = xs[i0.b[0]];
+        x.f[1] = xs[i0.b[1]];
+        x.f[2] = xs[i0.b[2]];
+        x.f[3] = xs[i0.b[3]];
+        x.f[4] = xs[i1.b[0]];
+        x.f[5] = xs[i1.b[1]];
+        x.f[6] = xs[i1.b[2]];
+        x.f[7] = xs[i1.b[3]];
 
         /* load from zs */
-        z.f[0] = zs[iv.i[0]];
-        z.f[1] = zs[iv.i[1]];
-        z.f[2] = zs[iv.i[2]];
-        z.f[3] = zs[iv.i[3]];
-        z.f[4] = zs[iv.i[4]];
-        z.f[5] = zs[iv.i[5]];
-        z.f[6] = zs[iv.i[6]];
-        z.f[7] = zs[iv.i[7]];
+        z.f[0] = zs[i0.b[0]];
+        z.f[1] = zs[i0.b[1]];
+        z.f[2] = zs[i0.b[2]];
+        z.f[3] = zs[i0.b[3]];
+        z.f[4] = zs[i1.b[0]];
+        z.f[5] = zs[i1.b[1]];
+        z.f[6] = zs[i1.b[2]];
+        z.f[7] = zs[i1.b[3]];
 
         ans.v = _mm256_add_ps(ans.v, _mm256_div_ps(_mm256_mul_ps(x.v, y), z.v));
     }
