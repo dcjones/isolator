@@ -1,0 +1,8 @@
+#cmakedefine HAVE_IMMINTRIN_H
+#cmakedefine USE_SSE2
+#cmakedefine USE_SSE3
+#cmakedefine USE_SSE4_1
+#cmakedefine USE_SSE4_2
+#cmakedefine USE_SSE4a
+#cmakedefine USE_AVX
+#define VERSION "${VERSION}"
