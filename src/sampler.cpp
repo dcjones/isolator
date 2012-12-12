@@ -810,9 +810,12 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         /* Skip multireads for now. */
         if (fm.blacklist.get(r->first) >= 0) continue;
         int multiread_num = fm.multireads.get(r->first);
+        /* XXX: Skipping over multi-reads until this is fixed. */
         if (multiread_num >= 0) {
+#if 0
             multiread_set.insert(std::make_pair((unsigned int) multiread_num,
                                                 r->second));
+#endif
             continue;
         }
 
@@ -867,8 +870,15 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
     for (TranscriptSetLocus::iterator t = locus->ts.begin();
             t != locus->ts.end(); ++t) {
         transcript_sequence_bias(*locus, *t);
-        transcript_weights[t->id] = std::max(constants::min_transcript_weight,
-                                             transcript_weight(*t));
+        transcript_weights[t->id] = transcript_weight(*t);
+
+        /* If a transcript is very unlikely to have been sequenced at all,
+         * ignore it. Otherwise quite a few outliers will be generated in which
+         * the annotated transcript is much shorter that what is actually being
+         * transcribed. */
+        if (transcript_weights[t->id] < constants::min_transcript_weight) {
+            continue;
+        }
 
         for (MultireadSet::iterator r = multiread_set.begin();
              r != multiread_set.end(); ++r) {
@@ -2021,6 +2031,16 @@ class MultireadSamplerThread
 
 void Sampler::run(unsigned int num_samples, SampleDB& out)
 {
+    int idx = 0, aidx = -1, bidx = -1;
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t, ++idx) {
+        if (t->transcript_id == "ENST00000488441") {
+            aidx = t->id;
+        }
+        else if (t->transcript_id == "ENST00000425052") {
+            bidx = t->id;
+        }
+    }
+
     /* Initial mixtures */
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         tmix[i] = 1.0 / (float) component_num_transcripts[transcript_component[i]];
@@ -2148,7 +2168,12 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
             if (fabsf(p - p_max) / fabsf(p) < constants::maxpost_rel_error) {
                 for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-                    maxpost_tmix[i] = tmix[i] * cmix[transcript_component[i]];
+                    if (transcript_weights[i] < constants::min_transcript_weight) {
+                        maxpost_tmix[i] = 0.0;
+                    }
+                    else {
+                        maxpost_tmix[i] = tmix[i] * cmix[transcript_component[i]];
+                    }
                 }
                 hillclimb = false;
                 for (unsigned int i = 0; i < constants::num_threads; ++i) {
@@ -2164,7 +2189,12 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
         }
         else {
             for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-                samples[i][sample_num] = tmix[i] * cmix[transcript_component[i]];
+                if (transcript_weights[i] < constants::min_transcript_weight) {
+                    samples[i][sample_num] = 0.0;
+                }
+                else {
+                    samples[i][sample_num] = tmix[i] * cmix[transcript_component[i]];
+                }
             }
             ++sample_num;
         }
