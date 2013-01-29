@@ -582,7 +582,12 @@ void FragmentModel::estimate(TranscriptSet& ts,
         }
     }
 
-    if (frag_lens.size() > constants::frag_len_min_pe_reads) {
+    size_t frag_len_pe_reads = 0;
+    for (g = frag_lens.begin(); g != frag_lens.end(); ++g) {
+        frag_len_pe_reads += g->second;
+    }
+
+    if (frag_len_pe_reads > constants::frag_len_min_pe_reads) {
         unsigned int* frag_len_vals = new unsigned int [frag_lens.size()];
         unsigned int* frag_len_lens = new unsigned int [frag_lens.size()];
         unsigned int sum_lens = 0;
