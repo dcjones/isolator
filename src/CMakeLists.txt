@@ -8,6 +8,7 @@ add_subdirectory(sqlite3)
 add_executable(isolator
                common.cpp
                constants.cpp
+               cpuid.cpp
                emp_dist.cpp
                fragment_model.cpp
                intervals.cpp

@@ -1,53 +1,35 @@
 
+#include "common.hpp"
 #include "config.h"
+#include "cpuid.hpp"
 #include "linalg.hpp"
 #include "logger.hpp"
 
 #include <math.h>
-
-#define POLY0(x, c0) (c0)
-#define POLY1(x, c0, c1) (x * POLY0(x, c1) + c0)
-#define POLY2(x, c0, c1, c2) (x * POLY1(x, c1, c2) + c0)
-#define POLY3(x, c0, c1, c2, c3) (x * POLY2(x, c1, c2, c3) + c0)
-#define POLY4(x, c0, c1, c2, c3, c4) (x * POLY3(x, c1, c2, c3, c4) + c0)
-#define POLY5(x, c0, c1, c2, c3, c4, c5) (x * POLY4(x, c1, c2, c3, c4, c5) + c0)
-
-float fastlog2(float x_)
-{
-    if (x_ <= 0.0f) return -INFINITY;
-
-    union {
-        float   f;
-        int32_t i;
-    } x, y, one;
-
-    one.f = 1.0f;
-    x.f = x_;
-
-    float e = (float) ((x.i >> 23) - 127);
-
-    y.i = (x.i & 0x007FFFFF) | one.i;
-    float m = y.f;
-
-    float p = POLY5(m, 3.1157899f, -3.3241990f, 2.5988452f, -1.2315303f,  3.1821337e-1f, -3.4436006e-2f);
-
-    p *= m - 1.0;
-
-    return p + e;
-}
-
-
-
-/* AVX versions */
-#if defined(HAVE_IMMINTRIN_H) && defined(USE_AVX) && defined(__AVX__)
-
 #include <immintrin.h>
+
+
+/* The implementation of each of these functions is determined at run time */
+void* (*aalloc)(size_t n) = NULL;
+void (*afree)(void*) = NULL;
+void (*acopy)(void* dest, const void* src, size_t n) = NULL;
+float (*dotlog)(const float* xs, const float* ys, const size_t n) = NULL;
+float (*dotlogc)(const float* xs, const float* ys, const size_t n, const float c) = NULL;
+void (*asxpy)(float* xs, const float* ys, const float c,
+              const unsigned int* idx, const unsigned int off,
+              const size_t n) = NULL;
+float (*asxtydsz)(const float* xs, const float* ys, const float* zs,
+                  const unsigned int* idx, const unsigned int off,
+                  const size_t n) = NULL;
+static __m128 (*log2_sse)(__m128 x) = NULL;
+const char* LINALG_INSTR_SET = "";
+
 
 #ifdef _MSC_VER
   #define ALIGN32_START __declspec(align(32))
   #define ALIGN32_END
-  #define ALIGN32_START __declspec(align(16))
-  #define ALIGN32_END
+  #define ALIGN16_START __declspec(align(16))
+  #define ALIGN16_END
 #else
   #define ALIGN32_START
   #define ALIGN32_END __attribute__((aligned(32)))
@@ -67,6 +49,42 @@ float fastlog2(float x_)
 #define PI16_CONST(name, c) \
     static const ALIGN16_START int pi16_##name[8] ALIGN16_END = {c, c, c, c}
 
+
+
+
+float fastlog2(float x_)
+{
+    if (x_ <= 0.0f) return -INFINITY;
+
+    union {
+        float   f;
+        int32_t i;
+    } x, y, one;
+
+    one.f = 1.0f;
+    x.f = x_;
+
+    float e = (float) ((x.i >> 23) - 127);
+
+    y.i = (x.i & 0x007FFFFF) | one.i;
+    float m = y.f;
+
+    float p = -3.4436006e-2f;
+    p = m * p +  3.1821337e-1f;
+    p = m * p + -1.2315303f;
+    p = m * p +  2.5988452f;
+    p = m * p + -3.3241990f;
+    p = m * p +  3.1157899f;
+
+    p *= m - 1.0;
+
+    return p + e;
+}
+
+
+
+/* AVX versions */
+
 PS32_CONST(1, 1.0f);
 PI32_CONST(inv_mant_mask, ~0x7f800000);
 PI16_CONST(0x7f, 0x7f);
@@ -80,7 +98,7 @@ PS32_CONST(log2_c5, -3.4436006e-2f);
 PS32_CONST(neginf, (float) -INFINITY);
 
 
-void* aalloc(size_t n)
+void* aalloc_avx(size_t n)
 {
     void* xs = _mm_malloc(n, 32);
     if (xs == NULL) {
@@ -91,13 +109,13 @@ void* aalloc(size_t n)
 }
 
 
-void afree(void* xs)
+void afree_avx(void* xs)
 {
     _mm_free(xs);
 }
 
 
-void acopy(void* dest_, const void* src_, size_t n)
+void acopy_avx(void* dest_, const void* src_, size_t n)
 {
     assert(n % 4 == 0);
     n /= 4; /* bytes to 4-byte words */
@@ -126,7 +144,7 @@ void acopy(void* dest_, const void* src_, size_t n)
 
 
 /* Hopefully a cleaner version of avx_log2, following intels' amaths. */
-static __m256 avx_log2(__m256 x)
+static __m256 log2_avx(__m256 x)
 {
     /* extract the exponent */
     union {
@@ -158,7 +176,7 @@ static __m256 avx_log2(__m256 x)
 }
 
 
-float dotlog(const float* xs, const float* ys, const size_t n)
+float dotlog_avx(const float* xs, const float* ys, const size_t n)
 {
     union {
         __m256 v;
@@ -171,7 +189,7 @@ float dotlog(const float* xs, const float* ys, const size_t n)
     for (i = 0; i < n / 8; ++i) {
         xv = _mm256_load_ps(xs + 8 * i);
         yv = _mm256_load_ps(ys + 8 * i);
-        ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(xv, avx_log2(yv)));
+        ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(xv, log2_avx(yv)));
     }
 
     float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3] +
@@ -193,7 +211,7 @@ float dotlog(const float* xs, const float* ys, const size_t n)
 }
 
 
-float dotlogc(const float* xs, const float* ys, const size_t n, const float c)
+float dotlogc_avx(const float* xs, const float* ys, const size_t n, const float c)
 {
     union {
         __m256 v;
@@ -208,7 +226,7 @@ float dotlogc(const float* xs, const float* ys, const size_t n, const float c)
     for (i = 0; i < n / 8; ++i) {
         xv = _mm256_load_ps(xs + 8 * i);
         yv = _mm256_mul_ps(cv, _mm256_load_ps(ys + 8 * i));
-        ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(xv, avx_log2(yv)));
+        ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(xv, log2_avx(yv)));
     }
 
     float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3] +
@@ -230,9 +248,9 @@ float dotlogc(const float* xs, const float* ys, const size_t n, const float c)
 }
 
 
-void asxpy(float* xs, const float* ys, const float c,
-            const unsigned int* idx, const unsigned int off,
-            const size_t n)
+void asxpy_avx(float* xs, const float* ys, const float c,
+               const unsigned int* idx, const unsigned int off,
+               const size_t n)
 {
     __m256 yv;
     __m256 cv = _mm256_set1_ps(c);
@@ -295,9 +313,9 @@ void asxpy(float* xs, const float* ys, const float c,
 }
 
 
-float asxtydsz(const float* xs, const float* ys, const float* zs,
-               const unsigned int* idx, const unsigned int off,
-               const size_t n)
+float asxtydsz_avx(const float* xs, const float* ys, const float* zs,
+                   const unsigned int* idx, const unsigned int off,
+                   const size_t n)
 {
     union {
         __m256 v;
@@ -365,13 +383,7 @@ float asxtydsz(const float* xs, const float* ys, const float* zs,
 }
 
 
-
-/* SSE2 versions */
-#elif defined(HAVE_IMMINTRIN_H) && defined(USE_SSE2) && defined(__SSE2__)
-
-#include <immintrin.h>
-
-void* aalloc(size_t n)
+void* aalloc_sse(size_t n)
 {
     void* xs = _mm_malloc(n, 16);
     if (xs == NULL) {
@@ -382,13 +394,13 @@ void* aalloc(size_t n)
 }
 
 
-void afree(void* xs)
+void afree_sse(void* xs)
 {
     _mm_free(xs);
 }
 
 
-void acopy(void* dest_, const void* src_, size_t n)
+void acopy_sse(void* dest_, const void* src_, size_t n)
 {
     assert(n % 4 == 0);
     n /= 4; /* bytes to 4-byte words */
@@ -412,23 +424,21 @@ void acopy(void* dest_, const void* src_, size_t n)
 }
 
 
-/* Macros for evaluating ploynomials. */
-#define SSE_POLY0(x, c0) _mm_set1_ps(c0)
-#define SSE_POLY1(x, c0, c1) \
-    _mm_add_ps(_mm_mul_ps(SSE_POLY0(x, c1), x), _mm_set1_ps(c0))
-#define SSE_POLY2(x, c0, c1, c2) \
-    _mm_add_ps(_mm_mul_ps(SSE_POLY1(x, c1, c2), x), _mm_set1_ps(c0))
-#define SSE_POLY3(x, c0, c1, c2, c3) \
-    _mm_add_ps(_mm_mul_ps(SSE_POLY2(x, c1, c2, c3), x), _mm_set1_ps(c0))
-#define SSE_POLY4(x, c0, c1, c2, c3, c4) \
-    _mm_add_ps(_mm_mul_ps(SSE_POLY3(x, c1, c2, c3, c4), x), _mm_set1_ps(c0))
-#define SSE_POLY5(x, c0, c1, c2, c3, c4, c5) \
-    _mm_add_ps(_mm_mul_ps(SSE_POLY4(x, c1, c2, c3, c4, c5), x), _mm_set1_ps(c0))
+PS16_CONST(1, 1.0f);
+PS16_CONST(inv_mant_mask, ~0x7f800000);
+
+PS16_CONST(log2_c0, 3.1157899f);
+PS16_CONST(log2_c1, -3.3241990f);
+PS16_CONST(log2_c2, 2.5988452f);
+PS16_CONST(log2_c3, -1.2315303f);
+PS16_CONST(log2_c4, 3.1821337e-1f);
+PS16_CONST(log2_c5, -3.4436006e-2f);
+PS16_CONST(neginf, (float) -INFINITY);
+
 
 /* Comptue log2 over an sse single vector. */
-static __m128 sse_log2(__m128 x)
+static __m128 log2_sse2(__m128 x)
 {
-
     /* extract exponent */
     const __m128i i = _mm_castps_si128(x);
     __m128 e = _mm_cvtepi32_ps(
@@ -442,30 +452,56 @@ static __m128 sse_log2(__m128 x)
     __m128 m = _mm_or_ps(_mm_castsi128_ps(_mm_and_si128(i, mant_mask)), one);
 
     /* polynomial approximation on the mantissa */
-    __m128 p = SSE_POLY5(m,
-                         3.1157899f,
-                        -3.3241990f,
-                         2.5988452f,
-                        -1.2315303f,
-                         3.1821337e-1f,
-                        -3.4436006e-2f);
+    __m128 p = *(__m128*) ps16_log2_c5;
+    p = _mm_add_ps(_mm_mul_ps(m, p), *(__m128*) ps16_log2_c4);
+    p = _mm_add_ps(_mm_mul_ps(m, p), *(__m128*) ps16_log2_c3);
+    p = _mm_add_ps(_mm_mul_ps(m, p), *(__m128*) ps16_log2_c2);
+    p = _mm_add_ps(_mm_mul_ps(m, p), *(__m128*) ps16_log2_c1);
+    p = _mm_add_ps(_mm_mul_ps(m, p), *(__m128*) ps16_log2_c0);
 
-    p = _mm_add_ps(_mm_mul_ps(p, _mm_sub_ps(m, one)), e);
+    p = _mm_add_ps(_mm_mul_ps(p, _mm_sub_ps(m, *(__m128*) ps16_1)), e);
 
     /* handle the case with x= < 0.0 */
-#if (defined(__SSE41__) && defined(USE_SSE4_1)) || (defined(__SSE42__) && defined(USE_SSE4_2))
-    p = _mm_blendv_ps(p, _mm_set1_ps(-INFINITY), _mm_cmple_ps(x, _mm_setzero_ps()));
-#else
     // TODO: test this
     __m128 mask = _mm_cmpgt_ps(x, _mm_setzero_ps());
     p = _mm_or_ps(_mm_and_ps(mask, p), _mm_andnot_ps(mask, _mm_set1_ps(-INFINITY)));
-#endif
 
     return p;
 }
 
 
-float dotlog(const float* xs, const float* ys, const size_t n)
+static __m128 log2_sse4(__m128 x)
+{
+    /* extract exponent */
+    const __m128i i = _mm_castps_si128(x);
+    __m128 e = _mm_cvtepi32_ps(
+                 _mm_sub_epi32(
+                   _mm_srli_epi32(i, 23),
+                   _mm_set1_epi32(127)));
+
+    /* extract mantissa */
+    const __m128i mant_mask = _mm_set1_epi32(0x007FFFFF);
+    const __m128 one = _mm_set1_ps(1.0f);
+    __m128 m = _mm_or_ps(_mm_castsi128_ps(_mm_and_si128(i, mant_mask)), one);
+
+    /* polynomial approximation on the mantissa */
+    __m128 p = *(__m128*) ps16_log2_c5;
+    p = _mm_add_ps(_mm_mul_ps(m, p), *(__m128*) ps16_log2_c4);
+    p = _mm_add_ps(_mm_mul_ps(m, p), *(__m128*) ps16_log2_c3);
+    p = _mm_add_ps(_mm_mul_ps(m, p), *(__m128*) ps16_log2_c2);
+    p = _mm_add_ps(_mm_mul_ps(m, p), *(__m128*) ps16_log2_c1);
+    p = _mm_add_ps(_mm_mul_ps(m, p), *(__m128*) ps16_log2_c0);
+
+    p = _mm_add_ps(_mm_mul_ps(p, _mm_sub_ps(m, *(__m128*) ps16_1)), e);
+
+    /* handle the case with x= < 0.0 */
+    p = _mm_blendv_ps(p, _mm_set1_ps(-INFINITY), _mm_cmple_ps(x, _mm_setzero_ps()));
+
+    return p;
+}
+
+
+float dotlog_sse(const float* xs, const float* ys, const size_t n)
 {
     __m128 xv, yv;
     union ans_t
@@ -479,7 +515,7 @@ float dotlog(const float* xs, const float* ys, const size_t n)
     for (i = 0; i < n / 4; ++i) {
         xv = _mm_load_ps(xs + 4 * i);
         yv = _mm_load_ps(ys + 4 * i);
-        ans.v = _mm_add_ps(ans.v, _mm_mul_ps(xv, sse_log2(yv)));
+        ans.v = _mm_add_ps(ans.v, _mm_mul_ps(xv, log2_sse(yv)));
     }
 
     float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3];
@@ -496,7 +532,8 @@ float dotlog(const float* xs, const float* ys, const size_t n)
 }
 
 
-float dotlog(const float* xs, const float* ys, const size_t n, const float c)
+float dotlogc_sse(const float* xs, const float* ys, const size_t n,
+                  const float c)
 {
     __m128 xv, yv;
     union ans_t
@@ -512,7 +549,7 @@ float dotlog(const float* xs, const float* ys, const size_t n, const float c)
     for (i = 0; i < n / 4; ++i) {
         xv = _mm_load_ps(xs + 4 * i);
         yv = _mm_mul_ps(cv, _mm_load_ps(ys + 4 * i));
-        ans.v = _mm_add_ps(ans.v, _mm_mul_ps(xv, sse_log2(yv)));
+        ans.v = _mm_add_ps(ans.v, _mm_mul_ps(xv, log2_sse(yv)));
     }
 
     float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3];
@@ -520,18 +557,18 @@ float dotlog(const float* xs, const float* ys, const size_t n, const float c)
     /* handle any overhang */
     i *= 4;
     switch (n % 4) {
-        case 3: fans += xs[i] * fastlog2(c * ys[i]); ++i;
-        case 2: fans += xs[i] * fastlog2(c * ys[i]); ++i;
-        case 1: fans += xs[i] * fastlog2(c * ys[i]);
+        case 3: fans += xs[i] * fastlog2(ys[i]); ++i;
+        case 2: fans += xs[i] * fastlog2(ys[i]); ++i;
+        case 1: fans += xs[i] * fastlog2(ys[i]);
     }
 
     return fans;
 }
 
 
-void asxpy(float* xs, const float* ys, const float c,
-            const unsigned int* idx, const unsigned int off,
-            const size_t n)
+void asxpy_sse(float* xs, const float* ys, const float c,
+               const unsigned int* idx, const unsigned int off,
+               const size_t n)
 {
     __m128 yv;
     __m128 cv = _mm_set1_ps(c);
@@ -577,20 +614,25 @@ void asxpy(float* xs, const float* ys, const float c,
     }
 }
 
-float asxtydsz(const float* xs, const float* ys, const float* zs,
-               const unsigned int* idx, const unsigned int off,
-               const size_t n)
+
+float asxtydsz_sse(const float* xs, const float* ys, const float* zs,
+                   const unsigned int* idx, const unsigned int off,
+                   const size_t n)
 {
     // TODO: write this
+    UNUSED(xs);
+    UNUSED(ys);
+    UNUSED(zs);
+    UNUSED(idx);
+    UNUSED(off);
+    UNUSED(n);
+    fprintf(stderr, "asxtydsz_sse is not implemented!\n");
+    abort();
     return 0.0;
 }
 
 
-/* Vanilla versions */
-#else
-
-
-void* aalloc(size_t n)
+void* aalloc_vanilla(size_t n)
 {
     void* xs = malloc(n);
     if (xs == NULL) {
@@ -601,19 +643,19 @@ void* aalloc(size_t n)
 }
 
 
-void afree(void* xs)
+void afree_vanilla(void* xs)
 {
     free(xs);
 }
 
 
-void acopy(void* dest, const void* src, size_t n)
+void acopy_vanilla(void* dest, const void* src, size_t n)
 {
     memcpy(dest, src, n);
 }
 
 
-float dotlog(const float* xs, const float* ys, const size_t n)
+float dotlog_vanilla(const float* xs, const float* ys, const size_t n)
 {
     float ans = 0.0;
     size_t i;
@@ -624,7 +666,7 @@ float dotlog(const float* xs, const float* ys, const size_t n)
 }
 
 
-float dotlogc(const float* xs, const float* ys, const size_t n, const float c)
+float dotlogc_vanilla(const float* xs, const float* ys, const size_t n, const float c)
 {
     float ans = 0.0;
     size_t i;
@@ -636,10 +678,10 @@ float dotlogc(const float* xs, const float* ys, const size_t n, const float c)
 }
 
 
-void asxpy(float* xs, const float* ys, const float c,
-            const unsigned int* idx,
-            const unsigned int off,
-            const size_t n)
+void asxpy_vanilla(float* xs, const float* ys, const float c,
+                   const unsigned int* idx,
+                   const unsigned int off,
+                   const size_t n)
 {
     size_t i;
     for (i = 0; i < n; ++i) {
@@ -648,9 +690,9 @@ void asxpy(float* xs, const float* ys, const float c,
 }
 
 
-float asxtydsz(const float* xs, const float* ys, const float* zs
-               const unsigned int* idx, const unsigned int off,
-               const size_t n)
+float asxtydsz_vanilla(const float* xs, const float* ys, const float* zs,
+                       const unsigned int* idx, const unsigned int off,
+                       const size_t n)
 {
     float ans = 0.0;
     for (size_t i = 0; i < n; ++i) {
@@ -659,4 +701,47 @@ float asxtydsz(const float* xs, const float* ys, const float* zs
     return ans;
 }
 
-#endif
+
+void linalg_init()
+{
+    if (cpu_has_avx()) {
+        aalloc   = aalloc_avx;
+        afree    = afree_avx;
+        acopy    = acopy_avx;
+        dotlog   = dotlog_avx;
+        dotlogc  = dotlogc_avx;
+        asxpy    = asxpy_avx;
+        asxtydsz = asxtydsz_avx;
+        LINALG_INSTR_SET = "AVX";
+    }
+    else if (cpu_has_sse2()) {
+        aalloc   = aalloc_sse;
+        afree    = afree_sse;
+        acopy    = acopy_sse;
+        dotlog   = dotlog_sse;
+        dotlogc  = dotlogc_sse;
+        asxpy    = asxpy_sse;
+        asxtydsz = asxtydsz_sse;
+        if (cpu_has_sse4()) {
+            log2_sse = log2_sse4;
+            LINALG_INSTR_SET = "SSE4";
+        }
+        else {
+            log2_sse = log2_sse2;
+            LINALG_INSTR_SET = "SSE2";
+        }
+    }
+    else {
+        aalloc   = aalloc_vanilla;
+        afree    = afree_vanilla;
+        acopy    = acopy_vanilla;
+        dotlog   = dotlog_vanilla;
+        dotlogc  = dotlogc_vanilla;
+        asxpy    = asxpy_vanilla;
+        asxtydsz = asxtydsz_vanilla;
+        LINALG_INSTR_SET = "Vanilla";
+    }
+}
+
+
+

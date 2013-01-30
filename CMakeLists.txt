@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 2.6)
 project(isolator)
 
+include(CheckIncludeFile)
+
 set(CMAKE_COLOR_MAKEFILE ON)
 
 execute_process(COMMAND sh git-version-gen
@@ -16,15 +18,13 @@ find_package(GSL REQUIRED)
 find_package(Threads)
 
 # Check for SSE or AVX intrinsics
-include(cmake/OptimizeForArchitecture.cmake)
-AutodetectHostArchitecture()
-OptimizeForArchitecture()
 check_include_file(immintrin.h HAVE_IMMINTRIN_H)
 
-set(CMAKE_C_FLAGS "-std=gnu99 -g -O3 -Wall -Wextra -DNDEBUG ${Vc_ARCHITECTURE_FLAGS}")
-set(CMAKE_CXX_FLAGS "-std=gnu++98 -g -O3 -Wall -Wextra -DNDEBUG ${Vc_ARCHITECTURE_FLAGS}")
-set(CMAKE_C_FLAGS_DEBUG "-std=gnu99 -g -O0 -Wall -Wextra ${Vc_ARCHITECTURE_FLAGS}")
-set(CMAKE_CXX_FLAGS_DEBUG "-std=gnu++98 -g -O0 -Wall -Wextra ${Vc_ARCHITECTURE_FLAGS}")
+set(ARCH_FLAGS "-msse2 -msse4.1 -msse4.2 -mavx")
+set(CMAKE_C_FLAGS "-std=gnu99 -g -O3 -Wall -Wextra -DNDEBUG ${ARCH_FLAGS}")
+set(CMAKE_CXX_FLAGS "-std=gnu++98 -g -O3 -Wall -Wextra -DNDEBUG ${ARCH_FLAGS}")
+set(CMAKE_C_FLAGS_DEBUG "-std=gnu99 -g -O0 -Wall -Wextra ${ARCH_FLAGS}")
+set(CMAKE_CXX_FLAGS_DEBUG "-std=gnu++98 -g -O0 -Wall -Wextra ${ARCH_FLAGS}")
 
 
 configure_file("${CMAKE_SOURCE_DIR}/src/config.h.in"

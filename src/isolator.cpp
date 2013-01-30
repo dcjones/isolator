@@ -10,6 +10,7 @@
 #include "config.h"
 #include "constants.hpp"
 #include "fragment_model.hpp"
+#include "linalg.hpp"
 #include "logger.hpp"
 #include "sample_db.hpp"
 #include "sampler.hpp"
@@ -25,7 +26,8 @@ const char* isolator_logo =
 
 static void print_logo()
 {
-    printf("%s\n     Version: %s\n\n", isolator_logo, VERSION);
+    printf("%s\n     Version: %s\nInstruction set: %s\n\n",
+           isolator_logo, VERSION, LINALG_INSTR_SET);
 }
 
 
@@ -322,7 +324,8 @@ void print_usage(FILE* fout)
 {
     fprintf(fout,
             "Usage: isolator <command> [<args>]\n"
-            "Isolator version %s\n\n"
+            "Isolator version %s\n"
+            "Instruction set: %s\n\n"
             "Where <command> is one of:\n"
             "    quantify          Quantify transcript abundance.\n"
             "    summarize         Summarize a sampler run.\n"
@@ -330,7 +333,7 @@ void print_usage(FILE* fout)
             "    test              Test for differential expression and\n"
             "                      isoform switching.\n"
             "    help              Become enlightened.\n",
-            VERSION);
+            VERSION, LINALG_INSTR_SET);
 }
 
 
@@ -355,6 +358,8 @@ int isolator_help(int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {
+    linalg_init();
+
     if (argc <= 1) {
         print_usage(stdout);
         return EXIT_SUCCESS;
