@@ -810,12 +810,9 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         /* Skip multireads for now. */
         if (fm.blacklist.get(r->first) >= 0) continue;
         int multiread_num = fm.multireads.get(r->first);
-        /* XXX: Skipping over multi-reads until this is fixed. */
         if (multiread_num >= 0) {
-#if 0
             multiread_set.insert(std::make_pair((unsigned int) multiread_num,
                                                 r->second));
-#endif
             continue;
         }
 

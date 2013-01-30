@@ -593,7 +593,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
         unsigned int sum_lens = 0;
 
         size_t i;
-        for (g = frag_lens.begin(), i = 0; g != frag_lens.end(); ++g) {
+        for (g = frag_lens.begin(), i = 0; g != frag_lens.end(); ++g, ++i) {
             frag_len_vals[i] = g->first;
             frag_len_lens[i] = g->second;
             sum_lens += g->second;
