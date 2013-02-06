@@ -5,7 +5,7 @@ include(CheckIncludeFile)
 
 set(CMAKE_COLOR_MAKEFILE ON)
 
-execute_process(COMMAND sh git-version-gen
+execute_process(COMMAND sh ${CMAKE_SOURCE_DIR}/git-version-gen
                 OUTPUT_VARIABLE VERSION
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
 

@@ -4,7 +4,7 @@
 
 #include <cstdlib>
 
-/* A couple very specific linear algebra functions implemented using
+/* A few very specific linear algebra functions implemented using
  * different instruction sets (vanilla x86, SSE4, and AVX). */
 
 
@@ -57,6 +57,7 @@ extern float (*dotlogc)(const float* xs, const float* ys, const size_t n, const 
 extern void (*asxpy)(float* xs, const float* ys, const float c,
                      const unsigned int* idx, const unsigned int off,
                      const size_t n);
+
 
 /* ssxtydsz: sum of sparse x times y divided by sparse z.
  *

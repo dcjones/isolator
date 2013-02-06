@@ -2028,16 +2028,6 @@ class MultireadSamplerThread
 
 void Sampler::run(unsigned int num_samples, SampleDB& out)
 {
-    int idx = 0, aidx = -1, bidx = -1;
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t, ++idx) {
-        if (t->transcript_id == "ENST00000488441") {
-            aidx = t->id;
-        }
-        else if (t->transcript_id == "ENST00000425052") {
-            bidx = t->id;
-        }
-    }
-
     /* Initial mixtures */
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         tmix[i] = 1.0 / (float) component_num_transcripts[transcript_component[i]];
@@ -2194,6 +2184,15 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
                 }
             }
             ++sample_num;
+        }
+
+        /* Check for numerical errors. */
+        for (unsigned int i = 0; i < num_components; ++i) {
+            for (unsigned int j = 0; j < component_frag[i + 1] - component_frag[i]; ++j ) {
+                if (!finite(frag_probs[i][j])) {
+                    Logger::warn("numerical error: %f", frag_probs[i][j]);
+                }
+            }
         }
 
         Logger::get_task(task_name).inc();

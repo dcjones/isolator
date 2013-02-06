@@ -26,7 +26,7 @@ const char* isolator_logo =
 
 static void print_logo()
 {
-    printf("%s\n     Version: %s\nInstruction set: %s\n\n",
+    printf("%s\n     Version: %s\n     Instruction set: %s\n\n",
            isolator_logo, VERSION, LINALG_INSTR_SET);
 }
 
