@@ -1,4 +1,5 @@
-#!/usr/bin/env python2
+#!/usr/bin/python
+##!/usr/bin/env python2
 
 # Convert the sqlite3 files output by isolator to a simpler plain text format.
 

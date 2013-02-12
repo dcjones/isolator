@@ -709,10 +709,17 @@ class SamplerInitThread
             , q(q)
             , thread(NULL)
         {
+            if (fm.frag_len_dist) {
+                frag_len_dist = new EmpDist(*fm.frag_len_dist);
+            }
+            else {
+                frag_len_dist = NULL;
+            }
         }
 
         ~SamplerInitThread()
         {
+            delete frag_len_dist;
             /* Note: we are not free weight_matrix_entries and
              * multiread_entries. This get's done in Sampler::Sampler.
              * It's all part of the delicate dance involved it minimizing
@@ -743,6 +750,12 @@ class SamplerInitThread
         }
 
     private:
+        double frag_len_p(pos_t frag_len)
+        {
+            if (frag_len_dist) return frag_len_dist->pdf(frag_len);
+            else return fm.frag_len_p(frag_len);
+        }
+
         void process_locus(SamplerInitInterval* locus);
 
         /* Compute sequence bias for both mates on both strand.
@@ -773,6 +786,10 @@ class SamplerInitThread
         Indexer& read_indexer;
         Queue<SamplerInitInterval*>& q;
         boost::thread* thread;
+
+        /* Copy the fragment length distribution to avoid contention between
+         * threads. */
+        EmpDist* frag_len_dist;
 
         /* Temprorary space for computing sequence bias, indexed by strand. */
         std::vector<float> mate1_seqbias[2];
@@ -974,6 +991,18 @@ void SamplerInitThread::transcript_sequence_bias(
 
 
 
+/* Ugh. This is a disaster. What approximations can be made to ensure that this
+ * is fast. As is, if the fragment length distribution is sufficient variable,
+ * this can take a very long time to run.
+ *
+ * Possible solutions:
+ *   1. Crank the shit out of the min_frag_len_pr
+ *   2. T
+ *
+ * The biggest problem is contention is the emperical distribution. I should be
+ * copying it to each SamplerInitThread and avoiding locks.
+ */
+
 float SamplerInitThread::transcript_weight(const Transcript& t)
 {
     pos_t trans_len = t.exonic_length();
@@ -982,7 +1011,7 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
     /* Set ws[k] to be the the number of fragmens of length k, weighted by
      * sequence bias. */
     for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
-        float frag_len_pr = fm.frag_len_p(frag_len);
+        float frag_len_pr = frag_len_p(frag_len);
 
         /* Don't bother considering sequence bias if the fragment length
          * probability is extremely small (i.e., so that it suffocates any
@@ -1014,7 +1043,7 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
 
     float w = 0.0;
     for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
-        float frag_len_pr = fm.frag_len_p(frag_len);
+        float frag_len_pr = frag_len_p(frag_len);
         w += frag_len_pr * ws[frag_len];
     }
 
@@ -1032,7 +1061,7 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         frag_len = std::min(trans_len, (pos_t) round(fm.frag_len_med()));
     }
 
-    float w = fm.frag_len_p(frag_len);
+    float w = frag_len_p(frag_len);
 
     if (a.mate1) {
         pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?

@@ -443,6 +443,7 @@ class FragmentModelThread
                 for (; j != AlignedReadIterator(); ++j) {
                     if (j->mate1 == NULL || j->mate2 == NULL) continue;
                     pos_t len = j->naive_frag_len();
+
                     if (len <= 0 || len > constants::max_frag_len) continue;
 
                     c = frag_lens.find(len);

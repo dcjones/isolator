@@ -349,7 +349,13 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
 pos_t AlignmentPair::naive_frag_len() const
 {
     if (mate1 == NULL || mate2 == NULL) return 0;
-    return std::max(mate2->end - mate1->start, mate1->end - mate2->start);
+    pos_t len = 1 + std::max(mate2->end - mate1->start, mate1->end - mate2->start);
+    /* The fragment length must be at leas as long as the reads themselves. */
+    if (len < mate2->end - mate2->start + 1 ||
+        len < mate1->end - mate1->start + 1) {
+        return 0;
+    }
+    else return len;
 }
 
 
@@ -477,7 +483,7 @@ void ReadSet::add_alignment(const bam1_t* b)
     else                           r->mate1.push_back(a);
 
     if (r->start == -1 || r->start < a->start) r->start = a->start;
-    if (r->end   == -1 || r->end   < a->end)   r->end    = a->end;
+    if (r->end   == -1 || r->end   < a->end)   r->end   = a->end;
 }
 
 

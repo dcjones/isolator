@@ -12,10 +12,10 @@ EmpDist::EmpDist(EmpDist& other)
     , cdf_memo(other.cdf_memo)
 {
     vals = new unsigned int [n];
-    vals = new unsigned int [n];
+    lens = new unsigned int [n];
 
-    std::copy(vals, other.vals, other.vals + n);
-    std::copy(lens, other.lens, other.lens + n);
+    std::copy(other.vals, other.vals + n, vals);
+    std::copy(other.lens, other.lens + n, lens);
 }
 
 
