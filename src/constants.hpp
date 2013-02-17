@@ -118,6 +118,8 @@ namespace constants
      * iterations to avoid cycles. */
     extern unsigned int max_newton_iter;
 
+    /* Number of initial burn-in samples to generate and throw away. */
+    extern unsigned int sampler_burnin_samples;
 }
 
 #endif

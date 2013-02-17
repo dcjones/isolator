@@ -301,7 +301,9 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     if (c1 != CigarIterator()) return -1;
 
     /* alignment is compatible, but single ended. */
-    if (a2 == NULL) return 0;
+    if (a2 == NULL) {
+        return 0;
+    }
 
     bool e2_sup_e1 = false; /* marks when e2 > e1 */
     TranscriptIntronExonIterator e2(t);
@@ -389,8 +391,8 @@ AlignedReadIterator::AlignedReadIterator(const AlignedRead& r)
     , i(0)
     , j(0)
 {
-    if (i < r.mate1.size()) p.mate1 = r.mate1[i];
-    if (j < r.mate2.size()) p.mate2 = r.mate2[j];
+    p.mate1 = r.mate1.empty() ? NULL : r.mate1[0];
+    p.mate2 = r.mate2.empty() ? NULL : r.mate2[0];
 }
 
 

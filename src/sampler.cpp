@@ -991,18 +991,6 @@ void SamplerInitThread::transcript_sequence_bias(
 
 
 
-/* Ugh. This is a disaster. What approximations can be made to ensure that this
- * is fast. As is, if the fragment length distribution is sufficient variable,
- * this can take a very long time to run.
- *
- * Possible solutions:
- *   1. Crank the shit out of the min_frag_len_pr
- *   2. T
- *
- * The biggest problem is contention is the emperical distribution. I should be
- * copying it to each SamplerInitThread and avoiding locks.
- */
-
 float SamplerInitThread::transcript_weight(const Transcript& t)
 {
     pos_t trans_len = t.exonic_length();
@@ -1031,13 +1019,15 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         sp = t.strand == strand_pos ? fm.strand_specificity :
                                       1.0 - fm.strand_specificity;
         for (pos_t pos = 0; pos <= trans_len - frag_len; ++pos) {
-            ws[frag_len] += sp * mate1_seqbias[0][pos] * mate2_seqbias[1][pos + frag_len - 1];
+            ws[frag_len] += sp * mate1_seqbias[0][pos] *
+                                 mate2_seqbias[1][pos + frag_len - 1];
         }
 
         sp = t.strand == strand_neg ? fm.strand_specificity :
                                       1.0 - fm.strand_specificity;
         for (pos_t pos = 0; pos <= trans_len - frag_len; ++pos) {
-            ws[frag_len] += sp * mate2_seqbias[0][pos] * mate1_seqbias[1][pos + frag_len - 1];
+            ws[frag_len] += sp * mate2_seqbias[0][pos] *
+                                 mate1_seqbias[1][pos + frag_len - 1];
         }
     }
 
@@ -1055,13 +1045,16 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
                                          const AlignmentPair& a)
 {
     pos_t frag_len = a.frag_len(t);
-    pos_t trans_len = t.exonic_length();
-    if (frag_len < 0.0) return 0.0;
-    else if (frag_len == 0.0) {
-        frag_len = std::min(trans_len, (pos_t) round(fm.frag_len_med()));
+    //pos_t trans_len = t.exonic_length();
+    if (frag_len < 0) return 0.0;
+    else if (frag_len == 0) {
+        pos_t max_frag_len = std::max(a.mate1->end - t.min_start + 1,
+                                      t.max_end - a.mate1->start + 1);
+        frag_len = std::min(max_frag_len, (pos_t) round(fm.frag_len_med()));
     }
 
     float w = frag_len_p(frag_len);
+    if (w < constants::min_frag_len_pr) return 0.0;
 
     if (a.mate1) {
         pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?
@@ -2083,14 +2076,14 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
     std::vector<MCMCThread*> mcmc_threads(constants::num_threads);
     for (size_t i = 0; i < constants::num_threads; ++i) {
         mcmc_threads[i] = new MCMCThread(*this, component_queue);
-        mcmc_threads[i]->hillclimb = true;
+        mcmc_threads[i]->hillclimb = false;
     }
 
     Queue<MultireadBlock> multiread_queue;
     std::vector<MultireadSamplerThread*> multiread_threads(constants::num_threads);
     for (size_t i = 0; i < constants::num_threads; ++i) {
         multiread_threads[i] = new MultireadSamplerThread(*this, multiread_queue);
-        multiread_threads[i]->hillclimb = true;
+        multiread_threads[i]->hillclimb = false;
     }
 
     unsigned int* cs = new unsigned int [num_components];
@@ -2101,6 +2094,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
     float p_max = -INFINITY; /* previous log-probability */
     bool hillclimb = true;
+    unsigned int burnin_samples = constants::sampler_burnin_samples;
 
     for (unsigned int sample_num = 0; sample_num < num_samples; ) {
         /* Sample multiread alignments */
@@ -2182,7 +2176,10 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
             Logger::debug("log(p) = %e", p);
 
-            if (fabsf(p - p_max) / fabsf(p) < constants::maxpost_rel_error) {
+            // XXX: Disabling EM: force it to stop after the first evaluation of
+            // overall logp.
+            //if (fabsf(p - p_max) / fabsf(p) < constants::maxpost_rel_error) {
+            if(true) {
                 for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
                     if (transcript_weights[i] < constants::min_transcript_weight) {
                         maxpost_tmix[i] = 0.0;
@@ -2203,7 +2200,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
             }
             p_max = p;
         }
-        else {
+        else if(burnin_samples == 0) {
             for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
                 if (transcript_weights[i] < constants::min_transcript_weight) {
                     samples[i][sample_num] = 0.0;
@@ -2213,6 +2210,9 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
                 }
             }
             ++sample_num;
+        }
+        else {
+            --burnin_samples;
         }
 
         /* Check for numerical errors. */
