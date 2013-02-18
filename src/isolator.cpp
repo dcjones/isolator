@@ -5,6 +5,7 @@
 #include <ctime>
 #include <getopt.h>
 #include <gsl/gsl_statistics_float.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "config.h"
@@ -160,6 +161,11 @@ int quantify(int argc, char* argv[])
     /* Prepare output database. */
     SampleDB db(out_fn, true);
     db.insert_meta("version", VERSION);
+    db.insert_meta("instruction_set", LINALG_INSTR_SET);
+
+    struct timeval t0, t1, elapsed_time;
+    gettimeofday(&t0, NULL);
+
     time_t current_time = time(NULL);
     tm current_time_struct;
     localtime_r(&current_time, &current_time_struct);
@@ -167,6 +173,7 @@ int quantify(int argc, char* argv[])
     strftime(time_str, sizeof(time_str), "%a, %d %b %Y %T %z",
              &current_time_struct);
     db.insert_meta("time", time_str);
+
     // TODO: insert command line into meta
     db.insert_param("num_samples", (double) num_samples);
 
@@ -178,6 +185,16 @@ int quantify(int argc, char* argv[])
     Sampler sampler(bam_fn, fa_fn, ts, *fm);
     delete fm; /* free a little memory */
     sampler.run(num_samples, db);
+
+    gettimeofday(&t1, NULL);
+    long tdiff = (t1.tv_usec + 1000000 * t1.tv_sec) -
+                 (t0.tv_usec + 1000000 * t0.tv_sec);
+    elapsed_time.tv_sec = tdiff / 1000000;
+    elapsed_time.tv_usec = tdiff % 1000000;
+    snprintf(time_str, sizeof(time_str), "%1ld.%0.6ld",
+             (long) elapsed_time.tv_sec,
+             (long) elapsed_time.tv_usec);
+    db.insert_meta("elapsed_seconds", time_str);
 
     Logger::info("Finished. Have a nice day!");
     Logger::end();
@@ -228,7 +245,7 @@ int summarize(int argc, char* argv[])
 
         switch (opt) {
             case 'h':
-                print_quantify_help(stdout);
+                print_summarize_help(stdout);
                 return 0;
 
             case 'v':
@@ -241,7 +258,7 @@ int summarize(int argc, char* argv[])
 
             case '?':
                 fprintf(stderr, "\n");
-                print_quantify_help(stderr);
+                print_summarize_help(stderr);
                 return 1;
 
             default:
@@ -289,10 +306,12 @@ int summarize(int argc, char* argv[])
         float posterior_median = gsl_stats_float_median_from_sorted_data(
                 &samples.at(0), 1, samples.size());
 
-        float lower_95_cred = gsl_stats_float_quantile_from_sorted_data(
-                &samples.at(0), 1, samples.size(), 0.025);
-        float upper_95_cred = gsl_stats_float_quantile_from_sorted_data(
-                &samples.at(0), 1, samples.size(), 0.975);
+        //float lower_95_cred = gsl_stats_float_quantile_from_sorted_data(
+                //&samples.at(0), 1, samples.size(), 0.025);
+        //float upper_95_cred = gsl_stats_float_quantile_from_sorted_data(
+                //&samples.at(0), 1, samples.size(), 0.975);
+        float lower_95_cred = samples.front();
+        float upper_95_cred = samples.back();
 
         for (std::vector<float>::iterator j = samples.begin();
                 j != samples.end(); ++j) {

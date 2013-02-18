@@ -563,7 +563,10 @@ void FragmentModel::estimate(TranscriptSet& ts,
     strand_specificity = (float) strand_bias[0];
     strand_specificity /= (float) (strand_bias[0] + strand_bias[1]);
 
-    Logger::info("Strand specificity: %0.1f%%", 100.0 * strand_specificity);
+    double negentropy =
+        strand_specificity * log2(strand_specificity) +
+        (1.0 - strand_specificity) * log2(1.0 - strand_specificity);
+    Logger::info("Strand specificity: %0.1f%%", 100.0 * (1.0 + negentropy));
 
     /* Collect fragment length statistics. */
     std::map<unsigned int, unsigned int> frag_lens;

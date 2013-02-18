@@ -110,10 +110,6 @@ namespace constants
      * overall probability by less than this amount, the process halts. */
     extern float maxpost_abs_peps;
 
-    /* When maximizing the posterior, halt if the posterior has not been
-     * improved in this many iterations. */
-    extern unsigned int p_max_it_limit;
-
     /* When using newton's method to find slice extents, only allow so many
      * iterations to avoid cycles. */
     extern unsigned int max_newton_iter;

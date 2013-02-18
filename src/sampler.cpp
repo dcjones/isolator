@@ -2201,14 +2201,23 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
             p_max = p;
         }
         else if(burnin_samples == 0) {
+            double total_weight = 0.0;
             for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
                 if (transcript_weights[i] < constants::min_transcript_weight) {
                     samples[i][sample_num] = 0.0;
                 }
                 else {
-                    samples[i][sample_num] = tmix[i] * cmix[transcript_component[i]];
+                    samples[i][sample_num] =
+                        tmix[i] * cmix[transcript_component[i]] /
+                        transcript_weights[i];
+                    total_weight += samples[i][sample_num];
                 }
             }
+
+            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+                samples[i][sample_num] /= total_weight;
+            }
+
             ++sample_num;
         }
         else {
