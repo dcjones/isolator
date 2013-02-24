@@ -236,6 +236,12 @@ static bool intron_compatible_cigar_op(uint8_t op)
 }
 
 
+static bool intergenic_compatible_cigar_op(uint8_t op)
+{
+    return op == BAM_CSOFT_CLIP;
+}
+
+
 pos_t AlignmentPair::frag_len(const Transcript& t) const
 {
     /* Reorder mates for convenience. */
@@ -269,6 +275,16 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     CigarIterator c1(*a1);
     pos_t intron_len = 0;
 
+    /* Allow soft-clipping at the beginning of the transcript to account for
+     * reads mapping into poly-A tails.. */
+    if (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
+        if (c1->end + 1 == e1->first.start &&
+            intergenic_compatible_cigar_op(c1->op) &&
+            t.strand == strand_neg) {
+            ++c1;
+        }
+    }
+
     while (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
         // case 1: e entirely preceedes c
         if (c1->start > e1->first.end) {
@@ -291,13 +307,20 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
             ++c1;
         }
 
-        // case 3: c precedes or partially overlaps e
+        // case 3: c precedes partially overlaps e
         else {
             return -1;
         }
     }
 
+#if 0
     /* alignment overhangs the transcript. */
+    if (c1 != CigarIterator()) {
+        if (!intergenic_compatible_cigar_op(c1->op)) return -1;
+        ++c1;
+        if (c1 != CigarIterator()) return -1;
+    }
+#endif
     if (c1 != CigarIterator()) return -1;
 
     /* alignment is compatible, but single ended. */
@@ -341,10 +364,22 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
         }
     }
 
-    if (c2 != CigarIterator()) return -1;
+    /* Allow soft-clipping at transcript ends. */
+    if (c2 != CigarIterator()) {
+        if (c2->start == t.max_end + 1 &&
+            intergenic_compatible_cigar_op(c2->op) &&
+            t.strand == strand_pos) {
+            ++c2;
+        }
+        else return -1;
 
-    assert(intron_len < a2->end - a1->start + 1);
-    return a2->end - a1->start + 1 - intron_len;
+        if (c2 != CigarIterator()) return -1;
+    }
+    //if (c2 != CigarIterator()) return -1;
+
+    pos_t fraglen = a2->end - a1->start + 1 - intron_len;
+    assert(fraglen > 0);
+    return fraglen;
 }
 
 

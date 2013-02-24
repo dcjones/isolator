@@ -1059,15 +1059,30 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     if (a.mate1) {
         pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?
                                     a.mate1->start : a.mate1->end);
-        assert(0 <= offset && offset < trans_len);
-        w *= mate1_seqbias[a.mate1->strand][offset];
+        if (0 <= offset && offset < (pos_t) mate1_seqbias[a.mate1->strand].size()) {
+            w *= mate1_seqbias[a.mate1->strand][offset];
+        }
+        else if (a.mate1->strand == t.strand) {
+            w *= fm.strand_specificity;
+        }
+        else {
+            w *= 1.0 - fm.strand_specificity;
+        }
+
     }
 
     if (a.mate2) {
         pos_t offset = t.get_offset(a.mate2->strand == strand_pos ?
                                     a.mate2->start : a.mate2->end);
-        assert(0 <= offset && offset < trans_len);
-        w *= mate2_seqbias[a.mate2->strand][offset];
+        if (0 <= offset && offset < (pos_t) mate2_seqbias[a.mate2->strand].size()) {
+            w *= mate2_seqbias[a.mate2->strand][offset];
+        }
+        else if (a.mate2->strand == t.strand) {
+            w *= 1.0 - fm.strand_specificity;
+        }
+        else {
+            w *= fm.strand_specificity;
+        }
     }
 
     return w;
