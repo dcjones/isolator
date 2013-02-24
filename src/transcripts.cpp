@@ -1,6 +1,7 @@
 
 #include <deque>
 
+#include "constants.hpp"
 #include "gtf/gtf_parse.h"
 #include "transcripts.hpp"
 #include "trie.hpp"
@@ -310,6 +311,35 @@ void TranscriptSet::read_gtf(FILE* f)
          t != TrieMapIterator<Transcript>();
          ++t) {
         t->second->id = next_id++;
+
+        /* Extend each transcript 3' and 5' end by some fixed ammount. */
+        pos_t u, v;
+        Transcript::iterator e1 = t->second->begin();
+        u = e1->start;
+        v = e1->end;
+        if (t->second->strand == strand_pos) {
+            u = std::max<pos_t>(0, u - constants::transcript_5p_extension);
+        }
+        else {
+            u = std::max<pos_t>(0, u - constants::transcript_3p_extension);
+        }
+        t->second->erase(e1);
+        t->second->insert(Exon(u, v));
+        t->second->min_start = u;
+
+        Transcript::reverse_iterator e2 = t->second->rbegin();
+        u = e2->start;
+        v = e2->end;
+        if (t->second->strand == strand_pos) {
+            v += constants::transcript_3p_extension;
+        }
+        else {
+            v += constants::transcript_5p_extension;
+        }
+        t->second->erase(--e2.base());
+        t->second->insert(Exon(u, v));
+        t->second->max_end = v;
+
         transcripts.insert(*t->second);
     }
 

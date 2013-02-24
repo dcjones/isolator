@@ -85,6 +85,20 @@ namespace constants
      * after optimization. */
     extern float zero_eps;
 
+    /* To account for imprecision in the transcription start and terminotation
+     * sites, we extent the 5p and 3p ends of each transcript. */
+    extern pos_t transcript_5p_extension;
+    extern pos_t transcript_3p_extension;
+
+    /* When training the distribution over TSS and TTS, ignore 5' or 3' exons
+     * that are shorter than this. */
+    extern pos_t transcript_min_end_exon_len;
+
+    /* Measure an emperical distribution over fragment position in the
+     * first/last n nucleotides. */
+    extern pos_t transcript_tss_dist_len;
+    extern pos_t transcript_tts_dist_len;
+
     /* It's possible for a transcript to get assigned exceedingly low weight,
      * given the fragment length distribution. Then when a single read lands
      * there, it is assumed that the trascript is very highly expressed. More

@@ -177,7 +177,9 @@ class FragmentModelInterval
         enum IntervalType
         {
             INTERGENIC,
-            EXONIC
+            EXONIC,
+            UTR5P,
+            UTR3P
         } type;
 
         FragmentModelInterval(const Interval& interval,
@@ -388,6 +390,8 @@ class FragmentModelThread
         {
             FragmentModelInterval* interval;
             ReadSet::UniqueReadCounts read_counts;
+            tss_dist_counts.resize(constants::transcript_tss_dist_len, 0);
+            tts_dist_counts.resize(constants::transcript_tss_dist_len, 0);
 
             while (true) {
                 interval = q.pop();
@@ -401,6 +405,22 @@ class FragmentModelThread
                     interval->rs.make_unique_read_counts(read_counts);
                     measure_fragment_lengths(read_counts);
                     measure_strand_bias(interval->strand, read_counts);
+                    read_counts.clear();
+                }
+                else if (interval->type == FragmentModelInterval::UTR5P) {
+                    interval->rs.make_unique_read_counts(read_counts);
+                    measure_tss_dist(interval->start,
+                                     interval->end,
+                                     interval->strand,
+                                     read_counts);
+                    read_counts.clear();
+                }
+                else if (interval->type == FragmentModelInterval::UTR3P) {
+                    interval->rs.make_unique_read_counts(read_counts);
+                    measure_tts_dist(interval->start,
+                                     interval->end,
+                                     interval->strand,
+                                     read_counts);
                     read_counts.clear();
                 }
 
@@ -432,6 +452,11 @@ class FragmentModelThread
         /* A hash table mapping a number k to the number of intergenic
          * positions with k read starts. */
         boost::unordered_map<unsigned int, unsigned int> noise_counts;
+
+        /* Counts of fragment starts at the given distance from the annotated
+         * tss/tts. */
+        std::vector<unsigned int> tss_dist_counts;
+        std::vector<unsigned int> tts_dist_counts;
 
     private:
         void measure_fragment_lengths(const ReadSet::UniqueReadCounts& counts)
@@ -470,6 +495,77 @@ class FragmentModelThread
             }
         }
 
+
+        void measure_tss_dist(
+                pos_t start, pos_t end, strand_t strand,
+                const ReadSet::UniqueReadCounts& counts)
+        {
+            ReadSet::UniqueReadCounts::const_iterator i;
+            for (i = counts.begin(); i != counts.end(); ++i) {
+                AlignedReadIterator j(*i->first);
+                for (; j != AlignedReadIterator(); ++j) {
+                    // TODO: The following code assumes FR fragments.
+                    pos_t d;
+                    if (strand == strand_pos) {
+                        if (j->mate1 && j->mate1->strand == strand_pos) {
+                            d = j->mate1->start - start;
+                        }
+                        else if (j->mate2 && j->mate2->strand == strand_neg) {
+                            d = j->mate2->start - start;
+                        }
+                    }
+                    else {
+                        if (j->mate1 && j->mate1->strand == strand_neg) {
+                            d = end - j->mate1->end;
+                        }
+                        else if (j->mate2 && j->mate2->strand == strand_pos) {
+                            d = end - j->mate2->end;
+                        }
+                    }
+
+                    if (0 <= d && (size_t) d < tss_dist_counts.size()) {
+                        ++tss_dist_counts[d];
+                    }
+                }
+            }
+        }
+
+
+        void measure_tts_dist(
+                pos_t start, pos_t end, strand_t strand,
+                const ReadSet::UniqueReadCounts& counts)
+        {
+            ReadSet::UniqueReadCounts::const_iterator i;
+            for (i = counts.begin(); i != counts.end(); ++i) {
+                AlignedReadIterator j(*i->first);
+                for (; j != AlignedReadIterator(); ++j) {
+                    // TODO: the following code assumes FR fragments.
+                    pos_t d;
+                    if (strand == strand_pos) {
+                        if (j->mate1 && j->mate1->strand == strand_neg) {
+                            d = end - j->mate1->end;
+                        }
+                        else if (j->mate2 && j->mate2->strand == strand_neg) {
+                            d = end - j->mate2->end;
+                        }
+                    }
+                    else {
+                        if (j->mate1 && j->mate1->strand == strand_pos) {
+                            d = j->mate1->start - start;
+                        }
+                        else if (j->mate2 && j->mate2->strand == strand_neg) {
+                            d = j->mate2->start - start;
+                        }
+                    }
+
+                    if (0 <= d && (size_t) d < tts_dist_counts.size()) {
+                        ++tts_dist_counts[d];
+                    }
+                }
+            }
+        }
+
+
         Queue<FragmentModelInterval*>& q;
         boost::thread* t;
 };
@@ -478,6 +574,8 @@ class FragmentModelThread
 FragmentModel::FragmentModel()
     : sb(NULL)
     , frag_len_dist(NULL)
+    , tss_dist(NULL)
+    , tts_dist(NULL)
 {
 }
 
@@ -486,6 +584,8 @@ FragmentModel::~FragmentModel()
 {
     if (sb) delete sb;
     if (frag_len_dist) delete frag_len_dist;
+    if (tss_dist) delete tss_dist;
+    if (tts_dist) delete tts_dist;
 }
 
 
@@ -506,6 +606,38 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                     FragmentModelInterval::EXONIC,
                                     q));
     }
+
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        Transcript::iterator         first_exon = t->begin();
+        Transcript::reverse_iterator last_exon  = t->rbegin();
+
+        if (first_exon->end - first_exon->start + 1 >= constants::transcript_min_end_exon_len) {
+            FragmentModelInterval::IntervalType type =
+                t->strand == strand_pos ?  FragmentModelInterval::UTR5P :
+                                           FragmentModelInterval::UTR3P;
+            intervals.push_back(new FragmentModelInterval(
+                                    Interval(t->seqname.get().c_str(),
+                                             first_exon->start,
+                                             first_exon->end,
+                                             t->strand),
+                                    type,
+                                    q));
+        }
+
+        if (last_exon->end - last_exon->start + 1 >= constants::transcript_min_end_exon_len) {
+            FragmentModelInterval::IntervalType type =
+                t->strand == strand_pos ?  FragmentModelInterval::UTR3P :
+                                           FragmentModelInterval::UTR5P;
+            intervals.push_back(new FragmentModelInterval(
+                                    Interval(t->seqname.get().c_str(),
+                                             last_exon->start,
+                                             last_exon->end,
+                                             t->strand),
+                                    type,
+                                    q));
+        }
+    }
+
 
     std::vector<FragmentModelThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -552,6 +684,39 @@ void FragmentModel::estimate(TranscriptSet& ts,
     for (size_t i = 0; i < constants::num_threads; ++i) {
         threads[i]->join();
     }
+
+    /* Collect TSS/TTS distribution statisics. */
+    std::vector<unsigned int> tss_dist_vals, tss_dist_lens,
+                              tts_dist_vals, tts_dist_lens;
+
+    tss_dist_vals.resize(constants::transcript_tss_dist_len, 0);
+    tss_dist_lens.resize(constants::transcript_tss_dist_len, 0);
+    for (unsigned int i = 0; i < tss_dist_vals.size(); ++i) {
+        tss_dist_vals[i] = i;
+    }
+
+    tts_dist_vals.resize(constants::transcript_tts_dist_len, 0);
+    tts_dist_lens.resize(constants::transcript_tts_dist_len, 0);
+    for (unsigned int i = 0; i < tts_dist_vals.size(); ++i) {
+        tts_dist_vals[i] = i;
+    }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        for (size_t j = 0; j < threads[i]->tss_dist_counts.size(); ++j) {
+            tss_dist_lens[j] += threads[i]->tss_dist_counts[j];
+        }
+
+        for (size_t j = 0; j < threads[i]->tts_dist_counts.size(); ++j) {
+            tts_dist_lens[j] += threads[i]->tts_dist_counts[j];
+        }
+    }
+
+    tss_dist = new EmpDist(&tss_dist_vals.at(0), &tss_dist_lens.at(0),
+                           constants::transcript_tss_dist_len);
+
+    tts_dist = new EmpDist(&tts_dist_vals.at(0), &tts_dist_lens.at(0),
+                           constants::transcript_tts_dist_len);
+
 
     /* Collect strand specificity statistics. */
     unsigned long strand_bias[2] = {0, 0};

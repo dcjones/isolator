@@ -38,6 +38,14 @@ class Transcript : public std::set<Exon>
 
         bool operator < (const Transcript& other) const;
 
+        /* Return a reference to the first exon, in terms of positive strand
+         * coordinates. */
+        Exon& front();
+
+        /* Return a reference to the last exon, in terms of positive strand
+         * coordinates. */
+        Exon& back();
+
         bool overlaps(SeqName seqname, pos_t start, pos_t end) const;
 
         /* Insert a new exon. Use this rather than the std::set insert functions
