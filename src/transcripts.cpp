@@ -517,7 +517,7 @@ void TranscriptSet::get_distinct_5p_3p_exons(const std::vector<Interval>& consen
     std::sort(end_exons.begin(), end_exons.end());
 
     size_t i = 0, j = 0;
-    while (i < consensus_exons.size() && j <= end_exons.size()) {
+    while (i < consensus_exons.size() && j < end_exons.size()) {
         while (i < consensus_exons.size() && consensus_exons[i] < end_exons[j]) {
             ++i;
         }
