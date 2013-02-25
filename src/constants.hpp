@@ -59,6 +59,11 @@ namespace constants
      * lengths that have probability less that this number. */
     extern float min_frag_len_pr;
 
+    /* When estimating transcript weights, don't both measuring sequence bias,
+     * strand bias etc, for fragments whose length has lower probability than
+     * this. */
+    extern float transcript_len_min_frag_pr;
+
     /* The degree of smoothing to use for the emperical distribution over
      * fragment lengths. */
     extern float frag_len_dist_smoothing;
@@ -84,6 +89,9 @@ namespace constants
      * the following number as a lower bound, then round anything near it to 0.0
      * after optimization. */
     extern float zero_eps;
+
+    /* Any sample recorded less that this number gets rounded down to zero. */
+    extern float round_down_eps;
 
     /* To account for imprecision in the transcription start and terminotation
      * sites, we extent the 5p and 3p ends of each transcript. */

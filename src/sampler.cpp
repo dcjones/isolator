@@ -1016,7 +1016,7 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         /* Don't bother considering sequence bias if the fragment length
          * probability is extremely small (i.e., so that it suffocates any
          * effect from bias.). */
-        if (frag_len_pr < constants::min_frag_len_pr) {
+        if (frag_len_pr < constants::transcript_len_min_frag_pr) {
             ws[frag_len] = (float) (trans_len - frag_len + 1);
             continue;
         }
@@ -2295,7 +2295,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
             p_max = p;
         }
         else if(burnin_samples == 0) {
-            double total_weight = 0.0;
+            double total_weight = 0.0, new_total_weight = 0.0;
             for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
                 if (transcript_weights[i] < constants::min_transcript_weight) {
                     samples[i][sample_num] = 0.0;
@@ -2310,6 +2310,15 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
             for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
                 samples[i][sample_num] /= total_weight;
+
+                if (samples[i][sample_num] < constants::round_down_eps) {
+                    samples[i][sample_num] = 0.0;
+                }
+                new_total_weight += samples[i][sample_num];
+            }
+
+            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+                samples[i][sample_num] /= new_total_weight;
             }
 
             ++sample_num;
