@@ -1027,7 +1027,6 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
 
         ws[frag_len] = 0.0;
 
-        float sp;
         float endbias;
         float sp0 = t.strand == strand_pos ? fm.strand_specificity :
                                             1.0 - fm.strand_specificity;
@@ -1037,8 +1036,8 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
 
         for (pos_t pos = 0; pos <= trans_len - frag_len; ++pos) {
             // Determine fragment end bias
+            endbias = 1.0;
             if (t.strand == strand_pos) {
-                endbias = 1.0;
                 if (pos < constants::transcript_tss_dist_len) {
                     endbias *= tss_dist->pdf(pos) *
                                 constants::transcript_tss_dist_len;
@@ -1049,7 +1048,6 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
                 }
             }
             else {
-                endbias = 1.0;
                 if (pos < constants::transcript_tts_dist_len) {
                     endbias *= tts_dist->pdf(pos) *
                                 constants::transcript_tts_dist_len;
@@ -1065,12 +1063,9 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
                                             mate2_seqbias[1][pos + frag_len - 1];
 
             // Negative strand fragment weight
-            ws[frag_len] += sp1 * mate2_seqbias[0][pos] *
-                                 mate1_seqbias[1][pos + frag_len - 1];
+            ws[frag_len] += sp1 * endbias * mate2_seqbias[0][pos] *
+                                            mate1_seqbias[1][pos + frag_len - 1];
         }
-
-        sp = t.strand == strand_neg ? fm.strand_specificity :
-                                      1.0 - fm.strand_specificity;
     }
 
     float w = 0.0;
@@ -1087,7 +1082,6 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
                                          const AlignmentPair& a)
 {
     pos_t frag_len = a.frag_len(t);
-    //pos_t trans_len = t.exonic_length();
     if (frag_len < 0) return 0.0;
     else if (frag_len == 0) {
         pos_t max_frag_len = std::max(a.mate1->end - t.min_start + 1,

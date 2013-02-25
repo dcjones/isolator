@@ -607,37 +607,33 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                     q));
     }
 
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        Transcript::iterator         first_exon = t->begin();
-        Transcript::reverse_iterator last_exon  = t->rbegin();
+    std::vector<Interval> consensus_5p_exons, consensus_3p_exons;
+    ts.get_distinct_5p_3p_exons(exonic, consensus_5p_exons, consensus_3p_exons);
 
-        if (first_exon->end - first_exon->start + 1 >= constants::transcript_min_end_exon_len) {
-            FragmentModelInterval::IntervalType type =
-                t->strand == strand_pos ?  FragmentModelInterval::UTR5P :
-                                           FragmentModelInterval::UTR3P;
-            intervals.push_back(new FragmentModelInterval(
-                                    Interval(t->seqname.get().c_str(),
-                                             first_exon->start,
-                                             first_exon->end,
-                                             t->strand),
-                                    type,
-                                    q));
-        }
+    Logger::info("%zu 5' exons", consensus_5p_exons.size());
+    Logger::info("%zu 3' exons", consensus_3p_exons.size());
 
-        if (last_exon->end - last_exon->start + 1 >= constants::transcript_min_end_exon_len) {
-            FragmentModelInterval::IntervalType type =
-                t->strand == strand_pos ?  FragmentModelInterval::UTR3P :
-                                           FragmentModelInterval::UTR5P;
+    for (interval = consensus_5p_exons.begin();
+         interval != consensus_5p_exons.end();
+         ++interval) {
+        if (interval->length() <= constants::transcript_tss_dist_len) {
             intervals.push_back(new FragmentModelInterval(
-                                    Interval(t->seqname.get().c_str(),
-                                             last_exon->start,
-                                             last_exon->end,
-                                             t->strand),
-                                    type,
+                                    *interval,
+                                    FragmentModelInterval::UTR5P,
                                     q));
         }
     }
 
+    for (interval = consensus_3p_exons.begin();
+         interval != consensus_3p_exons.end();
+         ++interval) {
+        if (interval->length() <= constants::transcript_tts_dist_len) {
+            intervals.push_back(new FragmentModelInterval(
+                                    *interval,
+                                    FragmentModelInterval::UTR3P,
+                                    q));
+        }
+    }
 
     std::vector<FragmentModelThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {

@@ -148,6 +148,12 @@ class TranscriptSet
          * beginnings or ends of chromosomes. */
         void get_intergenic(std::vector<Interval>&);
 
+        /* Fill a vector with 5'/3' most exons that don't overlap other
+         * transcripts. */
+        void get_distinct_5p_3p_exons(const std::vector<Interval>& consensus_exons,
+                                      std::vector<Interval>& consensus_5p_exons,
+                                      std::vector<Interval>& consensus_3p_exons);
+
         /* Acess to std::set::iterator */
         typedef std::set<Transcript>::const_iterator iterator;
         iterator begin();

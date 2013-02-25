@@ -483,6 +483,60 @@ void TranscriptSet::get_intergenic(std::vector<Interval>& intervals)
 }
 
 
+void TranscriptSet::get_distinct_5p_3p_exons(const std::vector<Interval>& consensus_exons,
+                                             std::vector<Interval>& consensus_5p_exons,
+                                             std::vector<Interval>& consensus_3p_exons)
+{
+    // Build vectors of 5' and 3' exons.
+    std::vector<Interval> end_exons;
+    std::vector<int>      end_exon_type; // 0 for 5', 1 for 3'
+    std::set<Transcript>::iterator t;
+
+    for (t = transcripts.begin(); t != transcripts.end(); ++t) {
+        Transcript::iterator         first_exon = t->begin();
+        Transcript::reverse_iterator last_exon  = t->rbegin();
+        end_exons.push_back(Interval(t->seqname.get().c_str(),
+                                     first_exon->start,
+                                     first_exon->end,
+                                     t->strand));
+        end_exons.push_back(Interval(t->seqname.get().c_str(),
+                                     last_exon->start,
+                                     last_exon->end,
+                                     t->strand));
+
+        if (t->strand == strand_pos) {
+            end_exon_type.push_back(0);
+            end_exon_type.push_back(1);
+        }
+        else {
+            end_exon_type.push_back(1);
+            end_exon_type.push_back(0);
+        }
+    }
+
+    std::sort(end_exons.begin(), end_exons.end());
+
+    size_t i = 0, j = 0;
+    while (i < consensus_exons.size() && j <= end_exons.size()) {
+        while (i < consensus_exons.size() && consensus_exons[i] < end_exons[j]) {
+            ++i;
+        }
+        if (i >= consensus_exons.size()) break;
+
+        if (consensus_exons[i] == end_exons[j]) {
+            if (end_exon_type[j] == 0) {
+                consensus_5p_exons.push_back(end_exons[j]);
+            }
+            else {
+                consensus_3p_exons.push_back(end_exons[j]);
+            }
+        }
+        ++j;
+    }
+}
+
+
+
 TranscriptSet::iterator TranscriptSet::begin()
 {
     return transcripts.begin();
