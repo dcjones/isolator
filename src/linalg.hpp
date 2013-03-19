@@ -61,7 +61,7 @@ extern void (*asxpy)(float* xs, const float* ys, const float c,
 
 /* ssxtydsz: sum of sparse x times y divided by sparse z.
  *
- * ...I know, I know, but ou try coming up with a better name!
+ * ...I know, I know, but you try coming up with a better name!
  *
  * This computes the sum of
  *   xs[idx[i] - off] * ys[i] / zs[idx[i] - off]

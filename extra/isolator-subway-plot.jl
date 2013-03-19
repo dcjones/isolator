@@ -4,10 +4,31 @@
 #
 #
 
-require("Compose")
-using Compose
+## along an axis
+function amap(f::Function, A::StridedArray, axis::Integer)
+    dimsA = size(A)
+    ndimsA = ndims(A)
+    axis_size = dimsA[axis]
 
-require("Heap")
+    if axis_size == 0
+        return f(A)
+    end
+
+    idx = ntuple(ndimsA, j -> j == axis ? 1 : 1:dimsA[j])
+    r = f(sub(A, idx))
+    R = Array(typeof(r), axis_size)
+    R[1] = r
+
+    for i = 2:axis_size
+        idx = ntuple(ndimsA, j -> j == axis ? i : 1:dimsA[j])
+        R[i] = f(sub(A, idx))
+    end
+
+    return R
+end
+
+using Compose
+using Color
 using Heap
 
 import Base.isless
@@ -79,7 +100,6 @@ posterior_means = amap(sum, S, 2)
 posterior_means = posterior_means / sum(posterior_means)
 posterior_means = [id => mu for (id, mu) in zip(transcript_ids, posterior_means)]
 
-
 type Exon
     startpos::Int
     endpos::Int
@@ -124,7 +144,7 @@ exon_group = Exon[]
 while !isempty(exons)
     exon = hpop(exons)
     startpos = exon.startpos
-    push(exon_group, exon)
+    push!(exon_group, exon)
 
     while !isempty(exons) && exons[1].startpos == startpos
         push(exon_group, hpop(exons))
@@ -137,18 +157,18 @@ while !isempty(exons)
 
     group_ids = Set{String}([exon.transcript_id for exon in exon_group]...)
     while !isempty(exon_group)
-        exon = pop(exon_group)
+        exon = pop!(exon_group)
         if exon.endpos > endpos
             hpush(exons, Exon(endpos + 1, exon.endpos, exon.transcript_id))
         end
     end
 
-    push(S, group_ids)
+    push!(S, group_ids)
 end
 
 
 function lab_rainbow(l, c, h0, n)
-    Color[LCHab(l, c, h0 + 360.0 * (i - 1) / n) for i in 1:n]
+    ColorValue[LCHab(l, c, h0 + 360.0 * (i - 1) / n) for i in 1:n]
 end
 
 

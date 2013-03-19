@@ -1529,6 +1529,9 @@ class InferenceThread
         {
             if (S.component_num_transcripts[c] <= 1) return;
 
+            acopy(S.frag_probs_prop[c], S.frag_probs[c],
+                  (S.component_frag[c + 1] - S.component_frag[c]) * sizeof(float));
+
             gsl_ran_shuffle(rng, S.component_transcripts[c],
                             S.component_num_transcripts[c],
                             sizeof(unsigned int));
@@ -1646,22 +1649,6 @@ float MCMCThread::recompute_component_probability(unsigned int u, unsigned int v
                    S.weight_matrix->rowlens[v]);
 
 
-#if 0
-    for (unsigned int k = 0; k < S.weight_matrix->rowlens[u]; ++k) {
-        unsigned int j = S.weight_matrix->idxs[u][k];
-        float t = S.frag_counts[c][j - S.component_frag[c]] * S.weight_matrix->rows[u][k];
-        t /= S.frag_probs_prop[c][j - S.component_frag[c]];
-        *d += t;
-    }
-
-    for (unsigned int k = 0; k < S.weight_matrix->rowlens[v]; ++k) {
-        unsigned int j = S.weight_matrix->idxs[v][k];
-        float t = S.frag_counts[c][j - S.component_frag[c]] * S.weight_matrix->rows[v][k];
-        t /= S.frag_probs_prop[c][j - S.component_frag[c]];
-        *d -= t;
-    }
-#endif
-
     *d *= tmixu + tmixv;
     *d /= M_LN2;
 
@@ -1714,15 +1701,8 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
     /* derivative */
     float d;
 
-    p = recompute_component_probability(
-            u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
-
-    while (!finite(p)) {
-        if (left) z = std::min(1.0f, z + zeps);
-        else z = std::max(constants::zero_eps, z - zeps);
-        p = recompute_component_probability(
-                u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
-    }
+    z = z0;
+    p = p0;
     p -= slice_height;
 
     /* upper or lower bound on z (depending on 'left') */
@@ -1778,192 +1758,6 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
 
     return z;
 }
-
-
-#if 0
-/* Find slice extents for drawing inter transcript samples at the given slice
- * height. How fast this function executes is the major bottleneck to sampler
- * speed so a lot of optimization has gone into it. Consequently, it is probably
- * the hairiest code in isolator, so tread lightly.
- *
- * This is essentially the Brent-Dekker algorithm which uses bisection and
- * secant rule updates to find the point where p - slice_height = 0 with as few
- * evaluations of the posterior as possible.
- *
- * There is also a bunch of work to recompute as little as possible when
- * revaluating the posterior.
- */
-float MCMCThread::transcript_slice_sample_search(float slice_height,
-                                                 unsigned int u, unsigned int v,
-                                                 float z0, float p0, bool left)
-{
-    /* Find the range of fragment indexes that are affected by updating the u/v
-     * mixture, so we can recompute as little as possible. */
-    unsigned int comp = S.transcript_component[u];
-    unsigned int f0 = S.component_frag[comp+1];
-    unsigned int f1 = S.component_frag[comp];
-    if (S.weight_matrix->rowlens[u] > 0) {
-        f0 = S.weight_matrix->idxs[u][0];
-        f1 = 1 + S.weight_matrix->idxs[u][S.weight_matrix->rowlens[u] - 1];
-    }
-
-    if (S.weight_matrix->rowlens[v] > 0) {
-        f0 = std::min(f0, S.weight_matrix->idxs[v][0]);
-        f1 = std::max(f1,  1 + S.weight_matrix->idxs[v][S.weight_matrix->rowlens[v] - 1]);
-    }
-
-    if (f0 > f1) f0 = f1 = S.component_frag[comp];
-    f0 -= S.component_frag[comp];
-    f1 -= S.component_frag[comp];
-
-    /* Round f0 down to the nearst 32-byte boundry so we can use avx/sse. */
-    f0 &= 0xfffffff8;
-
-    /* Current probability over [f0, f1). */
-    float pf01 = dotlog(S.frag_counts[comp] + f0, S.frag_probs[comp] + f0, f1 - f0);
-
-    const float tmixuv = S.tmix[u] + S.tmix[v];
-
-    static const float xmin  = constants::zero_eps;
-    static const float xmax  = 1.0f - constants::zero_eps;
-    static const float xeps  = 1e-4f;
-    static const float leps  = 1e-2;
-    static const float delta = xeps;
-
-    float low, high;
-
-    if (left) {
-        low  = xmin;
-        high = z0;
-    }
-    else {
-        low  = z0;
-        high = xmax;
-    }
-
-    // probabilities
-    float lowp = NAN, highp = NAN;
-
-    // low end probability
-    if (left) {
-        lowp = recompute_component_probability(
-                u, v, low * tmixuv, (1.0f - low) * tmixuv, f0, f1, pf01, p0);
-        while (!finite(lowp)) {
-            low = std::min(xmax, low + xeps);
-            lowp = recompute_component_probability(
-                    u, v, low * tmixuv, (1.0f - low) * tmixuv, f0, f1, pf01, p0);
-        }
-    }
-    else {
-        lowp = p0;
-    }
-    lowp -= slice_height;
-
-    if (left && lowp >= 0) return low;
-
-    // high end likelihood
-    if (!left) {
-        highp = recompute_component_probability(u, v,
-                high * tmixuv, (1.0f - high) * tmixuv, f0, f1, pf01, p0);
-        while (!finite(highp)) {
-            high = std::max(xmin, high - xeps);
-            highp = recompute_component_probability(u, v,
-                    high * tmixuv, (1.0f - high) * tmixuv, f0, f1, pf01, p0);
-        }
-    }
-    else {
-        highp = p0;
-    }
-    highp -= slice_height;
-
-    if (!left && highp >= 0) return high;
-
-    assert(lowL * highL < 0 || lowL == 0.0 || highL == 0.0);
-
-    float c, d, s, cL, dL, sL;
-
-    if (abs(lowp) < abs(highp)) {
-        std::swap(low, high);
-        std::swap(lowp, highp);
-    }
-
-    bool mflag = true;
-    s = high;
-    d = dL = 0;
-    c  = low;
-    cL = lowp;
-
-    /* TODO:
-     * Often the slice edge is extremely close to the current value.
-     * Instead of doing bisection, we should do some sort of adjustable
-     * bisection that first looks very close to the current value.
-     *
-     * Yeah right. What I should do is a gradient based search.
-     * Figure out how to evaluated the gradient, then just do newton's method
-     * from the mid point.
-     */
-
-    while (fabs(high - low) > xeps &&
-           fabs(lowp) > leps &&
-           fabs(highp) > leps) {
-
-        if (!finite(lowp) || !finite(highp)) {
-            /* bisection */
-            s = (high + low) / 2.0;
-            goto slice_sample_search_test;
-        }
-        else if (lowp != cL && highp != cL) {
-            /* inverse quadratic interpolation */
-            s  = (low  * highp * cL)    / ((lowp  - highp) * (lowp  - cL));
-            s += (high * lowp  * cL)    / ((highp -  lowp) * (highp - cL));
-            s += (c    * lowp  * highp) / ((cL    -  lowp) * (cL    - highp));
-        }
-        else {
-            /* secant rule */
-            s = high - highp * (high - low) / (highp - lowp);
-        }
-
-        if ((s < (3 * low + high) / 4.0 || s > high)        || /* cond 1 */
-            (mflag && abs(s - high) >= abs(high - c) / 2.0) || /* cond 2 */
-            (!mflag && abs(s - high) >= abs(c - d) / 2.0)   || /* cond 3 */
-            (mflag && abs(high - c) < delta)                || /* cond 4 */
-            (!mflag && abs(c - d) < delta)) {
-
-            /* bisection */
-            s = (high + low) / 2.0;
-
-            mflag = true;
-        }
-
-slice_sample_search_test:
-        mflag = false;
-
-        sL = recompute_component_probability(
-                u, v, s * tmixuv, (1.0 - s) * tmixuv, f0, f1, pf01, p0);
-        sL -= slice_height;
-
-        d = c;
-        c  = high;
-        cL = highp;
-
-        if (lowp * sL < 0.0) {
-            high  = s;
-            highp = sL;
-        }
-        else {
-            low  = s;
-            lowp = sL;
-        }
-
-        if (abs(lowp) < abs(highp)) {
-            std::swap(low, high);
-            std::swap(lowp, highp);
-        }
-    }
-
-    return std::min(xmax, std::max(xmin, s));
-}
-#endif
 
 
 void MCMCThread::run_inter_transcript(unsigned int u, unsigned int v)
@@ -2144,6 +1938,12 @@ class MultireadSamplerThread
 
 void Sampler::run(unsigned int num_samples, SampleDB& out)
 {
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        if (t->transcript_id == "ENST00000253408") {
+            fprintf(stderr, "HERE\n");
+        }
+    }
+
     /* Initial mixtures */
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         tmix[i] = 1.0 / (float) component_num_transcripts[transcript_component[i]];
@@ -2290,7 +2090,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
                 Logger::pop_task(task_name);
                 task_name = "Sampling";
-                Logger::push_task(task_name, num_samples);
+                Logger::push_task(task_name, num_samples + burnin_samples);
             }
             p_max = p;
         }
