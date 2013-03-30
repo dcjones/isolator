@@ -49,8 +49,8 @@ EmpDist::EmpDist(const unsigned int* vals, const unsigned int* lens,
 
 EmpDist::~EmpDist()
 {
-    delete vals;
-    delete lens;
+    delete [] vals;
+    delete [] lens;
 }
 
 

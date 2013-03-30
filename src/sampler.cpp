@@ -1702,7 +1702,8 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
     float d;
 
     z = z0;
-    p = p0;
+    p = recompute_component_probability(
+            u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
     p -= slice_height;
 
     /* upper or lower bound on z (depending on 'left') */
@@ -1986,7 +1987,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
     const char* task_name = "Finding maximum posterior";
     Logger::push_task(task_name);
 
-    float p_max = -INFINITY; /* previous log-probability */
+    //float p_max = -INFINITY; [> previous log-probability <]
     bool hillclimb = true;
     unsigned int burnin_samples = constants::sampler_burnin_samples;
 
@@ -2092,7 +2093,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
                 task_name = "Sampling";
                 Logger::push_task(task_name, num_samples + burnin_samples);
             }
-            p_max = p;
+            //p_max = p;
         }
         else if(burnin_samples == 0) {
             double total_weight = 0.0, new_total_weight = 0.0;
