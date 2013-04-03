@@ -53,7 +53,7 @@ void print_quantify_help(FILE* fout)
             "                          will be quantified (by default, every transcript).\n"
             "-G, --gene-ids=FILE       A file listing gene id's of transcripts that\n"
             "                          will be quantified (by default, every transcript).\n"
-            "-N, --num-samples         Generate this number of samples (by default: 10000).\n\n"
+            "-N, --num-samples         Generate this number of samples (by default: 500).\n\n"
             "See 'isolator help quantify' for more.\n");
 }
 

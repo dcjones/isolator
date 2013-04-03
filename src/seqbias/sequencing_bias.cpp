@@ -271,6 +271,11 @@ void sequencing_bias::build(const char* ref_fn,
 
     const size_t min_positions = 1000;
 
+    Logger::info("T1.size() == %d", (int) T1.size());
+    Logger::info("T2.size() == %d", (int) T2.size());
+    Logger::info("L == %d", (int) L);
+    Logger::info("R == %d", (int) R);
+
     if (T1.size() >= min_positions) {
         const char* task_name;
         if (T2.size() < min_positions) {
@@ -317,8 +322,9 @@ void sequencing_bias::buildn(motif** Mn,
     this->R = R;
 
     const size_t max_dump = 10000000;
-    std::vector<ReadPos> S(max_dump);
-    T.dump(S);
+    std::vector<ReadPos> S;
+    S.reserve(max_dump);
+    T.dump(S, max_dump);
 
     /* sort by tid (so we can load one chromosome at a time) */
     random_shuffle(S.begin(), S.end());
@@ -332,7 +338,6 @@ void sequencing_bias::buildn(motif** Mn,
 
     std::deque<twobitseq*> foreground_seqs;
     std::deque<twobitseq*> background_seqs;
-
 
     /* background sampling */
     int bg_samples = 2; // make this many samples for each read
@@ -358,7 +363,6 @@ void sequencing_bias::buildn(motif** Mn,
             if (seq) free(seq);
 
             seq = faidx_fetch_seq(ref_f, i->seqname.get().c_str(), 0, INT_MAX, &seqlen);
-
             Logger::debug("read sequence %s.", i->seqname.get().c_str());
 
             if (seq == NULL) {

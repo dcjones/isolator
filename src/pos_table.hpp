@@ -11,6 +11,27 @@
 /* A simple read position structure. */
 struct ReadPos
 {
+    ReadPos(SeqName seqname, uint32_t strand, int32_t pos, uint32_t count)
+        : seqname(seqname)
+        , strand(strand)
+        , pos(pos)
+        , count(count)
+    {}
+
+    ReadPos()
+        : seqname("")
+        , strand(strand_na)
+        , pos(0)
+        , count(0)
+    {}
+
+    ReadPos(const ReadPos& other)
+        : seqname(other.seqname)
+        , strand(other.strand)
+        , pos(other.pos)
+        , count(other.count)
+    {}
+
     SeqName  seqname;
     uint32_t strand;
     int32_t  pos;
@@ -34,7 +55,7 @@ class PosTable
         void add(bam1_t* b, samfile_t* bam_f);
 
         /* Dump to a flat array. */
-        void dump(std::vector<ReadPos>& positions);
+        void dump(std::vector<ReadPos>& positions, size_t max_size);
 
     private:
         struct PosTableVal

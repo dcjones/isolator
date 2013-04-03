@@ -57,9 +57,8 @@ void PosTable::add(bam1_t* b, samfile_t* bam_f)
 }
 
 
-void PosTable::dump(std::vector<ReadPos>& positions)
+void PosTable::dump(std::vector<ReadPos>& positions, size_t max_size)
 {
-    size_t k = 0;
     std::vector<PosSubtable>::iterator subtable;
     for (subtable = subtables.begin(); subtable != subtables.end(); ++subtable) {
         int strand;
@@ -68,12 +67,9 @@ void PosTable::dump(std::vector<ReadPos>& positions)
             for (i = subtable->values[strand].begin();
                  i != subtable->values[strand].end();
                  ++i) {
-                if (k < positions.size()) {
-                    positions[k].seqname = subtable->seqname;
-                    positions[k].strand  = strand;
-                    positions[k].pos     = i->pos;
-                    positions[k].count   = i->count;
-                    ++k;
+                if (positions.size() < max_size) {
+                    positions.push_back(
+                            ReadPos(subtable->seqname, strand, i->pos, i->count));
                 }
                 else {
                     goto finish_pos_table_dump;

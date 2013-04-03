@@ -1665,6 +1665,8 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
     static const float zeps = 1e-6f;
     static const float deps = 1e-4f;
 
+    if (fabs(p0 - slice_height) <= peps) return z0;
+
     /* Find the range of fragment indexes that are affected by updating the u/v
      * mixture, so we can recompute as little as possible. */
     unsigned int comp = S.transcript_component[u];
