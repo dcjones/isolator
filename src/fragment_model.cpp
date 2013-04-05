@@ -610,13 +610,10 @@ void FragmentModel::estimate(TranscriptSet& ts,
     std::vector<Interval> consensus_5p_exons, consensus_3p_exons;
     ts.get_distinct_5p_3p_exons(exonic, consensus_5p_exons, consensus_3p_exons);
 
-    Logger::info("%zu 5' exons", consensus_5p_exons.size());
-    Logger::info("%zu 3' exons", consensus_3p_exons.size());
-
     for (interval = consensus_5p_exons.begin();
          interval != consensus_5p_exons.end();
          ++interval) {
-        if (interval->length() <= constants::transcript_tss_dist_len) {
+        if (interval->length() >= constants::transcript_tss_dist_len) {
             intervals.push_back(new FragmentModelInterval(
                                     *interval,
                                     FragmentModelInterval::UTR5P,
@@ -627,7 +624,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     for (interval = consensus_3p_exons.begin();
          interval != consensus_3p_exons.end();
          ++interval) {
-        if (interval->length() <= constants::transcript_tts_dist_len) {
+        if (interval->length() >= constants::transcript_tts_dist_len) {
             intervals.push_back(new FragmentModelInterval(
                                     *interval,
                                     FragmentModelInterval::UTR3P,
@@ -707,15 +704,36 @@ void FragmentModel::estimate(TranscriptSet& ts,
         }
     }
 
+#if 0
+    // XXX: Debugging
+    {
+        FILE* out = fopen("tss_dist.tsv", "w");
+        for (int i = 0; i < constants::transcript_tss_dist_len; ++i) {
+            fprintf(out, "%d\t%d\n", i, (int) tss_dist_lens[i]);
+        }
+        fclose(out);
+    }
+
+    {
+        FILE* out = fopen("tts_dist.tsv", "w");
+        for (int i = 0; i < constants::transcript_tts_dist_len; ++i) {
+            fprintf(out, "%d\t%d\n", i, (int) tts_dist_lens[i]);
+        }
+        fclose(out);
+    }
+#endif
+
     if (constants::transcript_tss_dist_len) {
         tss_dist = new EmpDist(&tss_dist_vals.at(0), &tss_dist_lens.at(0),
-                               constants::transcript_tss_dist_len);
+                               constants::transcript_tss_dist_len,
+                               constants::transcript_tss_tts_dist_w);
     }
     else tss_dist = new EmpDist(NULL, NULL, 0);
 
     if (constants::transcript_tts_dist_len) {
         tts_dist = new EmpDist(&tts_dist_vals.at(0), &tts_dist_lens.at(0),
-                               constants::transcript_tts_dist_len);
+                               constants::transcript_tts_dist_len,
+                               constants::transcript_tss_tts_dist_w);
     }
     else tts_dist = new EmpDist(NULL, NULL, 0);
 

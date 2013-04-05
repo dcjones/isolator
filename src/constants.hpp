@@ -107,6 +107,11 @@ namespace constants
     extern pos_t transcript_tss_dist_len;
     extern pos_t transcript_tts_dist_len;
 
+    /* Smoothing used on the emperical distribution of fragment position at the
+     * starts/ends of transcripts. */
+    extern float transcript_tss_tts_dist_w;
+
+
     /* It's possible for a transcript to get assigned exceedingly low weight,
      * given the fragment length distribution. Then when a single read lands
      * there, it is assumed that the trascript is very highly expressed. More
