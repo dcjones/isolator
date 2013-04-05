@@ -1984,8 +1984,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
     const char* task_name = "Finding maximum posterior";
     Logger::push_task(task_name);
 
-    //float p_max = -INFINITY; [> previous log-probability <]
-    bool hillclimb = true;
+    float p_max = -INFINITY;
     unsigned int burnin_samples = constants::sampler_burnin_samples;
 
     for (unsigned int sample_num = 0; sample_num < num_samples; ) {
@@ -2057,42 +2056,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
             cmix[c] /= z;
         }
 
-        /* Check for convergence of the maximum posterior estimate. */
-        if (hillclimb) {
-            float p = 0.0;
-            for (unsigned int c = 0; c < num_components; ++c) {
-                p += fastlog2(cmix[c]) * frag_count_sums[c];
-                p += dotlog(frag_counts[c], frag_probs[c],
-                            component_frag[c + 1] - component_frag[c]);
-            }
-
-            Logger::debug("log(p) = %e", p);
-
-            // XXX: Disabling EM: force it to stop after the first evaluation of
-            // overall logp.
-            //if (fabsf(p - p_max) / fabsf(p) < constants::maxpost_rel_error) {
-            if(true) {
-                for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-                    if (transcript_weights[i] < constants::min_transcript_weight) {
-                        maxpost_tmix[i] = 0.0;
-                    }
-                    else {
-                        maxpost_tmix[i] = tmix[i] * cmix[transcript_component[i]];
-                    }
-                }
-                hillclimb = false;
-                for (unsigned int i = 0; i < constants::num_threads; ++i) {
-                    mcmc_threads[i]->hillclimb = false;
-                    multiread_threads[i]->hillclimb = false;
-                }
-
-                Logger::pop_task(task_name);
-                task_name = "Sampling";
-                Logger::push_task(task_name, num_samples + burnin_samples);
-            }
-            //p_max = p;
-        }
-        else if(burnin_samples == 0) {
+        if(burnin_samples == 0) {
             double total_weight = 0.0, new_total_weight = 0.0;
             for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
                 if (transcript_weights[i] < constants::min_transcript_weight) {
@@ -2117,6 +2081,21 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
             for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
                 samples[i][sample_num] /= new_total_weight;
+            }
+
+            /* Have we improved the overall probability? */
+            float p = 0.0;
+            for (unsigned int c = 0; c < num_components; ++c) {
+                p += fastlog2(cmix[c]) * frag_count_sums[c];
+                p += dotlog(frag_counts[c], frag_probs[c],
+                            component_frag[c + 1] - component_frag[c]);
+            }
+
+            if (p > p_max) {
+                p_max = p;
+                for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+                    maxpost_tmix[i] = samples[i][sample_num];
+                }
             }
 
             ++sample_num;
