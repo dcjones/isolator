@@ -306,6 +306,7 @@ void TranscriptSet::read_gtf(FILE* f)
     gtf_row_free(row);
     gtf_file_free(gtf_file);
 
+
     unsigned int next_id = 0;
     for (TrieMapIterator<Transcript> t(ts);
          t != TrieMapIterator<Transcript>();

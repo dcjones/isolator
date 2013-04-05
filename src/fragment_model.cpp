@@ -707,12 +707,17 @@ void FragmentModel::estimate(TranscriptSet& ts,
         }
     }
 
-    tss_dist = new EmpDist(&tss_dist_vals.at(0), &tss_dist_lens.at(0),
-                           constants::transcript_tss_dist_len);
+    if (constants::transcript_tss_dist_len) {
+        tss_dist = new EmpDist(&tss_dist_vals.at(0), &tss_dist_lens.at(0),
+                               constants::transcript_tss_dist_len);
+    }
+    else tss_dist = new EmpDist(NULL, NULL, 0);
 
-    tts_dist = new EmpDist(&tts_dist_vals.at(0), &tts_dist_lens.at(0),
-                           constants::transcript_tts_dist_len);
-
+    if (constants::transcript_tts_dist_len) {
+        tts_dist = new EmpDist(&tts_dist_vals.at(0), &tts_dist_lens.at(0),
+                               constants::transcript_tts_dist_len);
+    }
+    else tts_dist = new EmpDist(NULL, NULL, 0);
 
     /* Collect strand specificity statistics. */
     unsigned long strand_bias[2] = {0, 0};

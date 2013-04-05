@@ -1095,6 +1095,7 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     if (a.mate1) {
         pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?
                                     a.mate1->start : a.mate1->end);
+
         if (0 <= offset && offset < (pos_t) mate1_seqbias[a.mate1->strand].size()) {
             w *= mate1_seqbias[a.mate1->strand][offset];
         }
@@ -1108,21 +1109,21 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         // measure end bias
         if (t.strand == strand_pos) {
             if (a.mate1->strand == strand_pos &&
-                offset < constants::transcript_tss_dist_len) {
+                offset >= 0 && offset < constants::transcript_tss_dist_len) {
                 w *= tss_dist->pdf(offset) * constants::transcript_tss_dist_len;
             }
             else if (a.mate1->strand == strand_neg &&
-                     tlen - offset < constants::transcript_tts_dist_len) {
+                     tlen - offset >= 0.0 && tlen - offset < constants::transcript_tts_dist_len) {
                 w *= tts_dist->pdf(tlen - offset) * constants::transcript_tts_dist_len;
             }
         }
         else {
             if (a.mate1->strand == strand_pos &&
-                offset < constants::transcript_tts_dist_len) {
+                offset >= 0 && offset < constants::transcript_tts_dist_len) {
                 w *= tts_dist->pdf(offset) * constants::transcript_tts_dist_len;
             }
             else if (a.mate1->strand == strand_neg &&
-                     tlen - offset < constants::transcript_tss_dist_len) {
+                     tlen - offset >= 0 && tlen - offset < constants::transcript_tss_dist_len) {
                 w *= tss_dist->pdf(tlen - offset) * constants::transcript_tss_dist_len;
             }
         }
@@ -1144,21 +1145,21 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         // measure end bias
         if (t.strand == strand_pos) {
             if (a.mate2->strand == strand_pos &&
-                offset < constants::transcript_tss_dist_len) {
+                offset >= 0 && offset < constants::transcript_tss_dist_len) {
                 w *= tss_dist->pdf(offset) * constants::transcript_tss_dist_len;
             }
             else if (a.mate2->strand == strand_neg &&
-                     tlen - offset < constants::transcript_tts_dist_len) {
+                     tlen - offset >= 0 && tlen - offset < constants::transcript_tts_dist_len) {
                 w *= tts_dist->pdf(tlen - offset) * constants::transcript_tts_dist_len;
             }
         }
         else {
             if (a.mate2->strand == strand_pos &&
-                offset < constants::transcript_tts_dist_len) {
+                offset >= 0 && offset < constants::transcript_tts_dist_len) {
                 w *= tts_dist->pdf(offset) * constants::transcript_tts_dist_len;
             }
             else if (a.mate2->strand == strand_neg &&
-                     tlen - offset < constants::transcript_tss_dist_len) {
+                     tlen - offset >= 0 && tlen - offset < constants::transcript_tss_dist_len) {
                 w *= tss_dist->pdf(tlen - offset) * constants::transcript_tss_dist_len;
             }
         }
@@ -1941,12 +1942,6 @@ class MultireadSamplerThread
 
 void Sampler::run(unsigned int num_samples, SampleDB& out)
 {
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (t->transcript_id == "ENST00000253408") {
-            fprintf(stderr, "HERE\n");
-        }
-    }
-
     /* Initial mixtures */
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         tmix[i] = 1.0 / (float) component_num_transcripts[transcript_component[i]];
