@@ -1074,7 +1074,7 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         w += frag_len_pr * ws[frag_len];
     }
 
-    return w;
+    return std::max(w, constants::min_transcript_weight);
 }
 
 
