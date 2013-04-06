@@ -489,48 +489,65 @@ void TranscriptSet::get_distinct_5p_3p_exons(const std::vector<Interval>& consen
                                              std::vector<Interval>& consensus_3p_exons)
 {
     // Build vectors of 5' and 3' exons.
-    std::vector<Interval> end_exons;
-    std::vector<int>      end_exon_type; // 0 for 5', 1 for 3'
+    std::vector<Interval> exons_5p, exons_3p;
     std::set<Transcript>::iterator t;
 
     for (t = transcripts.begin(); t != transcripts.end(); ++t) {
-        Transcript::iterator         first_exon = t->begin();
-        Transcript::reverse_iterator last_exon  = t->rbegin();
-        end_exons.push_back(Interval(t->seqname.get().c_str(),
-                                     first_exon->start,
-                                     first_exon->end,
-                                     t->strand));
-        end_exons.push_back(Interval(t->seqname.get().c_str(),
-                                     last_exon->start,
-                                     last_exon->end,
-                                     t->strand));
+        Transcript::iterator         i_first = t->begin();
+        Transcript::reverse_iterator i_last  = t->rbegin();
+
+        Interval first_exon(t->seqname.get().c_str(),
+                            i_first->start,
+                            i_first->end,
+                            t->strand);
+
+        Interval last_exon(t->seqname.get().c_str(),
+                           i_last->start,
+                           i_last->end,
+                           t->strand);
 
         if (t->strand == strand_pos) {
-            end_exon_type.push_back(0);
-            end_exon_type.push_back(1);
+            exons_5p.push_back(first_exon);
+            exons_3p.push_back(last_exon);
         }
         else {
-            end_exon_type.push_back(1);
-            end_exon_type.push_back(0);
+            exons_5p.push_back(last_exon);
+            exons_3p.push_back(first_exon);
         }
     }
 
-    std::sort(end_exons.begin(), end_exons.end());
+    std::sort(exons_5p.begin(), exons_5p.end());
+    std::sort(exons_3p.begin(), exons_3p.end());
 
-    size_t i = 0, j = 0;
-    while (i < consensus_exons.size() && j < end_exons.size()) {
-        while (i < consensus_exons.size() && consensus_exons[i] < end_exons[j]) {
+
+    // find consensus 5' exons
+    std::vector<Interval>::const_iterator i = consensus_exons.begin(),
+                                          j = exons_5p.begin();
+
+    while (i != consensus_exons.end() && j != exons_5p.end()) {
+        while (i != consensus_exons.end() && *i < *j) {
             ++i;
         }
-        if (i >= consensus_exons.size()) break;
+        if (i == consensus_exons.end()) break;
 
-        if (consensus_exons[i] == end_exons[j]) {
-            if (end_exon_type[j] == 0) {
-                consensus_5p_exons.push_back(end_exons[j]);
-            }
-            else {
-                consensus_3p_exons.push_back(end_exons[j]);
-            }
+        if (*i == *j) {
+            consensus_5p_exons.push_back(*j);
+        }
+        ++j;
+    }
+
+    // find consensus 3' exons
+    i = consensus_exons.begin();
+    j = exons_3p.begin();
+
+    while (i != consensus_exons.end() && j != exons_3p.end()) {
+        while (i != consensus_exons.end() && *i < *j) {
+            ++i;
+        }
+        if (i == consensus_exons.end()) break;
+
+        if (*i == *j) {
+            consensus_3p_exons.push_back(*j);
         }
         ++j;
     }

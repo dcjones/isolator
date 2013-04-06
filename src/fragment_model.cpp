@@ -505,12 +505,12 @@ class FragmentModelThread
                 AlignedReadIterator j(*i->first);
                 for (; j != AlignedReadIterator(); ++j) {
                     // TODO: The following code assumes FR fragments.
-                    pos_t d;
+                    pos_t d = -1;
                     if (strand == strand_pos) {
                         if (j->mate1 && j->mate1->strand == strand_pos) {
                             d = j->mate1->start - start;
                         }
-                        else if (j->mate2 && j->mate2->strand == strand_neg) {
+                        else if (j->mate2 && j->mate2->strand == strand_pos) {
                             d = j->mate2->start - start;
                         }
                     }
@@ -518,7 +518,7 @@ class FragmentModelThread
                         if (j->mate1 && j->mate1->strand == strand_neg) {
                             d = end - j->mate1->end;
                         }
-                        else if (j->mate2 && j->mate2->strand == strand_pos) {
+                        else if (j->mate2 && j->mate2->strand == strand_neg) {
                             d = end - j->mate2->end;
                         }
                     }
@@ -540,7 +540,7 @@ class FragmentModelThread
                 AlignedReadIterator j(*i->first);
                 for (; j != AlignedReadIterator(); ++j) {
                     // TODO: the following code assumes FR fragments.
-                    pos_t d;
+                    pos_t d = -1;
                     if (strand == strand_pos) {
                         if (j->mate1 && j->mate1->strand == strand_neg) {
                             d = end - j->mate1->end;
@@ -553,7 +553,7 @@ class FragmentModelThread
                         if (j->mate1 && j->mate1->strand == strand_pos) {
                             d = j->mate1->start - start;
                         }
-                        else if (j->mate2 && j->mate2->strand == strand_neg) {
+                        else if (j->mate2 && j->mate2->strand == strand_pos) {
                             d = j->mate2->start - start;
                         }
                     }
@@ -704,7 +704,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
         }
     }
 
-#if 0
     // XXX: Debugging
     {
         FILE* out = fopen("tss_dist.tsv", "w");
@@ -721,7 +720,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
         }
         fclose(out);
     }
-#endif
 
     if (constants::transcript_tss_dist_len) {
         tss_dist = new EmpDist(&tss_dist_vals.at(0), &tss_dist_lens.at(0),
