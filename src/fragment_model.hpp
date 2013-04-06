@@ -122,7 +122,10 @@ class FragmentModel
         EmpDist* frag_len_dist;
 
         /* Distribution over read placement in the ends of the transcript. */
+        float tss_dist_weight;
         EmpDist* tss_dist;
+
+        float tts_dist_weight;
         EmpDist* tts_dist;
 };
 

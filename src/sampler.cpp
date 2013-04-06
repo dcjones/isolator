@@ -1039,22 +1039,21 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
             endbias = 1.0;
             if (t.strand == strand_pos) {
                 if (pos < constants::transcript_tss_dist_len) {
-                    endbias *= tss_dist->pdf(pos) *
-                                constants::transcript_tss_dist_len;
+                    endbias *= tss_dist->pdf(pos) * fm.tss_dist_weight;
                 }
                 if (trans_len - (pos + frag_len) < constants::transcript_tts_dist_len) {
                     endbias *= tts_dist->pdf(trans_len - (pos + frag_len)) *
-                               constants::transcript_tts_dist_len;
+                               fm.tss_dist_weight;
                 }
             }
             else {
                 if (pos < constants::transcript_tts_dist_len) {
                     endbias *= tts_dist->pdf(pos) *
-                                constants::transcript_tts_dist_len;
+                               fm.tts_dist_weight;
                 }
                 if (trans_len - (pos + frag_len) < constants::transcript_tss_dist_len) {
                     endbias *= tss_dist->pdf(trans_len - (pos + frag_len)) *
-                               constants::transcript_tss_dist_len;
+                               fm.tts_dist_weight;
                 }
             }
 
@@ -1110,21 +1109,21 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         if (t.strand == strand_pos) {
             if (a.mate1->strand == strand_pos &&
                 offset >= 0 && offset < constants::transcript_tss_dist_len) {
-                w *= tss_dist->pdf(offset) * constants::transcript_tss_dist_len;
+                w *= tss_dist->pdf(offset) * fm.tss_dist_weight;
             }
             else if (a.mate1->strand == strand_neg &&
                      tlen - offset >= 0.0 && tlen - offset < constants::transcript_tts_dist_len) {
-                w *= tts_dist->pdf(tlen - offset) * constants::transcript_tts_dist_len;
+                w *= tts_dist->pdf(tlen - offset) * fm.tts_dist_weight;
             }
         }
         else {
             if (a.mate1->strand == strand_pos &&
                 offset >= 0 && offset < constants::transcript_tts_dist_len) {
-                w *= tts_dist->pdf(offset) * constants::transcript_tts_dist_len;
+                w *= tts_dist->pdf(offset) * fm.tts_dist_weight;
             }
             else if (a.mate1->strand == strand_neg &&
                      tlen - offset >= 0 && tlen - offset < constants::transcript_tss_dist_len) {
-                w *= tss_dist->pdf(tlen - offset) * constants::transcript_tss_dist_len;
+                w *= tss_dist->pdf(tlen - offset) * fm.tss_dist_weight;
             }
         }
     }
@@ -1146,21 +1145,21 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         if (t.strand == strand_pos) {
             if (a.mate2->strand == strand_pos &&
                 offset >= 0 && offset < constants::transcript_tss_dist_len) {
-                w *= tss_dist->pdf(offset) * constants::transcript_tss_dist_len;
+                w *= tss_dist->pdf(offset) * fm.tss_dist_weight;
             }
             else if (a.mate2->strand == strand_neg &&
                      tlen - offset >= 0 && tlen - offset < constants::transcript_tts_dist_len) {
-                w *= tts_dist->pdf(tlen - offset) * constants::transcript_tts_dist_len;
+                w *= tts_dist->pdf(tlen - offset) * fm.tts_dist_weight;
             }
         }
         else {
             if (a.mate2->strand == strand_pos &&
                 offset >= 0 && offset < constants::transcript_tts_dist_len) {
-                w *= tts_dist->pdf(offset) * constants::transcript_tts_dist_len;
+                w *= tts_dist->pdf(offset) * fm.tts_dist_weight;
             }
             else if (a.mate2->strand == strand_neg &&
                      tlen - offset >= 0 && tlen - offset < constants::transcript_tss_dist_len) {
-                w *= tss_dist->pdf(tlen - offset) * constants::transcript_tss_dist_len;
+                w *= tss_dist->pdf(tlen - offset) * fm.tss_dist_weight;
             }
         }
     }

@@ -718,12 +718,31 @@ void FragmentModel::estimate(TranscriptSet& ts,
     }
     else tts_dist = new EmpDist(NULL, NULL, 0);
 
+    tss_dist_weight = 0.0;
+    for (pos_t i = constants::transcript_5p_extension;
+            i < constants::transcript_tss_dist_len; ++i) {
+        tss_dist_weight += tss_dist->pdf(i);
+    }
+    tss_dist_weight =
+        (float) (constants::transcript_tss_dist_len - constants::transcript_5p_extension) /
+        tss_dist_weight;
+    Logger::info("tss_dist_weight = %f", tss_dist_weight);
+
+    tts_dist_weight = 0.0;
+    for (pos_t i = constants::transcript_3p_extension;
+            i < constants::transcript_tts_dist_len; ++i) {
+        tts_dist_weight += tts_dist->pdf(i);
+    }
+    tts_dist_weight =
+        (float) (constants::transcript_tts_dist_len - constants::transcript_3p_extension) /
+        tts_dist_weight;
+    Logger::info("tts_dist_weight = %f", tts_dist_weight);
 
     // XXX: Debugging
     {
         FILE* out = fopen("tss_dist.tsv", "w");
         for (int i = 0; i < constants::transcript_tss_dist_len; ++i) {
-            fprintf(out, "%d\t%f\n", i, tss_dist->pdf(i));
+            fprintf(out, "%d\t%f\n", i, tss_dist->pdf(i) * tss_dist_weight);
         }
         fclose(out);
     }
@@ -731,7 +750,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     {
         FILE* out = fopen("tts_dist.tsv", "w");
         for (int i = 0; i < constants::transcript_tts_dist_len; ++i) {
-            fprintf(out, "%d\t%f\n", i, tts_dist->pdf(i));
+            fprintf(out, "%d\t%f\n", i, tts_dist->pdf(i) * tts_dist_weight);
         }
         fclose(out);
     }
