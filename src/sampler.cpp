@@ -1981,11 +1981,12 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
     unsigned int* cs = new unsigned int [num_components];
     for (unsigned int c = 0; c < num_components; ++c) cs[c] = c;
 
-    const char* task_name = "Finding maximum posterior";
-    Logger::push_task(task_name);
 
     float p_max = -INFINITY;
     unsigned int burnin_samples = constants::sampler_burnin_samples;
+
+    const char* task_name = "Sampling";
+    Logger::push_task(task_name, num_samples + burnin_samples);
 
     for (unsigned int sample_num = 0; sample_num < num_samples; ) {
         /* Sample multiread alignments */
