@@ -704,23 +704,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
         }
     }
 
-    // XXX: Debugging
-    {
-        FILE* out = fopen("tss_dist.tsv", "w");
-        for (int i = 0; i < constants::transcript_tss_dist_len; ++i) {
-            fprintf(out, "%d\t%d\n", i, (int) tss_dist_lens[i]);
-        }
-        fclose(out);
-    }
-
-    {
-        FILE* out = fopen("tts_dist.tsv", "w");
-        for (int i = 0; i < constants::transcript_tts_dist_len; ++i) {
-            fprintf(out, "%d\t%d\n", i, (int) tts_dist_lens[i]);
-        }
-        fclose(out);
-    }
-
     if (constants::transcript_tss_dist_len) {
         tss_dist = new EmpDist(&tss_dist_vals.at(0), &tss_dist_lens.at(0),
                                constants::transcript_tss_dist_len,
@@ -734,6 +717,24 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                constants::transcript_tss_tts_dist_w);
     }
     else tts_dist = new EmpDist(NULL, NULL, 0);
+
+
+    // XXX: Debugging
+    {
+        FILE* out = fopen("tss_dist.tsv", "w");
+        for (int i = 0; i < constants::transcript_tss_dist_len; ++i) {
+            fprintf(out, "%d\t%f\n", i, tss_dist->pdf(i));
+        }
+        fclose(out);
+    }
+
+    {
+        FILE* out = fopen("tts_dist.tsv", "w");
+        for (int i = 0; i < constants::transcript_tts_dist_len; ++i) {
+            fprintf(out, "%d\t%f\n", i, tts_dist->pdf(i));
+        }
+        fclose(out);
+    }
 
     /* Collect strand specificity statistics. */
     unsigned long strand_bias[2] = {0, 0};

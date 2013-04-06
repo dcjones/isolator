@@ -488,25 +488,46 @@ void TranscriptSet::get_distinct_5p_3p_exons(const std::vector<Interval>& consen
                                              std::vector<Interval>& consensus_5p_exons,
                                              std::vector<Interval>& consensus_3p_exons)
 {
+    // Group transcripts by gene_id
+    std::map<std::string, Transcript> genes;
+    std::map<std::string, Transcript>::iterator g;
+    std::set<Transcript>::iterator t;
+    for (std::set<Transcript>::iterator t = transcripts.begin();
+         t != transcripts.end(); ++t) {
+        g = genes.find(t->gene_id);
+        if (g == genes.end()) {
+             g = genes.insert(std::make_pair(t->gene_id.get(), Transcript())).first;
+        }
+
+        Transcript::iterator e;
+        for (e = t->begin(); e != t->end(); ++e) {
+            g->second.insert(*e);
+        }
+        g->second.strand = t->strand;
+        g->second.gene_id = t->gene_id;
+        g->second.seqname = t->seqname;
+    }
+
     // Build vectors of 5' and 3' exons.
     std::vector<Interval> exons_5p, exons_3p;
-    std::set<Transcript>::iterator t;
 
-    for (t = transcripts.begin(); t != transcripts.end(); ++t) {
-        Transcript::iterator         i_first = t->begin();
-        Transcript::reverse_iterator i_last  = t->rbegin();
+    for (g = genes.begin(); g != genes.end(); ++g) {
+        Transcript& t = g->second;
 
-        Interval first_exon(t->seqname.get().c_str(),
+        Transcript::iterator         i_first = t.begin();
+        Transcript::reverse_iterator i_last  = t.rbegin();
+
+        Interval first_exon(t.seqname.get().c_str(),
                             i_first->start,
                             i_first->end,
-                            t->strand);
+                            t.strand);
 
-        Interval last_exon(t->seqname.get().c_str(),
+        Interval last_exon(t.seqname.get().c_str(),
                            i_last->start,
                            i_last->end,
-                           t->strand);
+                           t.strand);
 
-        if (t->strand == strand_pos) {
+        if (t.strand == strand_pos) {
             exons_5p.push_back(first_exon);
             exons_3p.push_back(last_exon);
         }
@@ -518,7 +539,6 @@ void TranscriptSet::get_distinct_5p_3p_exons(const std::vector<Interval>& consen
 
     std::sort(exons_5p.begin(), exons_5p.end());
     std::sort(exons_3p.begin(), exons_3p.end());
-
 
     // find consensus 5' exons
     std::vector<Interval>::const_iterator i = consensus_exons.begin(),
@@ -552,7 +572,6 @@ void TranscriptSet::get_distinct_5p_3p_exons(const std::vector<Interval>& consen
         ++j;
     }
 }
-
 
 
 TranscriptSet::iterator TranscriptSet::begin()
