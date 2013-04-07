@@ -723,9 +723,12 @@ void FragmentModel::estimate(TranscriptSet& ts,
             i < constants::transcript_tss_dist_len; ++i) {
         tss_dist_weight += tss_dist->pdf(i);
     }
-    tss_dist_weight =
-        (float) (constants::transcript_tss_dist_len - constants::transcript_5p_extension) /
-        tss_dist_weight;
+    if (tss_dist_weight > 0.0) {
+        tss_dist_weight =
+            (float) (constants::transcript_tss_dist_len - constants::transcript_5p_extension) /
+            tss_dist_weight;
+    }
+    else tss_dist_weight = 0.0;
     Logger::info("tss_dist_weight = %f", tss_dist_weight);
 
     tts_dist_weight = 0.0;
@@ -733,9 +736,12 @@ void FragmentModel::estimate(TranscriptSet& ts,
             i < constants::transcript_tts_dist_len; ++i) {
         tts_dist_weight += tts_dist->pdf(i);
     }
-    tts_dist_weight =
-        (float) (constants::transcript_tts_dist_len - constants::transcript_3p_extension) /
-        tts_dist_weight;
+    if (tts_dist_weight >= 0.0) {
+        tts_dist_weight =
+            (float) (constants::transcript_tts_dist_len - constants::transcript_3p_extension) /
+            tts_dist_weight;
+    }
+    else tts_dist_weight = 0.0;
     Logger::info("tts_dist_weight = %f", tts_dist_weight);
 
     // XXX: Debugging
