@@ -85,39 +85,25 @@ void Transcript::get_sequence(twobitseq& dest, const twobitseq& src,
 {
     const pos_t len = exonic_length();
 
-    pos_t src_start = 0;
-    pos_t src_end   = len - 1;
+    dest.resize(len + lpad + rpad);
+    pos_t off = 0;
 
-    src_start -= lpad;
-    src_end   += rpad;
-
-    dest.resize(src_end - src_start + 1);
-    pos_t offset = 0;
-
-    if (src_start < 0) {
-        dest.copy(src, min_start + src_start, 0, -src_start);
-        offset += -src_start;
-        src_start = 0;
+    pos_t tstart = begin()->start;
+    while (tstart - lpad < 0) {
+        dest.setnuc(off, 0);
+        --lpad;
+        ++off;
     }
 
-    pos_t cum = 0;
-    pos_t u, v;
+    dest.copy(src, tstart - lpad, off, lpad);
+    off += lpad;
+
     for (const_iterator e = begin(); e != end(); ++e) {
-        u = e->start + std::max((pos_t) 0, src_start - cum);
-        v = std::min(e->end, e->start + (src_end - cum));
-
-        cum += e->end - e->start + 1;
-
-        if (u > v) continue;
-
-        dest.copy(src, u, offset, v - u + 1);
-        offset += v - u + 1;
+        dest.copy(src, e->start, off, e->end - e->start + 1);
+        off += e->end - e->start + 1;
     }
 
-    if (src_end >= len) {
-        dest.copy(src, max_end + 1, offset, src_end - len + 1);
-        offset += src_end - len + 1;
-    }
+    dest.copy(src, rbegin()->end + 1, off, rpad);
 }
 
 

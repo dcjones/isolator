@@ -196,6 +196,11 @@ class motif_trainer
 
 
         while (true) {
+            // XXX: debugging
+            if (round_num > 0) {
+                break;
+            }
+
             ++round_num;
             Logger::get_task(task_name).inc();
             compute_reachability();

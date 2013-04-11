@@ -48,6 +48,17 @@ kmer nuc_to_num(char c)
 }
 
 
+char num_to_nuc(kmer K) {
+    switch (K & 0x3) {
+        case 0: return 'a';
+        case 1: return 'c';
+        case 2: return 'g';
+        case 3: return 't';
+        default: return 'n';
+    }
+}
+
+
 
 void num_to_nuc(char* dest, kmer K, int k)
 {
@@ -269,5 +280,12 @@ void twobitseq::copy(const twobitseq& src, pos_t src_start, pos_t dest_start, po
 }
 
 
-
+std::string twobitseq::to_string() const
+{
+    std::string out;
+    for (size_t i = 0; i < n; ++i) {
+        out += num_to_nuc(getnuc(i));
+    }
+    return out;
+}
 

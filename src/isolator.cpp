@@ -76,7 +76,7 @@ int quantify(int argc, char* argv[])
     const char* fa_fn  = NULL;
     const char* out_fn = "isolator.db";
     constants::num_threads = boost::thread::hardware_concurrency();
-    unsigned int num_samples = 500;
+    unsigned int num_samples = 100;
     Logger::level logger_level = Logger::INFO;
 
     int opt;
@@ -298,6 +298,7 @@ int summarize(int argc, char* argv[])
     std::vector<float> samples;
     for (SampleDBIterator i(db); i != SampleDBIterator(); ++i) {
         samples = i->samples;
+
         std::sort(samples.begin(), samples.end());
         float posterior_mean = gsl_stats_float_mean(
                 &samples.at(0), 1, samples.size());
@@ -312,6 +313,10 @@ int summarize(int argc, char* argv[])
                 //&samples.at(0), 1, samples.size(), 0.975);
         float lower_95_cred = samples.front();
         float upper_95_cred = samples.back();
+
+        if (i->transcript_id.get() == "ENST00000253408") {
+            fprintf(stderr, "HERE");
+        }
 
         for (std::vector<float>::iterator j = samples.begin();
                 j != samples.end(); ++j) {

@@ -10,6 +10,7 @@
 #define TWOBITSEQ_MATRIX_HPP
 
 #include <cstdlib>
+#include <string>
 
 #include "common.hpp"
 #include "kmer_matrix.hpp"
@@ -65,6 +66,8 @@ class twobitseq
 
         kmer getnuc(size_t i) const;
         void setnuc(size_t i, kmer K);
+
+        std::string to_string() const;
 
     private:
 

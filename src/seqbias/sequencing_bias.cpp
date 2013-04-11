@@ -308,6 +308,15 @@ struct ReadPosSeqnameCmp
 };
 
 
+struct ReadPosCountCmp
+{
+    bool operator () (const ReadPos& a, const ReadPos& b)
+    {
+        return a.count > b.count;
+    }
+};
+
+
 void sequencing_bias::buildn(motif** Mn,
                              const char* ref_fn,
                              PosTable& T,
@@ -327,8 +336,11 @@ void sequencing_bias::buildn(motif** Mn,
     T.dump(S, max_dump);
 
     /* sort by tid (so we can load one chromosome at a time) */
-    random_shuffle(S.begin(), S.end());
-    sort(S.begin(), S.end(), ReadPosSeqnameCmp());
+    //random_shuffle(S.begin(), S.end());
+    //sort(S.begin(), S.end(), ReadPosSeqnameCmp());
+
+    sort(S.begin(), S.end(), ReadPosCountCmp());
+    sort(S.begin(), S.begin() + max_reads, ReadPosSeqnameCmp());
 
     /* sample foreground and background kmer frequencies */
     ref_f = fai_load(ref_fn);
@@ -385,7 +397,7 @@ void sequencing_bias::buildn(motif** Mn,
         }
         else {
             if (i->pos < L || i->pos >= seqlen - R) continue;
-            memcpy(local_seq, seq + (i->pos-L), (L+1+R)*sizeof(char));
+            memcpy(local_seq, seq + (i->pos - L), (L+1+R)*sizeof(char));
         }
 
         if (strchr(local_seq, 'n') != NULL) continue;
@@ -415,6 +427,34 @@ void sequencing_bias::buildn(motif** Mn,
             bg_sample_num++;
         }
     }
+
+
+#if 0
+    // XXX:
+    if (Mn == &M1) {
+        FILE* f = fopen("foreground_seqs.txt", "w");
+        for (std::deque<twobitseq*>::iterator i = foreground_seqs.begin();
+                i != foreground_seqs.end(); ++i) {
+            std::string s = (*i)->to_string();
+            for (int j = 0; j < L+1+R; ++j) {
+                fprintf(f, "%d\t%c\n", j, s[j]);
+            }
+        }
+        fclose(f);
+
+        f = fopen("background_seqs.txt", "w");
+        for (std::deque<twobitseq*>::iterator i = background_seqs.begin();
+                i != background_seqs.end(); ++i) {
+            std::string s = (*i)->to_string();
+            for (int j = 0; j < L+1+R; ++j) {
+                fprintf(f, "%d\t%c\n", j, s[j]);
+            }
+        }
+        fclose(f);
+    }
+#endif
+
+
 
     size_t max_parents  = 4;
     size_t max_distance = 10;

@@ -762,6 +762,12 @@ class SamplerInitThread
             else return fm.frag_len_p(frag_len);
         }
 
+        double frag_len_c(pos_t frag_len)
+        {
+            if (frag_len_dist) return frag_len_dist->cdf(frag_len);
+            else return fm.frag_len_c(frag_len);
+        }
+
         void process_locus(SamplerInitInterval* locus);
 
         /* Compute sequence bias for both mates on both strand.
@@ -979,26 +985,51 @@ void SamplerInitThread::transcript_sequence_bias(
         mate2_seqbias[1].resize(tlen);
     }
 
-    if (fm.sb == NULL || locus.seq == NULL) {
-        std::fill(mate1_seqbias[0].begin(), mate1_seqbias[0].begin() + tlen, 1.0);
-        std::fill(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen, 1.0);
-        std::fill(mate2_seqbias[0].begin(), mate2_seqbias[0].begin() + tlen, 1.0);
-        std::fill(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen, 1.0);
-        return;
-    }
+    std::fill(mate1_seqbias[0].begin(), mate1_seqbias[0].begin() + tlen, 1.0);
+    std::fill(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen, 1.0);
+    std::fill(mate2_seqbias[0].begin(), mate2_seqbias[0].begin() + tlen, 1.0);
+    std::fill(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen, 1.0);
+
+    if (fm.sb == NULL || locus.seq == NULL) return;
 
     t.get_sequence(tseq0, *locus.seq, fm.sb->getL(), fm.sb->getR());
     t.get_sequence(tseq1, *locus.seq, fm.sb->getR(), fm.sb->getL());
     tseq1.revcomp();
 
     for (pos_t pos = 0; pos < tlen; ++pos) {
+
         mate1_seqbias[0][pos] = fm.sb->get_mate1_bias(tseq0, pos + fm.sb->getL());
         mate1_seqbias[1][pos] = fm.sb->get_mate1_bias(tseq1, pos + fm.sb->getL());
-        mate1_seqbias[0][pos] = fm.sb->get_mate2_bias(tseq0, pos + fm.sb->getL());
-        mate1_seqbias[1][pos] = fm.sb->get_mate2_bias(tseq1, pos + fm.sb->getL());
+        mate2_seqbias[0][pos] = fm.sb->get_mate2_bias(tseq0, pos + fm.sb->getL());
+        mate2_seqbias[1][pos] = fm.sb->get_mate2_bias(tseq1, pos + fm.sb->getL());
     }
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
+
+#if 0
+    if (t.gene_id == "ENSG00000131095") {
+        FILE* f = fopen("gfap.0.txt", "a");
+        fprintf(f, ">%s\n", t.transcript_id.get().c_str());
+        for (pos_t pos = 0; pos < tlen; ++pos) {
+            fprintf(f, "%f, ", mate1_seqbias[0][pos]);
+        }
+        fprintf(f, "\n");
+        fclose(f);
+
+        f = fopen("gfap.1.txt", "a");
+        fprintf(f, ">%s\n", t.transcript_id.get().c_str());
+        for (pos_t pos = 0; pos < tlen; ++pos) {
+            fprintf(f, "%f, ", mate1_seqbias[1][pos]);
+        }
+        fprintf(f, "\n");
+        fclose(f);
+
+        f = fopen("gfap.txt", "a");
+        fprintf(f, ">%s\n", t.transcript_id.get().c_str());
+        fprintf(f, "%s\n", tseq1.to_string().c_str());
+        fclose(f);
+    }
+#endif
 }
 
 
@@ -1095,10 +1126,13 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?
                                     a.mate1->start : a.mate1->end);
 
+#if 0
         if (0 <= offset && offset < (pos_t) mate1_seqbias[a.mate1->strand].size()) {
             w *= mate1_seqbias[a.mate1->strand][offset];
         }
-        else if (a.mate1->strand == t.strand) {
+#endif
+
+        if (a.mate1->strand == t.strand) {
             w *= fm.strand_specificity;
         }
         else {
@@ -1131,10 +1165,13 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     if (a.mate2) {
         pos_t offset = t.get_offset(a.mate2->strand == strand_pos ?
                                     a.mate2->start : a.mate2->end);
+#if 0
         if (0 <= offset && offset < (pos_t) mate2_seqbias[a.mate2->strand].size()) {
             w *= mate2_seqbias[a.mate2->strand][offset];
         }
-        else if (a.mate2->strand == t.strand) {
+#endif
+
+        if (a.mate2->strand == t.strand) {
             w *= 1.0 - fm.strand_specificity;
         }
         else {

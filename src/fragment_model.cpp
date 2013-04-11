@@ -666,9 +666,10 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                  mate1_pos_tab, mate2_pos_tab,
                                  constants::seqbias_num_reads,
                                  constants::seqbias_left_pos,
-                                 constants::seqbias_right_pos);
+                                 constants::seqbias_right_pos, 1.0);
     }
     else sb = NULL;
+
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         q.push(NULL);
