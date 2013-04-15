@@ -812,6 +812,7 @@ class SamplerInitThread
         /* Exonic length of the transcript whos bias is stored in
          * mate1/mate2_seqbias. */
         pos_t tlen;
+        float tw;
 
         /* Temporary space for holding transcript sequences. */
         twobitseq tseq0; /* + strand */
@@ -927,7 +928,9 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
             float w = fragment_weight(*t, f->first);
             if (w > constants::min_frag_weight) {
+                // XXX
                 weight_matrix.push(t->id, f->second.first, w / transcript_weights[t->id]);
+                //weight_matrix.push(t->id, f->second.first, w);
             }
         }
     }
@@ -1006,30 +1009,26 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
+    if (t.transcript_id == "ENST00000253408") {
+        FILE* f = fopen("gfap.0.txt", "w");
+        for (pos_t pos = 0; pos < tlen; ++pos) {
+            fprintf(f, "%e\n", mate2_seqbias[0][pos]);
+        }
+        fclose(f);
+
+        f = fopen("gfap.1.txt", "w");
+        for (pos_t pos = 0; pos < tlen; ++pos) {
+            fprintf(f, "%e\n", mate2_seqbias[1][pos]);
+        }
+        fclose(f);
+
 #if 0
-    if (t.gene_id == "ENSG00000131095") {
-        FILE* f = fopen("gfap.0.txt", "a");
-        fprintf(f, ">%s\n", t.transcript_id.get().c_str());
-        for (pos_t pos = 0; pos < tlen; ++pos) {
-            fprintf(f, "%f, ", mate1_seqbias[0][pos]);
-        }
-        fprintf(f, "\n");
-        fclose(f);
-
-        f = fopen("gfap.1.txt", "a");
-        fprintf(f, ">%s\n", t.transcript_id.get().c_str());
-        for (pos_t pos = 0; pos < tlen; ++pos) {
-            fprintf(f, "%f, ", mate1_seqbias[1][pos]);
-        }
-        fprintf(f, "\n");
-        fclose(f);
-
-        f = fopen("gfap.txt", "a");
+        f = fopen("gfap.txt", "w");
         fprintf(f, ">%s\n", t.transcript_id.get().c_str());
         fprintf(f, "%s\n", tseq1.to_string().c_str());
         fclose(f);
-    }
 #endif
+    }
 }
 
 
@@ -1068,6 +1067,7 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         for (pos_t pos = 0; pos <= trans_len - frag_len; ++pos) {
             // Determine fragment end bias
             endbias = 1.0;
+#if 0
             if (t.strand == strand_pos) {
                 if (pos < constants::transcript_tss_dist_len) {
                     endbias *= tss_dist->pdf(pos) * fm.tss_dist_weight;
@@ -1087,6 +1087,7 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
                                fm.tts_dist_weight;
                 }
             }
+#endif
 
             // Positive strand fragment weight
             ws[frag_len] += sp0 * endbias * mate1_seqbias[0][pos] *
@@ -1098,13 +1099,24 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         }
     }
 
-    float w = 0.0;
+    tw = 0.0;
+#if 0
+    float C = frag_len_c(trans_len);
+    if (!finite(C) || C <= 0.0) {
+        return constants::min_transcript_weight;
+    }
+#endif
+
     for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
         float frag_len_pr = frag_len_p(frag_len);
-        w += frag_len_pr * ws[frag_len];
+        tw += frag_len_pr * ws[frag_len];
     }
 
-    return std::max(w, constants::min_transcript_weight);
+    if (!finite(tw) || tw <= constants::min_transcript_weight) {
+        return constants::min_transcript_weight;
+    }
+
+    return tw;
 }
 
 
@@ -1119,18 +1131,14 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         frag_len = std::min(max_frag_len, (pos_t) round(fm.frag_len_med()));
     }
 
-    float w = frag_len_p(frag_len);
-    if (w < constants::min_frag_len_pr) return 0.0;
+    float w = 1.0;
 
     if (a.mate1) {
         pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?
                                     a.mate1->start : a.mate1->end);
+        if (offset < 0 || offset >= tlen) return 0.0;
 
-#if 0
-        if (0 <= offset && offset < (pos_t) mate1_seqbias[a.mate1->strand].size()) {
-            w *= mate1_seqbias[a.mate1->strand][offset];
-        }
-#endif
+        w *= mate1_seqbias[a.mate1->strand][offset];
 
         if (a.mate1->strand == t.strand) {
             w *= fm.strand_specificity;
@@ -1139,6 +1147,7 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
             w *= 1.0 - fm.strand_specificity;
         }
 
+#if 0
         // measure end bias
         if (t.strand == strand_pos) {
             if (a.mate1->strand == strand_pos &&
@@ -1160,16 +1169,15 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
                 w *= tss_dist->pdf(tlen - offset) * fm.tss_dist_weight;
             }
         }
+#endif
     }
 
     if (a.mate2) {
         pos_t offset = t.get_offset(a.mate2->strand == strand_pos ?
                                     a.mate2->start : a.mate2->end);
-#if 0
-        if (0 <= offset && offset < (pos_t) mate2_seqbias[a.mate2->strand].size()) {
-            w *= mate2_seqbias[a.mate2->strand][offset];
-        }
-#endif
+        if (offset < 0 || offset >= tlen) return 0.0;
+
+        w *= mate2_seqbias[a.mate2->strand][offset];
 
         if (a.mate2->strand == t.strand) {
             w *= 1.0 - fm.strand_specificity;
@@ -1178,6 +1186,7 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
             w *= fm.strand_specificity;
         }
 
+#if 0
         // measure end bias
         if (t.strand == strand_pos) {
             if (a.mate2->strand == strand_pos &&
@@ -1199,9 +1208,24 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
                 w *= tss_dist->pdf(tlen - offset) * fm.tss_dist_weight;
             }
         }
+#endif
     }
 
-    return w;
+#if 0
+    w *= ws[frag_len];
+
+    if (t.transcript_id == "ENST00000435360") {
+        fprintf(stderr, "HERE\n");
+    }
+#endif
+
+    //w = w * 1000.0 / ws[frag_len];
+    //w = w * 1000.0 / tw;
+
+    float frag_len_pr = frag_len_p(frag_len);
+    if (frag_len_pr < constants::min_frag_len_pr) return 0.0;
+
+    return w * frag_len_pr;
 }
 
 
@@ -1978,6 +2002,26 @@ class MultireadSamplerThread
 
 void Sampler::run(unsigned int num_samples, SampleDB& out)
 {
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        if (t->transcript_id == "ENST00000435360") {
+            float z = 0.0;
+            for (size_t i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
+                z += weight_matrix->rows[t->id][i];
+            }
+
+            fprintf(stderr, "A\n");
+        }
+        else if (t->transcript_id == "ENST00000253408") {
+            float z = 0.0;
+            for (size_t i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
+                z += weight_matrix->rows[t->id][i];
+            }
+
+            fprintf(stderr, "B\n");
+        }
+    }
+
+
     /* Initial mixtures */
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         tmix[i] = 1.0 / (float) component_num_transcripts[transcript_component[i]];
@@ -2103,6 +2147,12 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
                     samples[i][sample_num] =
                         tmix[i] * cmix[transcript_component[i]] /
                         transcript_weights[i];
+
+#if 0
+                    samples[i][sample_num] =
+                        tmix[i] * cmix[transcript_component[i]];
+#endif
+
                     total_weight += samples[i][sample_num];
                 }
             }

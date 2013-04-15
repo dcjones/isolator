@@ -666,7 +666,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                  mate1_pos_tab, mate2_pos_tab,
                                  constants::seqbias_num_reads,
                                  constants::seqbias_left_pos,
-                                 constants::seqbias_right_pos, 1.0);
+                                 constants::seqbias_right_pos);
     }
     else sb = NULL;
 

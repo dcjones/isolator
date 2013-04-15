@@ -455,7 +455,7 @@ class motif_trainer
                 else i_start = j - max_distance;
 
                 if (max_distance == 0) i_end = m - 1;
-                else i_end = min(m, j + max_distance);
+                else i_end = min(m - 1, j + max_distance);
             }
             else i_start = i_end = j;
 

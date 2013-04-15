@@ -203,9 +203,9 @@ bool AlignmentPair::valid_frag() const
 
     switch (constants::libtype) {
         case constants::LIBTYPE_FR:
-            if (mate1 ->strand == mate2->strand) return false;
-            if (mate1->strand == strand_pos)     return mate1->start <= mate2->start;
-            else                                 return mate1->start >= mate2->start;
+            if (mate1->strand == mate2->strand) return false;
+            if (mate1->strand == strand_pos)    return mate1->start <= mate2->start;
+            else                                return mate1->start >= mate2->start;
 
         case constants::LIBTYPE_RF:
             if (mate1->strand == mate2->strand)  return false;

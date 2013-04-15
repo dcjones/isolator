@@ -483,7 +483,7 @@ void sequencing_bias::buildn(motif** Mn,
     }
 
     free(seq);
-    free(local_seq);
+    delete [] local_seq;
 }
 
 
