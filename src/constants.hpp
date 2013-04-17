@@ -98,19 +98,19 @@ namespace constants
     extern pos_t transcript_5p_extension;
     extern pos_t transcript_3p_extension;
 
-    /* When training the distribution over TSS and TTS, ignore 5' or 3' exons
-     * that are shorter than this. */
-    extern pos_t transcript_min_end_exon_len;
+    /* Length of emperical distribution over distance from 3' end. */
+    extern pos_t transcript_3p_dist_len;
 
-    /* Measure an emperical distribution over fragment position in the
-     * first/last n nucleotides. */
-    extern pos_t transcript_tss_dist_len;
-    extern pos_t transcript_tts_dist_len;
+    /* Record values past the end of the actual distribution length for
+     * smoothing to work out correctly. */
+    extern pos_t transcript_3p_dist_pad;
 
-    /* Smoothing used on the emperical distribution of fragment position at the
-     * starts/ends of transcripts. */
-    extern float transcript_tss_tts_dist_w;
+    /* Smoothing used on the emperical distribution  over distance from 3' end.
+     * */
+    extern float transcript_3p_dist_w;
 
+    /* Scale probabilities from the 3p dist to avoid underflow. */
+    extern float transcript_3p_dist_scale;
 
     /* It's possible for a transcript to get assigned exceedingly low weight,
      * given the fragment length distribution. Then when a single read lands

@@ -715,17 +715,13 @@ class SamplerInitThread
             else {
                 frag_len_dist = NULL;
             }
-
-
-            tss_dist = new EmpDist(*fm.tss_dist);
-            tts_dist = new EmpDist(*fm.tts_dist);
+            three_prime_dist = new EmpDist(*fm.three_prime_dist);
         }
 
         ~SamplerInitThread()
         {
             delete frag_len_dist;
-            delete tss_dist;
-            delete tts_dist;
+            delete three_prime_dist;
             /* Note: we are not free weight_matrix_entries and
              * multiread_entries. This get's done in Sampler::Sampler.
              * It's all part of the delicate dance involved it minimizing
@@ -802,8 +798,7 @@ class SamplerInitThread
         /* Copy the fragment length distribution to avoid contention between
          * threads. */
         EmpDist* frag_len_dist;
-        EmpDist* tss_dist;
-        EmpDist* tts_dist;
+        EmpDist* three_prime_dist;
 
         /* Temprorary space for computing sequence bias, indexed by strand. */
         std::vector<float> mate1_seqbias[2];
@@ -1010,38 +1005,53 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
 
+    // 3' bias
+    if (t.strand == strand_pos) {
+        float w;
+        for (pos_t pos = 0; pos < tlen; ++pos) {
+            w = three_prime_dist->pdf(std::min<pos_t>(
+                    constants::transcript_3p_dist_len - 1,
+                    tlen - pos - 1));
+            mate1_seqbias[0][pos] *= w * constants::transcript_3p_dist_scale;;
+            mate1_seqbias[1][pos] *= w * constants::transcript_3p_dist_scale;;
+        }
+    }
+    else {
+        float w;
+        for (pos_t pos = 0; pos < tlen; ++pos) {
+            w = three_prime_dist->pdf(std::min<pos_t>(
+                    constants::transcript_3p_dist_len - 1,
+                    pos));
+            mate1_seqbias[0][pos] *= w * constants::transcript_3p_dist_scale;
+            mate1_seqbias[1][pos] *= w * constants::transcript_3p_dist_scale;;
+        }
+    }
+
+
     /* trying something out */
 
-    /* Ugh. What is a reasonable thing to try here?
-     *
-     * The hypothesis is that by multiplying by the transcript length we are
-     * compensating for some other effect. 
-     *
-     * Things we might try:
-     *
-     *  Multiply by some fixed amount long transcripts.
-     *
-     */
-
-    if (tlen > 2000) {
+#if 0
+    if (tlen > 3000) {
         if (t.strand == strand_pos) {
             for (pos_t pos = 0; pos < 1000 && pos < tlen; ++pos) {
-                mate1_seqbias[0][pos] *= 0.8;
-                mate1_seqbias[1][pos] *= 0.8;
-                mate2_seqbias[0][pos] *= 0.8;
-                mate2_seqbias[1][pos] *= 0.8;
+                mate1_seqbias[0][pos] *= 0.2;
+                mate1_seqbias[1][pos] *= 0.2;
+                mate2_seqbias[0][pos] *= 0.2;
+                mate2_seqbias[1][pos] *= 0.2;
             }
         }
         else {
             for (pos_t pos = tlen - 1; pos > tlen - 1000 && pos >= 0; --pos) {
-                mate1_seqbias[0][pos] *= 0.8;
-                mate1_seqbias[1][pos] *= 0.8;
-                mate2_seqbias[0][pos] *= 0.8;
-                mate2_seqbias[1][pos] *= 0.8;
+                mate1_seqbias[0][pos] *= 0.2;
+                mate1_seqbias[1][pos] *= 0.2;
+                mate2_seqbias[0][pos] *= 0.2;
+                mate2_seqbias[1][pos] *= 0.2;
             }
         }
     }
+#endif
 
+#if 0
     if (t.transcript_id == "ENST00000253408") {
         FILE* f = fopen("gfap.0.txt", "w");
         for (pos_t pos = 0; pos < tlen; ++pos) {
@@ -1055,13 +1065,12 @@ void SamplerInitThread::transcript_sequence_bias(
         }
         fclose(f);
 
-#if 0
         f = fopen("gfap.txt", "w");
         fprintf(f, ">%s\n", t.transcript_id.get().c_str());
         fprintf(f, "%s\n", tseq1.to_string().c_str());
         fclose(f);
-#endif
     }
+#endif
 }
 
 
@@ -1090,7 +1099,6 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
 
         ws[frag_len] = 0.0;
 
-        float endbias;
         float sp0 = t.strand == strand_pos ? fm.strand_specificity :
                                             1.0 - fm.strand_specificity;
 
@@ -1098,47 +1106,17 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
                                             1.0 - fm.strand_specificity;
 
         for (pos_t pos = 0; pos <= trans_len - frag_len; ++pos) {
-            // Determine fragment end bias
-            endbias = 1.0;
-#if 0
-            if (t.strand == strand_pos) {
-                if (pos < constants::transcript_tss_dist_len) {
-                    endbias *= tss_dist->pdf(pos) * fm.tss_dist_weight;
-                }
-                if (trans_len - (pos + frag_len) < constants::transcript_tts_dist_len) {
-                    endbias *= tts_dist->pdf(trans_len - (pos + frag_len)) *
-                               fm.tss_dist_weight;
-                }
-            }
-            else {
-                if (pos < constants::transcript_tts_dist_len) {
-                    endbias *= tts_dist->pdf(pos) *
-                               fm.tts_dist_weight;
-                }
-                if (trans_len - (pos + frag_len) < constants::transcript_tss_dist_len) {
-                    endbias *= tss_dist->pdf(trans_len - (pos + frag_len)) *
-                               fm.tts_dist_weight;
-                }
-            }
-#endif
-
             // Positive strand fragment weight
-            ws[frag_len] += sp0 * endbias * mate1_seqbias[0][pos] *
-                                            mate2_seqbias[1][pos + frag_len - 1];
+            ws[frag_len] += sp0 * mate1_seqbias[0][pos] *
+                                  mate2_seqbias[1][pos + frag_len - 1];
 
             // Negative strand fragment weight
-            ws[frag_len] += sp1 * endbias * mate2_seqbias[0][pos] *
-                                            mate1_seqbias[1][pos + frag_len - 1];
+            ws[frag_len] += sp1 * mate2_seqbias[0][pos] *
+                                  mate1_seqbias[1][pos + frag_len - 1];
         }
     }
 
     tw = 0.0;
-#if 0
-    float C = frag_len_c(trans_len);
-    if (!finite(C) || C <= 0.0) {
-        return constants::min_transcript_weight;
-    }
-#endif
 
     for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
         float frag_len_pr = frag_len_p(frag_len);
@@ -1151,16 +1129,6 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
     }
 #endif
 
-#if 0
-    // naive tw
-    float naive_tw = 0.0;
-    for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
-        float frag_len_pr = frag_len_p(frag_len);
-        naive_tw += frag_len_pr * (float) (trans_len - frag_len + 1);
-    }
-
-    return naive_tw;
-#endif
     return tw;
 }
 
@@ -1200,30 +1168,6 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         else {
             w *= 1.0 - fm.strand_specificity;
         }
-
-#if 0
-        // measure end bias
-        if (t.strand == strand_pos) {
-            if (a.mate1->strand == strand_pos &&
-                offset >= 0 && offset < constants::transcript_tss_dist_len) {
-                w *= tss_dist->pdf(offset) * fm.tss_dist_weight;
-            }
-            else if (a.mate1->strand == strand_neg &&
-                     tlen - offset >= 0.0 && tlen - offset < constants::transcript_tts_dist_len) {
-                w *= tts_dist->pdf(tlen - offset) * fm.tts_dist_weight;
-            }
-        }
-        else {
-            if (a.mate1->strand == strand_pos &&
-                offset >= 0 && offset < constants::transcript_tts_dist_len) {
-                w *= tts_dist->pdf(offset) * fm.tts_dist_weight;
-            }
-            else if (a.mate1->strand == strand_neg &&
-                     tlen - offset >= 0 && tlen - offset < constants::transcript_tss_dist_len) {
-                w *= tss_dist->pdf(tlen - offset) * fm.tss_dist_weight;
-            }
-        }
-#endif
     }
 
     if (a.mate2) {
@@ -1239,30 +1183,6 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         else {
             w *= fm.strand_specificity;
         }
-
-#if 0
-        // measure end bias
-        if (t.strand == strand_pos) {
-            if (a.mate2->strand == strand_pos &&
-                offset >= 0 && offset < constants::transcript_tss_dist_len) {
-                w *= tss_dist->pdf(offset) * fm.tss_dist_weight;
-            }
-            else if (a.mate2->strand == strand_neg &&
-                     tlen - offset >= 0 && tlen - offset < constants::transcript_tts_dist_len) {
-                w *= tts_dist->pdf(tlen - offset) * fm.tts_dist_weight;
-            }
-        }
-        else {
-            if (a.mate2->strand == strand_pos &&
-                offset >= 0 && offset < constants::transcript_tts_dist_len) {
-                w *= tts_dist->pdf(offset) * fm.tts_dist_weight;
-            }
-            else if (a.mate2->strand == strand_neg &&
-                     tlen - offset >= 0 && tlen - offset < constants::transcript_tss_dist_len) {
-                w *= tss_dist->pdf(tlen - offset) * fm.tss_dist_weight;
-            }
-        }
-#endif
     }
 
     float frag_len_pr = frag_len_p(frag_len);

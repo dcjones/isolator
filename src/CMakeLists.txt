@@ -37,6 +37,5 @@ target_link_libraries(isolator
                       ${Boost_TIMER_LIBRARY}
                       ${ZLIB_LIBRARIES}
                       ${GSL_LIBRARIES}
-                      ${CMAKE_THREAD_LIBS_INIT}
-                      tcmalloc)
+                      ${CMAKE_THREAD_LIBS_INIT})
 

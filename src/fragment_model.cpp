@@ -182,22 +182,37 @@ class FragmentModelInterval
         {
             INTERGENIC,
             EXONIC,
-            UTR5P,
-            UTR3P
+            THREE_PRIME_EXONIC
         } type;
 
         FragmentModelInterval(const Interval& interval,
-                              IntervalType type,
-                              Queue<FragmentModelInterval*>& q)
+                              IntervalType type)
             : type(type)
             , seqname(interval.seqname)
             , start(interval.start)
             , end(interval.end)
             , strand(interval.strand)
-            , q(q)
+            , three_prime_dist(-1)
             , tid(-1)
         {
         }
+
+        FragmentModelInterval(SeqName seqname,
+                              pos_t start,
+                              pos_t end,
+                              strand_t strand,
+                              pos_t three_prime_dist,
+                              IntervalType type)
+            : type(type)
+            , seqname(seqname)
+            , start(start)
+            , end(end)
+            , strand(strand)
+            , three_prime_dist(three_prime_dist)
+            , tid(-1)
+        {
+        }
+                               
 
         void add_alignment(const bam1_t* b)
         {
@@ -216,22 +231,16 @@ class FragmentModelInterval
             rs.clear();
         }
 
-        /* Once reads have been accumulated in this interval, it adds itself to
-         * a work queue to be processed thes deleted. */
-        void finish()
-        {
-            q.push(this);
-        }
-
         ReadSet rs;
 
         SeqName seqname;
         pos_t start, end;
         strand_t strand;
 
-    private:
-        Queue<FragmentModelInterval*>& q;
+        // Exon's distance from the 3' end of the transcript.
+        pos_t three_prime_dist;
 
+    private:
         /* A the sequence ID assigned by the BAM file, so we can arrange
          * intervals in the same order. */
         int32_t tid;
@@ -240,6 +249,7 @@ class FragmentModelInterval
                              AlnCountTrie& T,
                              PosTable& mate1_pos_tab,
                              PosTable& mate2_pos_tab,
+                             Queue<FragmentModelInterval*>& q,
                              const char* bam_fn,
                              const char* task_name);
 };
@@ -259,6 +269,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
               AlnCountTrie& T,
               PosTable& mate1_pos_tab,
               PosTable& mate2_pos_tab,
+              Queue<FragmentModelInterval*>& q,
               const char* bam_fn,
               const char* task_name)
 {
@@ -346,14 +357,14 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
             if (b->core.tid < intervals[j]->tid) break;
             if (b->core.tid > intervals[j]->tid) {
                 assert(j == j0);
-                intervals[j0++]->finish();
+                q.push(intervals[j0++]);
                 continue;
             }
 
             if (b->core.pos < intervals[j]->start) break;
             if (b->core.pos > intervals[j]->end) {
                 if (j == j0) {
-                    intervals[j0++]->finish();
+                    q.push(intervals[j0++]);
                 }
                 continue;
             }
@@ -365,7 +376,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
         }
     }
 
-    for(; j0 < n; ++j0) intervals[j0]->finish();
+    for(; j0 < n; ++j0) q.push(intervals[j0]);
 
     bam_destroy1(b);
     samclose(bam_f);
@@ -380,7 +391,11 @@ class FragmentModelThread
 {
     public:
         FragmentModelThread(Queue<FragmentModelInterval*>& q)
-            : q(q), t(NULL)
+            : three_prime_dist_counts(
+                    constants::transcript_3p_dist_len +
+                    constants::transcript_3p_dist_pad, 0)
+            , q(q)
+            , t(NULL)
         {
             strand_bias[0] = strand_bias[1] = 0;
         }
@@ -394,8 +409,6 @@ class FragmentModelThread
         {
             FragmentModelInterval* interval;
             ReadSet::UniqueReadCounts read_counts;
-            tss_dist_counts.resize(constants::transcript_tss_dist_len, 0);
-            tts_dist_counts.resize(constants::transcript_tss_dist_len, 0);
 
             while (true) {
                 interval = q.pop();
@@ -411,20 +424,13 @@ class FragmentModelThread
                     measure_strand_bias(interval->strand, read_counts);
                     read_counts.clear();
                 }
-                else if (interval->type == FragmentModelInterval::UTR5P) {
+                else if (interval->type == FragmentModelInterval::THREE_PRIME_EXONIC) {
                     interval->rs.make_unique_read_counts(read_counts);
-                    measure_tss_dist(interval->start,
-                                     interval->end,
-                                     interval->strand,
-                                     read_counts);
-                    read_counts.clear();
-                }
-                else if (interval->type == FragmentModelInterval::UTR3P) {
-                    interval->rs.make_unique_read_counts(read_counts);
-                    measure_tts_dist(interval->start,
-                                     interval->end,
-                                     interval->strand,
-                                     read_counts);
+                    measure_three_prime_dist(interval->start,
+                                             interval->end,
+                                             interval->strand,
+                                             interval->three_prime_dist,
+                                             read_counts);
                     read_counts.clear();
                 }
 
@@ -459,8 +465,7 @@ class FragmentModelThread
 
         /* Counts of fragment starts at the given distance from the annotated
          * tss/tts. */
-        std::vector<unsigned int> tss_dist_counts;
-        std::vector<unsigned int> tts_dist_counts;
+        std::vector<unsigned int> three_prime_dist_counts;
 
     private:
         void measure_fragment_lengths(const ReadSet::UniqueReadCounts& counts)
@@ -499,76 +504,31 @@ class FragmentModelThread
             }
         }
 
-
-        void measure_tss_dist(
-                pos_t start, pos_t end, strand_t strand,
+        void measure_three_prime_dist(
+                pos_t start, pos_t end, strand_t strand, pos_t three_prime_dist,
                 const ReadSet::UniqueReadCounts& counts)
         {
             ReadSet::UniqueReadCounts::const_iterator i;
             for (i = counts.begin(); i != counts.end(); ++i) {
                 AlignedReadIterator j(*i->first);
                 for (; j != AlignedReadIterator(); ++j) {
-                    // TODO: The following code assumes FR fragments.
-                    pos_t d = -1;
+                    if (!j->mate1) continue;
+                    pos_t d = j->mate1->strand == strand_pos ?
+                                  j->mate1->start : j->mate1->end;
                     if (strand == strand_pos) {
-                        if (j->mate1 && j->mate1->strand == strand_pos) {
-                            d = j->mate1->start - start;
-                        }
-                        else if (j->mate2 && j->mate2->strand == strand_pos) {
-                            d = j->mate2->start - start;
-                        }
+                        d = three_prime_dist + end - d;
                     }
                     else {
-                        if (j->mate1 && j->mate1->strand == strand_neg) {
-                            d = end - j->mate1->end;
-                        }
-                        else if (j->mate2 && j->mate2->strand == strand_neg) {
-                            d = end - j->mate2->end;
-                        }
+                        d = three_prime_dist + d - start;
                     }
 
-                    if (0 <= d && (size_t) d < tss_dist_counts.size()) {
-                        ++tss_dist_counts[d];
+                    if (0 <= d && d < constants::transcript_3p_dist_len +
+                                      constants::transcript_3p_dist_pad) {
+                        ++three_prime_dist_counts[d];
                     }
                 }
             }
         }
-
-
-        void measure_tts_dist(
-                pos_t start, pos_t end, strand_t strand,
-                const ReadSet::UniqueReadCounts& counts)
-        {
-            ReadSet::UniqueReadCounts::const_iterator i;
-            for (i = counts.begin(); i != counts.end(); ++i) {
-                AlignedReadIterator j(*i->first);
-                for (; j != AlignedReadIterator(); ++j) {
-                    // TODO: the following code assumes FR fragments.
-                    pos_t d = -1;
-                    if (strand == strand_pos) {
-                        if (j->mate1 && j->mate1->strand == strand_neg) {
-                            d = end - j->mate1->end;
-                        }
-                        else if (j->mate2 && j->mate2->strand == strand_neg) {
-                            d = end - j->mate2->end;
-                        }
-                    }
-                    else {
-                        if (j->mate1 && j->mate1->strand == strand_pos) {
-                            d = j->mate1->start - start;
-                        }
-                        else if (j->mate2 && j->mate2->strand == strand_pos) {
-                            d = j->mate2->start - start;
-                        }
-                    }
-
-                    if (0 <= d && (size_t) d < tts_dist_counts.size()) {
-                        ++tts_dist_counts[d];
-                    }
-                }
-            }
-        }
-
 
         Queue<FragmentModelInterval*>& q;
         boost::thread* t;
@@ -578,8 +538,7 @@ class FragmentModelThread
 FragmentModel::FragmentModel()
     : sb(NULL)
     , frag_len_dist(NULL)
-    , tss_dist(NULL)
-    , tts_dist(NULL)
+    , three_prime_dist(NULL)
 {
 }
 
@@ -588,8 +547,7 @@ FragmentModel::~FragmentModel()
 {
     if (sb) delete sb;
     if (frag_len_dist) delete frag_len_dist;
-    if (tss_dist) delete tss_dist;
-    if (tts_dist) delete tts_dist;
+    if (three_prime_dist) delete three_prime_dist;
 }
 
 
@@ -607,34 +565,45 @@ void FragmentModel::estimate(TranscriptSet& ts,
     for (interval = exonic.begin(); interval != exonic.end(); ++interval) {
         intervals.push_back(new FragmentModelInterval(
                                     *interval,
-                                    FragmentModelInterval::EXONIC,
-                                    q));
+                                    FragmentModelInterval::EXONIC));
     }
 
-    std::vector<Interval> consensus_5p_exons, consensus_3p_exons;
-    ts.get_distinct_5p_3p_exons(exonic, consensus_5p_exons, consensus_3p_exons);
 
-    for (interval = consensus_5p_exons.begin();
-         interval != consensus_5p_exons.end();
-         ++interval) {
-        if (interval->length() >= constants::transcript_tss_dist_len) {
-            intervals.push_back(new FragmentModelInterval(
-                                    *interval,
-                                    FragmentModelInterval::UTR5P,
-                                    q));
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        if (t->exonic_length() >= constants::transcript_3p_dist_len +
+                                  constants::transcript_3p_dist_pad) {
+            pos_t d = 0;
+            if (t->strand == strand_neg) {
+                for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
+                    intervals.push_back(new FragmentModelInterval(
+                                t->seqname,
+                                e->start,
+                                e->end,
+                                t->strand,
+                                d,
+                                FragmentModelInterval::THREE_PRIME_EXONIC));
+                    d += e->end - e->start + 1;
+                    if (d >= constants::transcript_3p_dist_len +
+                             constants::transcript_3p_dist_pad) break;
+                }
+            }
+            else {
+                for (Transcript::reverse_iterator e = t->rbegin(); e != t->rend(); ++e) {
+                    intervals.push_back(new FragmentModelInterval(
+                                t->seqname,
+                                e->start,
+                                e->end,
+                                t->strand,
+                                d,
+                                FragmentModelInterval::THREE_PRIME_EXONIC));
+                    d += e->end - e->start + 1;
+                    if (d >= constants::transcript_3p_dist_len +
+                             constants::transcript_3p_dist_pad) break;
+                }
+            }
         }
     }
 
-    for (interval = consensus_3p_exons.begin();
-         interval != consensus_3p_exons.end();
-         ++interval) {
-        if (interval->length() >= constants::transcript_tts_dist_len) {
-            intervals.push_back(new FragmentModelInterval(
-                                    *interval,
-                                    FragmentModelInterval::UTR3P,
-                                    q));
-        }
-    }
 
     std::vector<FragmentModelThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -645,7 +614,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     AlnCountTrie* alncnt = new AlnCountTrie();
     PosTable mate1_pos_tab, mate2_pos_tab;
     sam_scan(intervals, *alncnt,
-             mate1_pos_tab, mate2_pos_tab,
+             mate1_pos_tab, mate2_pos_tab, q,
              bam_fn, "Indexing reads");
 
     /* Index multireads. */
@@ -675,7 +644,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
     }
     else sb = NULL;
 
-
     for (size_t i = 0; i < constants::num_threads; ++i) {
         q.push(NULL);
     }
@@ -684,85 +652,32 @@ void FragmentModel::estimate(TranscriptSet& ts,
         threads[i]->join();
     }
 
-    /* Collect TSS/TTS distribution statisics. */
-    std::vector<unsigned int> tss_dist_vals, tss_dist_lens,
-                              tts_dist_vals, tts_dist_lens;
+    /* Collect 3' dist distribution statistics */
+    std::vector<unsigned int> three_prime_dist_vals(
+            constants::transcript_3p_dist_len + constants::transcript_3p_dist_pad);
+    std::vector<unsigned int> three_prime_dist_counts(
+            constants::transcript_3p_dist_len + constants::transcript_3p_dist_pad, 0);
 
-    tss_dist_vals.resize(constants::transcript_tss_dist_len, 0);
-    tss_dist_lens.resize(constants::transcript_tss_dist_len, 0);
-    for (unsigned int i = 0; i < tss_dist_vals.size(); ++i) {
-        tss_dist_vals[i] = i;
-    }
-
-    tts_dist_vals.resize(constants::transcript_tts_dist_len, 0);
-    tts_dist_lens.resize(constants::transcript_tts_dist_len, 0);
-    for (unsigned int i = 0; i < tts_dist_vals.size(); ++i) {
-        tts_dist_vals[i] = i;
+    for (unsigned int i = 0; i < three_prime_dist_vals.size(); ++i) {
+        three_prime_dist_vals[i] = i;
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
-        for (size_t j = 0; j < threads[i]->tss_dist_counts.size(); ++j) {
-            tss_dist_lens[j] += threads[i]->tss_dist_counts[j];
-        }
-
-        for (size_t j = 0; j < threads[i]->tts_dist_counts.size(); ++j) {
-            tts_dist_lens[j] += threads[i]->tts_dist_counts[j];
+        for (size_t j = 0; j < threads[i]->three_prime_dist_counts.size(); ++j) {
+            three_prime_dist_counts[j] += threads[i]->three_prime_dist_counts[j];
         }
     }
 
-    if (constants::transcript_tss_dist_len) {
-        tss_dist = new EmpDist(&tss_dist_vals.at(0), &tss_dist_lens.at(0),
-                               constants::transcript_tss_dist_len,
-                               constants::transcript_tss_tts_dist_w);
-    }
-    else tss_dist = new EmpDist(NULL, NULL, 0);
-
-    if (constants::transcript_tts_dist_len) {
-        tts_dist = new EmpDist(&tts_dist_vals.at(0), &tts_dist_lens.at(0),
-                               constants::transcript_tts_dist_len,
-                               constants::transcript_tss_tts_dist_w);
-    }
-    else tts_dist = new EmpDist(NULL, NULL, 0);
-
-    tss_dist_weight = 0.0;
-    for (pos_t i = constants::transcript_5p_extension;
-            i < constants::transcript_tss_dist_len; ++i) {
-        tss_dist_weight += tss_dist->pdf(i);
-    }
-    if (tss_dist_weight > 0.0) {
-        tss_dist_weight =
-            (float) (constants::transcript_tss_dist_len - constants::transcript_5p_extension) /
-            tss_dist_weight;
-    }
-    else tss_dist_weight = 0.0;
-    Logger::info("tss_dist_weight = %f", tss_dist_weight);
-
-    tts_dist_weight = 0.0;
-    for (pos_t i = constants::transcript_3p_extension;
-            i < constants::transcript_tts_dist_len; ++i) {
-        tts_dist_weight += tts_dist->pdf(i);
-    }
-    if (tts_dist_weight >= 0.0) {
-        tts_dist_weight =
-            (float) (constants::transcript_tts_dist_len - constants::transcript_3p_extension) /
-            tts_dist_weight;
-    }
-    else tts_dist_weight = 0.0;
-    Logger::info("tts_dist_weight = %f", tts_dist_weight);
+    three_prime_dist = new EmpDist(&three_prime_dist_vals.at(0),
+                                   &three_prime_dist_counts.at(0),
+                                   three_prime_dist_vals.size(),
+                                   constants::transcript_3p_dist_w);
 
     // XXX: Debugging
     {
-        FILE* out = fopen("tss_dist.tsv", "w");
-        for (int i = 0; i < constants::transcript_tss_dist_len; ++i) {
-            fprintf(out, "%d\t%f\n", i, tss_dist->pdf(i) * tss_dist_weight);
-        }
-        fclose(out);
-    }
-
-    {
-        FILE* out = fopen("tts_dist.tsv", "w");
-        for (int i = 0; i < constants::transcript_tts_dist_len; ++i) {
-            fprintf(out, "%d\t%f\n", i, tts_dist->pdf(i) * tts_dist_weight);
+        FILE* out = fopen("3p_dist.tsv", "w");
+        for (int i = 0; i < constants::transcript_3p_dist_len; ++i) {
+            fprintf(out, "%d\t%f\n", i, three_prime_dist->pdf(i));
         }
         fclose(out);
     }

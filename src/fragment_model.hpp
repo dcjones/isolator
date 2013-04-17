@@ -122,12 +122,8 @@ class FragmentModel
         /* Distribution over fragment lengths. */
         EmpDist* frag_len_dist;
 
-        /* Distribution over read placement in the ends of the transcript. */
-        float tss_dist_weight;
-        EmpDist* tss_dist;
-
-        float tts_dist_weight;
-        EmpDist* tts_dist;
+        /* Distribution over distance from 3' end. */
+        EmpDist* three_prime_dist;
 };
 
 
