@@ -86,6 +86,7 @@ class AlnIndex
 
     private:
         hattrie_t* t;
+        boost::mutex mut;
 };
 
 

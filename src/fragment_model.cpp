@@ -153,6 +153,8 @@ void AlnIndex::clear()
 
 void AlnIndex::add(const char* key)
 {
+    boost::lock_guard<boost::mutex> lock(mut);
+
     value_t* val = hattrie_get(t, key, strlen(key));
     if (*val == 0) {
         *val = 1 + hattrie_size(t);
@@ -162,6 +164,8 @@ void AlnIndex::add(const char* key)
 
 int AlnIndex::get(const char* key)
 {
+    boost::lock_guard<boost::mutex> lock(mut);
+
     value_t* val = hattrie_tryget(t, key, strlen(key));
     if (val == NULL) return -1;
     else {
@@ -329,12 +333,12 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
 
         /* Count numbers of alignments by read. */
         if (b->core.flag & BAM_FREAD2) {
+            if (b->core.n_cigar == 1) mate2_pos_tab.add(b, bam_f);
             T.inc_mate2(bam1_qname(b));
-            mate2_pos_tab.add(b, bam_f);
         }
         else {
+            if (b->core.n_cigar == 1) mate1_pos_tab.add(b, bam_f);
             T.inc_mate1(bam1_qname(b));
-            mate1_pos_tab.add(b, bam_f);
         }
 
         /* Add reads to intervals in which they are contained. */
@@ -666,7 +670,8 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                  mate1_pos_tab, mate2_pos_tab,
                                  constants::seqbias_num_reads,
                                  constants::seqbias_left_pos,
-                                 constants::seqbias_right_pos);
+                                 constants::seqbias_right_pos,
+                                 1.0);
     }
     else sb = NULL;
 

@@ -197,9 +197,11 @@ class motif_trainer
 
         while (true) {
             // XXX: debugging
-            if (round_num > 0) {
+#if 0
+            if (round_num > 1) {
                 break;
             }
+#endif
 
             ++round_num;
             Logger::get_task(task_name).inc();

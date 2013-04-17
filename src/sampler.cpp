@@ -1000,14 +1000,47 @@ void SamplerInitThread::transcript_sequence_bias(
     tseq1.revcomp();
 
     for (pos_t pos = 0; pos < tlen; ++pos) {
-
         mate1_seqbias[0][pos] = fm.sb->get_mate1_bias(tseq0, pos + fm.sb->getL());
         mate1_seqbias[1][pos] = fm.sb->get_mate1_bias(tseq1, pos + fm.sb->getL());
         mate2_seqbias[0][pos] = fm.sb->get_mate2_bias(tseq0, pos + fm.sb->getL());
         mate2_seqbias[1][pos] = fm.sb->get_mate2_bias(tseq1, pos + fm.sb->getL());
     }
+
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
+
+
+    /* trying something out */
+
+    /* Ugh. What is a reasonable thing to try here?
+     *
+     * The hypothesis is that by multiplying by the transcript length we are
+     * compensating for some other effect. 
+     *
+     * Things we might try:
+     *
+     *  Multiply by some fixed amount long transcripts.
+     *
+     */
+
+    if (tlen > 2000) {
+        if (t.strand == strand_pos) {
+            for (pos_t pos = 0; pos < 1000 && pos < tlen; ++pos) {
+                mate1_seqbias[0][pos] *= 0.8;
+                mate1_seqbias[1][pos] *= 0.8;
+                mate2_seqbias[0][pos] *= 0.8;
+                mate2_seqbias[1][pos] *= 0.8;
+            }
+        }
+        else {
+            for (pos_t pos = tlen - 1; pos > tlen - 1000 && pos >= 0; --pos) {
+                mate1_seqbias[0][pos] *= 0.8;
+                mate1_seqbias[1][pos] *= 0.8;
+                mate2_seqbias[0][pos] *= 0.8;
+                mate2_seqbias[1][pos] *= 0.8;
+            }
+        }
+    }
 
     if (t.transcript_id == "ENST00000253408") {
         FILE* f = fopen("gfap.0.txt", "w");
@@ -1112,10 +1145,22 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         tw += frag_len_pr * ws[frag_len];
     }
 
+#if 0
     if (!finite(tw) || tw <= constants::min_transcript_weight) {
         return constants::min_transcript_weight;
     }
+#endif
 
+#if 0
+    // naive tw
+    float naive_tw = 0.0;
+    for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
+        float frag_len_pr = frag_len_p(frag_len);
+        naive_tw += frag_len_pr * (float) (trans_len - frag_len + 1);
+    }
+
+    return naive_tw;
+#endif
     return tw;
 }
 
@@ -1136,6 +1181,15 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     if (a.mate1) {
         pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?
                                     a.mate1->start : a.mate1->end);
+
+        // XXX
+        if (t.transcript_id == "ENST00000253408") {
+            FILE* f = fopen("gfap.reads.txt", "a");
+            fprintf(f, "%d\n", (int) offset);
+            fclose(f);
+        }
+
+
         if (offset < 0 || offset >= tlen) return 0.0;
 
         w *= mate1_seqbias[a.mate1->strand][offset];
@@ -1211,21 +1265,10 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
 #endif
     }
 
-#if 0
-    w *= ws[frag_len];
-
-    if (t.transcript_id == "ENST00000435360") {
-        fprintf(stderr, "HERE\n");
-    }
-#endif
-
-    //w = w * 1000.0 / ws[frag_len];
-    //w = w * 1000.0 / tw;
-
     float frag_len_pr = frag_len_p(frag_len);
     if (frag_len_pr < constants::min_frag_len_pr) return 0.0;
 
-    return w * frag_len_pr;
+    return frag_len_pr * w;
 }
 
 

@@ -321,7 +321,9 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
         if (c1 != CigarIterator()) return -1;
     }
 #endif
-    if (c1 != CigarIterator()) return -1;
+    if (c1 != CigarIterator()) {
+        return -1;
+    }
 
     /* alignment is compatible, but single ended. */
     if (a2 == NULL) {
@@ -371,11 +373,14 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
             t.strand == strand_pos) {
             ++c2;
         }
-        else return -1;
+        else {
+            return -1;
+        }
 
-        if (c2 != CigarIterator()) return -1;
+        if (c2 != CigarIterator()) {
+            return -1;
+        }
     }
-    //if (c2 != CigarIterator()) return -1;
 
     pos_t fraglen = a2->end - a1->start + 1 - intron_len;
     assert(fraglen > 0);

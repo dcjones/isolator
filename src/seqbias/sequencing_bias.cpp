@@ -336,11 +336,11 @@ void sequencing_bias::buildn(motif** Mn,
     T.dump(S, max_dump);
 
     /* sort by tid (so we can load one chromosome at a time) */
-    //random_shuffle(S.begin(), S.end());
-    //sort(S.begin(), S.end(), ReadPosSeqnameCmp());
+    random_shuffle(S.begin(), S.end());
+    sort(S.begin(), S.end(), ReadPosSeqnameCmp());
 
-    sort(S.begin(), S.end(), ReadPosCountCmp());
-    sort(S.begin(), S.begin() + max_reads, ReadPosSeqnameCmp());
+    //sort(S.begin(), S.end(), ReadPosCountCmp());
+    //sort(S.begin(), S.begin() + max_reads, ReadPosSeqnameCmp());
 
     /* sample foreground and background kmer frequencies */
     ref_f = fai_load(ref_fn);
