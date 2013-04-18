@@ -194,6 +194,7 @@ class FragmentModelInterval
             , end(interval.end)
             , strand(interval.strand)
             , three_prime_dist(-1)
+            , tlen(-1)
             , tid(-1)
         {
         }
@@ -203,6 +204,7 @@ class FragmentModelInterval
                               pos_t end,
                               strand_t strand,
                               pos_t three_prime_dist,
+                              pos_t tlen,
                               IntervalType type)
             : type(type)
             , seqname(seqname)
@@ -210,6 +212,7 @@ class FragmentModelInterval
             , end(end)
             , strand(strand)
             , three_prime_dist(three_prime_dist)
+            , tlen(tlen)
             , tid(-1)
         {
         }
@@ -240,6 +243,9 @@ class FragmentModelInterval
 
         // Exon's distance from the 3' end of the transcript.
         pos_t three_prime_dist;
+
+        // Transcript length
+        pos_t tlen;
 
     private:
         /* A the sequence ID assigned by the BAM file, so we can arrange
@@ -434,6 +440,7 @@ class FragmentModelThread
                                              interval->end,
                                              interval->strand,
                                              interval->three_prime_dist,
+                                             interval->tlen,
                                              read_counts);
                     read_counts.clear();
                 }
@@ -511,7 +518,7 @@ class FragmentModelThread
 
         void measure_three_prime_dist(
                 pos_t start, pos_t end, strand_t strand, pos_t three_prime_dist,
-                const ReadSet::UniqueReadCounts& counts)
+                pos_t tlen, const ReadSet::UniqueReadCounts& counts)
         {
             ReadSet::UniqueReadCounts::const_iterator i;
             for (i = counts.begin(); i != counts.end(); ++i) {
@@ -526,6 +533,8 @@ class FragmentModelThread
                     else {
                         d = three_prime_dist + d - start;
                     }
+
+                    d = d * constants::transcript_3p_dist_len / tlen;
 
                     if (0 <= d && d < constants::transcript_3p_dist_len +
                                       constants::transcript_3p_dist_pad) {
@@ -581,8 +590,9 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
 
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (t->exonic_length() >= constants::transcript_3p_dist_len +
-                                  constants::transcript_3p_dist_pad) {
+        pos_t tlen = t->exonic_length();
+        if (tlen >= constants::transcript_3p_dist_len +
+                    constants::transcript_3p_dist_pad) {
             pos_t d = 0;
             if (t->strand == strand_neg) {
                 for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
@@ -592,6 +602,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                 e->end,
                                 t->strand,
                                 d,
+                                tlen,
                                 FragmentModelInterval::THREE_PRIME_EXONIC));
                     d += e->end - e->start + 1;
                     if (d >= constants::transcript_3p_dist_len +
@@ -606,6 +617,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                 e->end,
                                 t->strand,
                                 d,
+                                tlen,
                                 FragmentModelInterval::THREE_PRIME_EXONIC));
                     d += e->end - e->start + 1;
                     if (d >= constants::transcript_3p_dist_len +
@@ -713,7 +725,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
                    &three_prime_dist_weight_d.at(0), 1,
                    n, &three_prime_dist_c0[0], &three_prime_dist_c1[0],
                    &cov00, &cov01, &cov10, &sumsq);
-    Logger::info("3' + ; c0 = %e, c1 = %e",
+    Logger::info("3' + : c0 = %e, c1 = %e",
                  three_prime_dist_c0[0],
                  three_prime_dist_c1[0]);
 
@@ -726,7 +738,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
                    &three_prime_dist_weight_d.at(0), 1,
                    n, &three_prime_dist_c0[1], &three_prime_dist_c1[1],
                    &cov00, &cov01, &cov10, &sumsq);
-    Logger::info("3' + ; c0 = %e, c1 = %e",
+    Logger::info("3' - : c0 = %e, c1 = %e",
                  three_prime_dist_c0[1],
                  three_prime_dist_c1[1]);
 

@@ -1011,42 +1011,44 @@ void SamplerInitThread::transcript_sequence_bias(
         float w;
         pos_t p;
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            p = tlen - pos - 1;
-            if (p < constants::transcript_3p_dist_len) {
-                w = three_prime_dist[0]->pdf(p);
-            }
-            else {
+            p = (tlen - pos - 1) * constants::transcript_3p_dist_len / tlen;
+            //if (p < constants::transcript_3p_dist_len) {
+                //w = three_prime_dist[0]->pdf(p);
+            //}
+            //else {
                 w = std::max(1e-8, fm.three_prime_dist_c0[0] + p * fm.three_prime_dist_c1[0]);
-            }
-            mate1_seqbias[0][pos] *= w * constants::transcript_3p_dist_scale;;
+            //}
+            mate1_seqbias[0][pos] *= w * constants::transcript_3p_dist_scale;
 
-            if (p < constants::transcript_3p_dist_len) {
-                w = three_prime_dist[1]->pdf(p);
-            }
-            else {
+            //if (p < constants::transcript_3p_dist_len) {
+                //w = three_prime_dist[1]->pdf(p);
+            //}
+            //else {
                 w = std::max(1e-8, fm.three_prime_dist_c0[1] + p * fm.three_prime_dist_c1[1]);
-            }
-            mate1_seqbias[1][pos] *= w * constants::transcript_3p_dist_scale;;
+            //}
+            mate1_seqbias[1][pos] *= w * constants::transcript_3p_dist_scale;
         }
     }
     else {
         float w;
+        pos_t p;
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            if (pos < constants::transcript_3p_dist_len) {
-                w = three_prime_dist[1]->pdf(pos);
-            }
-            else {
-                w = std::max(1e-8, fm.three_prime_dist_c0[1] + pos * fm.three_prime_dist_c1[1]);
-            }
+            p = pos * constants::transcript_3p_dist_len / tlen;
+            //if (p < constants::transcript_3p_dist_len) {
+                //w = three_prime_dist[1]->pdf(p);
+            //}
+            //else {
+                w = std::max(1e-8, fm.three_prime_dist_c0[1] + p * fm.three_prime_dist_c1[1]);
+            //}
             mate1_seqbias[0][pos] *= w * constants::transcript_3p_dist_scale;
 
 
-            if (pos < constants::transcript_3p_dist_len) {
-                w = three_prime_dist[0]->pdf(pos);
-            }
-            else {
-                w = std::max(1e-8, fm.three_prime_dist_c0[0] + pos * fm.three_prime_dist_c1[0]);
-            }
+            //if (pos < constants::transcript_3p_dist_len) {
+                //w = three_prime_dist[0]->pdf(p);
+            //}
+            //else {
+                w = std::max(1e-8, fm.three_prime_dist_c0[0] + p * fm.three_prime_dist_c1[0]);
+            //}
             mate1_seqbias[1][pos] *= w * constants::transcript_3p_dist_scale;
         }
     }
