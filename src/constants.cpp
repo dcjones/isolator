@@ -21,9 +21,12 @@ float                constants::zero_eps                     = 1e-16;
 float                constants::round_down_eps               = 1e-14;
 pos_t                constants::transcript_5p_extension      = 0;
 pos_t                constants::transcript_3p_extension      = 0;
-pos_t                constants::transcript_3p_dist_len       = 2000;
+pos_t                constants::transcript_3p_dist_len       = 100;
 pos_t                constants::transcript_3p_dist_pad       = 200;
 float                constants::transcript_3p_dist_w         = 0.95;
+size_t               constants::transcript_3p_num_bins       = 9;
+pos_t                constants::transcript_3p_bins[8] =
+    {400, 800, 1200, 1400, 1600, 2000, 2400, 3200};
 float                constants::transcript_3p_dist_scale     = 1000.0;
 float                constants::min_transcript_weight        = 5.0;
 float                constants::tmix_prior_prec              = 0.01;
