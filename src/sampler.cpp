@@ -715,13 +715,15 @@ class SamplerInitThread
             else {
                 frag_len_dist = NULL;
             }
-            three_prime_dist = new EmpDist(*fm.three_prime_dist);
+            three_prime_dist[0] = new EmpDist(*fm.three_prime_dist[0]);
+            three_prime_dist[1] = new EmpDist(*fm.three_prime_dist[1]);
         }
 
         ~SamplerInitThread()
         {
             delete frag_len_dist;
-            delete three_prime_dist;
+            delete three_prime_dist[0];
+            delete three_prime_dist[1];
             /* Note: we are not free weight_matrix_entries and
              * multiread_entries. This get's done in Sampler::Sampler.
              * It's all part of the delicate dance involved it minimizing
@@ -798,7 +800,7 @@ class SamplerInitThread
         /* Copy the fragment length distribution to avoid contention between
          * threads. */
         EmpDist* frag_len_dist;
-        EmpDist* three_prime_dist;
+        EmpDist* three_prime_dist[2];
 
         /* Temprorary space for computing sequence bias, indexed by strand. */
         std::vector<float> mate1_seqbias[2];
@@ -1004,26 +1006,48 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
-
     // 3' bias
     if (t.strand == strand_pos) {
         float w;
+        pos_t p;
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            w = three_prime_dist->pdf(std::min<pos_t>(
-                    constants::transcript_3p_dist_len - 1,
-                    tlen - pos - 1));
+            p = tlen - pos - 1;
+            if (p < constants::transcript_3p_dist_len) {
+                w = three_prime_dist[0]->pdf(p);
+            }
+            else {
+                w = std::max(1e-8, fm.three_prime_dist_c0[0] + p * fm.three_prime_dist_c1[0]);
+            }
             mate1_seqbias[0][pos] *= w * constants::transcript_3p_dist_scale;;
+
+            if (p < constants::transcript_3p_dist_len) {
+                w = three_prime_dist[1]->pdf(p);
+            }
+            else {
+                w = std::max(1e-8, fm.three_prime_dist_c0[1] + p * fm.three_prime_dist_c1[1]);
+            }
             mate1_seqbias[1][pos] *= w * constants::transcript_3p_dist_scale;;
         }
     }
     else {
         float w;
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            w = three_prime_dist->pdf(std::min<pos_t>(
-                    constants::transcript_3p_dist_len - 1,
-                    pos));
+            if (pos < constants::transcript_3p_dist_len) {
+                w = three_prime_dist[1]->pdf(pos);
+            }
+            else {
+                w = std::max(1e-8, fm.three_prime_dist_c0[1] + pos * fm.three_prime_dist_c1[1]);
+            }
             mate1_seqbias[0][pos] *= w * constants::transcript_3p_dist_scale;
-            mate1_seqbias[1][pos] *= w * constants::transcript_3p_dist_scale;;
+
+
+            if (pos < constants::transcript_3p_dist_len) {
+                w = three_prime_dist[0]->pdf(pos);
+            }
+            else {
+                w = std::max(1e-8, fm.three_prime_dist_c0[0] + pos * fm.three_prime_dist_c1[0]);
+            }
+            mate1_seqbias[1][pos] *= w * constants::transcript_3p_dist_scale;
         }
     }
 
@@ -1123,11 +1147,9 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         tw += frag_len_pr * ws[frag_len];
     }
 
-#if 0
     if (!finite(tw) || tw <= constants::min_transcript_weight) {
         return constants::min_transcript_weight;
     }
-#endif
 
     return tw;
 }

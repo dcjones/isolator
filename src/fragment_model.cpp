@@ -1,6 +1,7 @@
 
 #include <boost/unordered_map.hpp>
 #include <gsl/gsl_cdf.h>
+#include <gsl/gsl_fit.h>
 #include <gsl/gsl_randist.h>
 
 #include "constants.hpp"
@@ -391,7 +392,10 @@ class FragmentModelThread
 {
     public:
         FragmentModelThread(Queue<FragmentModelInterval*>& q)
-            : three_prime_dist_counts(
+            : three_prime_dist_counts_0(
+                    constants::transcript_3p_dist_len +
+                    constants::transcript_3p_dist_pad, 0)
+            , three_prime_dist_counts_1(
                     constants::transcript_3p_dist_len +
                     constants::transcript_3p_dist_pad, 0)
             , q(q)
@@ -465,7 +469,8 @@ class FragmentModelThread
 
         /* Counts of fragment starts at the given distance from the annotated
          * tss/tts. */
-        std::vector<unsigned int> three_prime_dist_counts;
+        std::vector<unsigned int> three_prime_dist_counts_0;
+        std::vector<unsigned int> three_prime_dist_counts_1;
 
     private:
         void measure_fragment_lengths(const ReadSet::UniqueReadCounts& counts)
@@ -524,7 +529,12 @@ class FragmentModelThread
 
                     if (0 <= d && d < constants::transcript_3p_dist_len +
                                       constants::transcript_3p_dist_pad) {
-                        ++three_prime_dist_counts[d];
+                        if (strand == j->mate1->strand) {
+                            ++three_prime_dist_counts_0[d];
+                        }
+                        else {
+                            ++three_prime_dist_counts_1[d];
+                        }
                     }
                 }
             }
@@ -538,8 +548,8 @@ class FragmentModelThread
 FragmentModel::FragmentModel()
     : sb(NULL)
     , frag_len_dist(NULL)
-    , three_prime_dist(NULL)
 {
+    three_prime_dist[0] = three_prime_dist[1] = NULL;
 }
 
 
@@ -547,7 +557,8 @@ FragmentModel::~FragmentModel()
 {
     if (sb) delete sb;
     if (frag_len_dist) delete frag_len_dist;
-    if (three_prime_dist) delete three_prime_dist;
+    if (three_prime_dist[0]) delete three_prime_dist[0];
+    if (three_prime_dist[1]) delete three_prime_dist[1];
 }
 
 
@@ -653,31 +664,84 @@ void FragmentModel::estimate(TranscriptSet& ts,
     }
 
     /* Collect 3' dist distribution statistics */
-    std::vector<unsigned int> three_prime_dist_vals(
+    std::vector<unsigned int> three_prime_dist_vals_0(
             constants::transcript_3p_dist_len + constants::transcript_3p_dist_pad);
-    std::vector<unsigned int> three_prime_dist_counts(
+    std::vector<unsigned int> three_prime_dist_counts_0(
             constants::transcript_3p_dist_len + constants::transcript_3p_dist_pad, 0);
 
-    for (unsigned int i = 0; i < three_prime_dist_vals.size(); ++i) {
-        three_prime_dist_vals[i] = i;
+    std::vector<unsigned int> three_prime_dist_vals_1(
+            constants::transcript_3p_dist_len + constants::transcript_3p_dist_pad);
+    std::vector<unsigned int> three_prime_dist_counts_1(
+            constants::transcript_3p_dist_len + constants::transcript_3p_dist_pad, 0);
+
+    for (unsigned int i = 0; i < three_prime_dist_vals_0.size(); ++i) {
+        three_prime_dist_vals_0[i] = i;
+        three_prime_dist_vals_1[i] = i;
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
-        for (size_t j = 0; j < threads[i]->three_prime_dist_counts.size(); ++j) {
-            three_prime_dist_counts[j] += threads[i]->three_prime_dist_counts[j];
+        for (size_t j = 0; j < threads[i]->three_prime_dist_counts_0.size(); ++j) {
+            three_prime_dist_counts_0[j] += threads[i]->three_prime_dist_counts_0[j];
+            three_prime_dist_counts_1[j] += threads[i]->three_prime_dist_counts_1[j];
         }
     }
 
-    three_prime_dist = new EmpDist(&three_prime_dist_vals.at(0),
-                                   &three_prime_dist_counts.at(0),
-                                   three_prime_dist_vals.size(),
-                                   constants::transcript_3p_dist_w);
+    three_prime_dist[0] = new EmpDist(&three_prime_dist_vals_0.at(0),
+                                      &three_prime_dist_counts_0.at(0),
+                                      three_prime_dist_vals_0.size(),
+                                      constants::transcript_3p_dist_w);
+    three_prime_dist[1] = new EmpDist(&three_prime_dist_vals_1.at(0),
+                                      &three_prime_dist_counts_1.at(0),
+                                      three_prime_dist_vals_0.size(),
+                                      constants::transcript_3p_dist_w);
+
+
+    // Fit a line to the 3' bias to extrapolate past the end.
+    size_t n = constants::transcript_3p_dist_len - constants::transcript_3p_dist_pad;
+    std::vector<double> three_prime_dist_vals_d(n);
+    std::vector<double> three_prime_dist_weight_d(n);
+    for (unsigned int i = 0; i < n; ++i) {
+        three_prime_dist_vals_d[i] = (double) (i + constants::transcript_3p_dist_pad);
+    }
+
+    double cov00, cov01, cov10, sumsq;
+    for (unsigned int i = 0; i < n; ++i) {
+        three_prime_dist_weight_d[i] = three_prime_dist[0]->pdf(
+                i + constants::transcript_3p_dist_pad);
+    }
+    gsl_fit_linear(&three_prime_dist_vals_d.at(0), 1,
+                   &three_prime_dist_weight_d.at(0), 1,
+                   n, &three_prime_dist_c0[0], &three_prime_dist_c1[0],
+                   &cov00, &cov01, &cov10, &sumsq);
+    Logger::info("3' + ; c0 = %e, c1 = %e",
+                 three_prime_dist_c0[0],
+                 three_prime_dist_c1[0]);
+
+
+    for (unsigned int i = 0; i < three_prime_dist_vals_d.size(); ++i) {
+        three_prime_dist_weight_d[i] = three_prime_dist[1]->pdf(
+                i + constants::transcript_3p_dist_pad);
+    }
+    gsl_fit_linear(&three_prime_dist_vals_d.at(0), 1,
+                   &three_prime_dist_weight_d.at(0), 1,
+                   n, &three_prime_dist_c0[1], &three_prime_dist_c1[1],
+                   &cov00, &cov01, &cov10, &sumsq);
+    Logger::info("3' + ; c0 = %e, c1 = %e",
+                 three_prime_dist_c0[1],
+                 three_prime_dist_c1[1]);
+
 
     // XXX: Debugging
     {
-        FILE* out = fopen("3p_dist.tsv", "w");
+        FILE* out = fopen("3p_dist.0.tsv", "w");
         for (int i = 0; i < constants::transcript_3p_dist_len; ++i) {
-            fprintf(out, "%d\t%f\n", i, three_prime_dist->pdf(i));
+            fprintf(out, "%d\t%f\n", i, three_prime_dist[0]->pdf(i));
+        }
+        fclose(out);
+
+        out = fopen("3p_dist.1.tsv", "w");
+        for (int i = 0; i < constants::transcript_3p_dist_len; ++i) {
+            fprintf(out, "%d\t%f\n", i, three_prime_dist[1]->pdf(i));
         }
         fclose(out);
     }

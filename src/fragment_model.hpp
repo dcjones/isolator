@@ -123,7 +123,8 @@ class FragmentModel
         EmpDist* frag_len_dist;
 
         /* Distribution over distance from 3' end. */
-        EmpDist* three_prime_dist;
+        EmpDist* three_prime_dist[2];
+        double three_prime_dist_c0[2], three_prime_dist_c1[2];
 };
 
 
