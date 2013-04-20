@@ -117,7 +117,9 @@ sequencing_bias::sequencing_bias()
     : ref_f(NULL)
     , M1(NULL)
     , M2(NULL)
-{}
+{
+    gc1[0] = gc1[1] = gc2[0] = gc2[1] = NULL;
+}
 
 
 #if 0
@@ -192,6 +194,7 @@ sequencing_bias::sequencing_bias(const char* ref_fn,
     , M1(NULL)
     , M2(NULL)
 {
+    gc1[0] = gc1[1] = gc2[0] = gc2[1] = NULL;
     build(ref_fn, T1, T2, max_reads, L, R,
           complexity_penalty);
 }
@@ -257,6 +260,11 @@ void sequencing_bias::clear()
 
     delete M2;
     M2 = NULL;
+
+    delete [] gc1[0];
+    delete [] gc1[1];
+    delete [] gc2[0];
+    delete [] gc2[1];
 }
 
 
@@ -472,8 +480,29 @@ void sequencing_bias::buildn(motif** Mn,
                     complexity_penalty,
                     task_name);
 
-
+    double** gc = Mn == &M1 ? gc1 : gc2;
     std::deque<twobitseq*>::iterator seqit;
+
+    gc[0] = new double[L + 1 + R];
+    std::fill(gc[0], gc[0] + (L + 1 + R), 1.0);
+    for (seqit = background_seqs.begin(); seqit != background_seqs.end(); seqit++) {
+        ++gc[0][(*seqit)->gc_count()];
+    }
+    for (pos_t i = 0; i < L + 1 + R; ++i) {
+        gc[0][i] /= (double) background_seqs.size() + L + 1 + R;
+    }
+
+
+    gc[1] = new double[L + 1 + R];
+    std::fill(gc[0], gc[0] + (L + 1 + R), 1.0);
+    for (seqit = foreground_seqs.begin(); seqit != foreground_seqs.end(); seqit++) {
+        ++gc[1][(*seqit)->gc_count()];
+    }
+    for (pos_t i = 0; i < L + 1 + R; ++i) {
+        gc[1][i] /= (double) background_seqs.size() + L + 1 + R;
+    }
+
+
     for (seqit = background_seqs.begin(); seqit != background_seqs.end(); seqit++) {
         delete *seqit;
     }
@@ -567,6 +596,7 @@ double* sequencing_bias::get_maten_bias(const motif* Mn,
 
     twobitseq seq(seqstr);
 
+    // TODO: GC correction
     for (i = 0; i < seqlen; i++) {
         bs[i] = Mn->eval(seq, i);
     }
@@ -582,7 +612,17 @@ double sequencing_bias::get_maten_bias(const motif* Mn,
                                        const twobitseq& seq, pos_t pos) const
 {
     if (Mn == NULL || pos < L || (pos_t) seq.size() - pos <= R) return 1.0;
-    return Mn->eval(seq, pos - L);
+
+    size_t gc_cnt = seq.gc_count(pos, L + 1 + R);
+    double gc_adj;
+    if (Mn == M1) {
+        gc_adj = gc1[0][gc_cnt] / gc1[1][gc_cnt];
+    }
+    else {
+        gc_adj = gc2[0][gc_cnt] / gc2[1][gc_cnt];
+    }
+
+    return gc_adj * Mn->eval(seq, pos - L);
 }
 
 

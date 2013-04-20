@@ -63,6 +63,11 @@ class twobitseq
         /** Copy a part of another sequence. */
         void copy(const twobitseq& src, pos_t src_start, pos_t dest_start, pos_t n);
 
+        /** Count number of Gs and Cs between i and j inclusively. */
+        size_t gc_count(pos_t i, pos_t j) const;
+
+        /* Count number of Gs and Cs in the entire sequence. */
+        size_t gc_count() const;
 
         kmer getnuc(size_t i) const;
         void setnuc(size_t i, kmer K);

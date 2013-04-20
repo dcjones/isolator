@@ -121,7 +121,11 @@ class sequencing_bias
 
         /* trained motifs */
         motif* M1; // single-end motif, or double-end mate1 motif
-        motif* M2; // doubre-end mate2 motif
+        motif* M2; // double-end mate2 motif
+
+        /* foreground/background distribution over gc content */
+        double* gc1[2];
+        double* gc2[2];
 };
 
 

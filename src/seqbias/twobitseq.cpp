@@ -280,6 +280,28 @@ void twobitseq::copy(const twobitseq& src, pos_t src_start, pos_t dest_start, po
 }
 
 
+size_t twobitseq::gc_count(pos_t i, pos_t j) const
+{
+    size_t cnt = 0;
+    for (pos_t k = i; k <= j && k < (pos_t) n; ++k) {
+        kmer c = getnuc(k);
+        if (c == 1 || c == 2) ++cnt;
+    }
+    return cnt;
+}
+
+
+size_t twobitseq::gc_count() const
+{
+    size_t cnt = 0;
+    for (size_t k = 0; k < n; ++k) {
+        kmer c = getnuc(k);
+        if (c == 1 || c == 2) ++cnt;
+    }
+    return cnt;
+}
+
+
 std::string twobitseq::to_string() const
 {
     std::string out;

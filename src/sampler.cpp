@@ -1033,13 +1033,13 @@ void SamplerInitThread::transcript_sequence_bias(
         for (pos_t pos = 0; pos < tlen; ++pos) {
             p = std::max<pos_t>(0, (tlen - pos - 1) - constants::transcript_3p_dist_pad);
             p = p * constants::transcript_3p_dist_len / (tlen - constants::transcript_3p_dist_pad);
-            mate1_seqbias[0][pos] =
+            mate1_seqbias[0][pos] *=
                 tp_bias_0[bin]->pdf(p) * constants::transcript_3p_dist_scale;
 
             p = tlen - pos - 1;
             p = p * constants::transcript_3p_dist_len / (tlen - constants::transcript_3p_dist_pad);
             p = std::min<pos_t>(constants::transcript_3p_dist_len - 1, p);
-            mate1_seqbias[1][pos] =
+            mate1_seqbias[1][pos] *=
                 tp_bias_1[bin]->pdf(p) * constants::transcript_3p_dist_scale;
         }
     }
@@ -1049,60 +1049,15 @@ void SamplerInitThread::transcript_sequence_bias(
             p = pos;
             p = p * constants::transcript_3p_dist_len / (tlen - constants::transcript_3p_dist_pad);
             p = std::min<pos_t>(constants::transcript_3p_dist_len - 1, p);
-            mate1_seqbias[0][pos] =
+            mate1_seqbias[0][pos] *=
                 tp_bias_1[bin]->pdf(p) * constants::transcript_3p_dist_scale;
 
             p = std::max<pos_t>(0, pos - constants::transcript_3p_dist_pad);
             p = p * constants::transcript_3p_dist_len / (tlen - constants::transcript_3p_dist_pad);
-            mate1_seqbias[1][pos] =
+            mate1_seqbias[1][pos] *=
                 tp_bias_0[bin]->pdf(p) * constants::transcript_3p_dist_scale;
         }
     }
-
-
-    /* trying something out */
-
-#if 0
-    if (tlen > 3000) {
-        if (t.strand == strand_pos) {
-            for (pos_t pos = 0; pos < 1000 && pos < tlen; ++pos) {
-                mate1_seqbias[0][pos] *= 0.2;
-                mate1_seqbias[1][pos] *= 0.2;
-                mate2_seqbias[0][pos] *= 0.2;
-                mate2_seqbias[1][pos] *= 0.2;
-            }
-        }
-        else {
-            for (pos_t pos = tlen - 1; pos > tlen - 1000 && pos >= 0; --pos) {
-                mate1_seqbias[0][pos] *= 0.2;
-                mate1_seqbias[1][pos] *= 0.2;
-                mate2_seqbias[0][pos] *= 0.2;
-                mate2_seqbias[1][pos] *= 0.2;
-            }
-        }
-    }
-#endif
-
-#if 0
-    if (t.transcript_id == "ENST00000253408") {
-        FILE* f = fopen("gfap.0.txt", "w");
-        for (pos_t pos = 0; pos < tlen; ++pos) {
-            fprintf(f, "%e\n", mate2_seqbias[0][pos]);
-        }
-        fclose(f);
-
-        f = fopen("gfap.1.txt", "w");
-        for (pos_t pos = 0; pos < tlen; ++pos) {
-            fprintf(f, "%e\n", mate2_seqbias[1][pos]);
-        }
-        fclose(f);
-
-        f = fopen("gfap.txt", "w");
-        fprintf(f, ">%s\n", t.transcript_id.get().c_str());
-        fprintf(f, "%s\n", tseq1.to_string().c_str());
-        fclose(f);
-    }
-#endif
 }
 
 
