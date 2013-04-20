@@ -108,7 +108,7 @@ namespace constants
     /* Transcript 3p bias is conditioned on transcript length, binned into the
      * following bins. Each number represents an upper bound for a bin.
      */
-    extern pos_t transcript_3p_bins[8];
+    extern pos_t transcript_3p_bins[4];
     extern size_t transcript_3p_num_bins;
 
     /* Smoothing used on the emperical distribution  over distance from 3' end.

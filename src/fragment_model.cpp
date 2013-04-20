@@ -517,13 +517,16 @@ class FragmentModelThread
         }
 
         void measure_three_prime_dist(
-                pos_t start, pos_t end, strand_t strand, pos_t three_prime_dist,
-                pos_t tlen, const ReadSet::UniqueReadCounts& counts)
+                pos_t start, pos_t end, strand_t strand,
+                pos_t exon_three_prime_dist, pos_t tlen,
+                const ReadSet::UniqueReadCounts& counts)
         {
+            if (tlen <= constants::transcript_3p_dist_pad) return;
+
             /* find the right bin */
             size_t bin = constants::transcript_3p_num_bins - 1;
             while (bin > 0) {
-                if (tlen - constants::transcript_3p_dist_pad > constants::transcript_3p_bins[bin - 1]) {
+                if (tlen > constants::transcript_3p_bins[bin - 1]) {
                     break;
                 }
                 --bin;
@@ -541,22 +544,27 @@ class FragmentModelThread
                     pos_t d = j->mate1->strand == strand_pos ?
                                   j->mate1->start : j->mate1->end;
                     if (strand == strand_pos) {
-                        d = three_prime_dist + end - d;
+                        d = exon_three_prime_dist + end - d;
                     }
                     else {
-                        d = three_prime_dist + d - start;
+                        d = exon_three_prime_dist + d - start;
                     }
 
-                    d = d * constants::transcript_3p_dist_len / tlen;
 
-                    if (0 <= d && d < constants::transcript_3p_dist_len +
-                                      constants::transcript_3p_dist_pad) {
-                        if (strand == j->mate1->strand) {
-                            ++three_prime_dist_counts_0[d];
-                        }
-                        else {
-                            ++three_prime_dist_counts_1[d];
-                        }
+                    if (strand == j->mate1->strand) {
+                        d -= constants::transcript_3p_dist_pad;
+                        d = d * constants::transcript_3p_dist_len /
+                            (tlen - constants::transcript_3p_dist_pad);
+                        if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
+
+                        ++three_prime_dist_counts_0[d];
+                    }
+                    else {
+                        d = d * constants::transcript_3p_dist_len /
+                            (tlen - constants::transcript_3p_dist_pad);
+                        if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
+
+                        ++three_prime_dist_counts_1[d];
                     }
                 }
             }
@@ -608,7 +616,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         pos_t tlen = t->exonic_length();
-        if (tlen >= constants::transcript_3p_dist_pad) {
+        if (tlen > constants::transcript_3p_dist_pad) {
             pos_t d = 0;
             if (t->strand == strand_neg) {
                 for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
@@ -621,8 +629,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                 tlen,
                                 FragmentModelInterval::THREE_PRIME_EXONIC));
                     d += e->end - e->start + 1;
-                    if (d >= constants::transcript_3p_dist_len +
-                             constants::transcript_3p_dist_pad) break;
                 }
             }
             else {
@@ -636,8 +642,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                 tlen,
                                 FragmentModelInterval::THREE_PRIME_EXONIC));
                     d += e->end - e->start + 1;
-                    if (d >= constants::transcript_3p_dist_len +
-                             constants::transcript_3p_dist_pad) break;
                 }
             }
         }
@@ -678,8 +682,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                  mate1_pos_tab, mate2_pos_tab,
                                  constants::seqbias_num_reads,
                                  constants::seqbias_left_pos,
-                                 constants::seqbias_right_pos,
-                                 1.0);
+                                 constants::seqbias_right_pos);
     }
     else sb = NULL;
 
@@ -755,8 +758,21 @@ void FragmentModel::estimate(TranscriptSet& ts,
                 fprintf(out, "%d\t%f\n", j, tp_bias_1[i]->pdf(j));
             }
             fclose(out);
-
         }
+
+        FILE* out = fopen("3p.inf.0.tsv", "w");
+        size_t i = constants::transcript_3p_num_bins - 1;
+        for (int j = 0; j < constants::transcript_3p_dist_len; ++j) {
+            fprintf(out, "%d\t%f\n", j, tp_bias_0[i]->pdf(j));
+        }
+        fclose(out);
+
+        out = fopen("3p.inf.1.tsv", "w");
+        i = constants::transcript_3p_num_bins - 1;
+        for (int j = 0; j < constants::transcript_3p_dist_len; ++j) {
+            fprintf(out, "%d\t%f\n", j, tp_bias_1[i]->pdf(j));
+        }
+        fclose(out);
     }
 
 

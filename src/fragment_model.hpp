@@ -124,8 +124,8 @@ class FragmentModel
 
         /* Distribution over distance from 3' end. */
         // Of length: constants::transcript_3p_num_bins
-        EmpDist* tp_bias_0[9];
-        EmpDist* tp_bias_1[9];
+        EmpDist* tp_bias_0[5];
+        EmpDist* tp_bias_1[5];
 };
 
 

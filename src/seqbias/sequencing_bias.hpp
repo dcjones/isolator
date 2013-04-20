@@ -45,7 +45,7 @@ class sequencing_bias
                         PosTable& T1, PosTable& T2,
                         size_t max_reads,
                         pos_t L, pos_t R,
-                        double complexity_penalty = 0.5);
+                        double complexity_penalty = 1.0);
 
 
         /** destructor */

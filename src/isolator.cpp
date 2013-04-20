@@ -314,10 +314,6 @@ int summarize(int argc, char* argv[])
         float lower_95_cred = samples.front();
         float upper_95_cred = samples.back();
 
-        if (i->transcript_id.get() == "ENST00000253408") {
-            fprintf(stderr, "HERE");
-        }
-
         for (std::vector<float>::iterator j = samples.begin();
                 j != samples.end(); ++j) {
             *j = fabsf(*j - posterior_median);
