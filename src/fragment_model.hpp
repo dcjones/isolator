@@ -97,6 +97,7 @@ class FragmentModel
         FragmentModel();
         ~FragmentModel();
         void estimate(TranscriptSet& ts, const char* bam_fn, const char* fa_fn);
+        void train_seqbias(const char* bam_fn, const char* fa_fn);
 
         /* Fragment length probability ,cdf, and median using a fallback when no
          * emperical distribution is available. */

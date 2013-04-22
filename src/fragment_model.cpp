@@ -247,6 +247,10 @@ class FragmentModelInterval
         // Transcript length
         pos_t tlen;
 
+        // Sequence associated with the intervals seqname.
+        boost::shared_ptr<twobitseq> seq0;
+        boost::shared_ptr<twobitseq> seq1;
+
     private:
         /* A the sequence ID assigned by the BAM file, so we can arrange
          * intervals in the same order. */
@@ -254,10 +258,9 @@ class FragmentModelInterval
 
         friend void sam_scan(std::vector<FragmentModelInterval*>& intervals,
                              AlnCountTrie& T,
-                             PosTable& mate1_pos_tab,
-                             PosTable& mate2_pos_tab,
                              Queue<FragmentModelInterval*>& q,
                              const char* bam_fn,
+                             const char* fa_fn,
                              const char* task_name);
 };
 
@@ -274,10 +277,9 @@ struct FragmentModelIntervalPtrCmp
 
 void sam_scan(std::vector<FragmentModelInterval*>& intervals,
               AlnCountTrie& T,
-              PosTable& mate1_pos_tab,
-              PosTable& mate2_pos_tab,
               Queue<FragmentModelInterval*>& q,
               const char* bam_fn,
+              const char* fa_fn,
               const char* task_name)
 {
     /* Measure file size to monitor progress. */
@@ -291,6 +293,14 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
             fclose(f);
         }
         Logger::push_task(task_name, input_size / input_block_size);
+    }
+
+    faidx_t* fa_f = NULL;
+    if (fa_fn) {
+        fa_f = fai_load(fa_fn);
+        if (fa_f == NULL) {
+            Logger::abort("Can't open FASTA file %s.", fa_fn);
+        }
     }
 
     samfile_t* bam_f;
@@ -346,16 +356,39 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
                     "Excuse me, but I must insist that your SAM/BAM file be sorted. "
                     "Please run: 'samtools sort'.");
         }
+
+        if (fa_f && b->core.tid != last_tid) {
+            int seqlen;
+            char* seqstr = faidx_fetch_seq(
+                    fa_f, bam_f->header->target_name[b->core.tid],
+                    0, INT_MAX, &seqlen);
+
+            if (seqstr == NULL) {
+                Logger::abort("Couldn't read sequence %s",
+                        bam_f->header->target_name[b->core.tid]);
+            }
+
+            boost::shared_ptr<twobitseq> seq0(new twobitseq(seqstr));
+            boost::shared_ptr<twobitseq> seq1(new twobitseq(*seq0));
+            seq1->revcomp();
+            free(seqstr);
+
+            for (j = j0; j < n && intervals[j]->tid <= b->core.tid; ++j) {
+                if (intervals[j]->tid < b->core.tid) continue;
+                intervals[j]->seq0 = seq0;
+                intervals[j]->seq1 = seq1;
+            }
+        }
+
+
         last_tid = b->core.tid;
         last_pos = b->core.pos;
 
         /* Count numbers of alignments by read. */
         if (b->core.flag & BAM_FREAD2) {
-            if (b->core.n_cigar == 1) mate2_pos_tab.add(b, bam_f);
             T.inc_mate2(bam1_qname(b));
         }
         else if (b->core.flag & BAM_FREAD1) {
-            if (b->core.n_cigar == 1) mate1_pos_tab.add(b, bam_f);
             T.inc_mate1(bam1_qname(b));
         }
 
@@ -387,6 +420,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
 
     bam_destroy1(b);
     samclose(bam_f);
+    if (fa_f) fai_destroy(fa_f);
 
     if (task_name) Logger::pop_task(task_name);
 }
@@ -397,8 +431,10 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
 class FragmentModelThread
 {
     public:
-        FragmentModelThread(Queue<FragmentModelInterval*>& q)
+        FragmentModelThread(Queue<FragmentModelInterval*>& q,
+                            const sequencing_bias* sb)
             : q(q)
+            , sb(sb)
             , t(NULL)
         {
             for (size_t i = 0; i < constants::transcript_3p_num_bins; ++i) {
@@ -441,6 +477,8 @@ class FragmentModelThread
                                              interval->strand,
                                              interval->three_prime_dist,
                                              interval->tlen,
+                                             interval->seq0,
+                                             interval->seq1,
                                              read_counts);
                     read_counts.clear();
                 }
@@ -476,8 +514,11 @@ class FragmentModelThread
 
         /* Counts of fragment starts at the given distance from the annotated
          * tss/tts. Of length: constants::transcript_3p_num_bins */
-        std::vector<unsigned int> binned_three_prime_dist_counts_0[9];
-        std::vector<unsigned int> binned_three_prime_dist_counts_1[9];
+        std::vector<double> binned_three_prime_dist_counts_0[9];
+        std::vector<double> binned_three_prime_dist_counts_1[9];
+
+        /* Mate1 sequence bias across the current interval. */
+        std::vector<double> mate1_seqbias[2];
 
     private:
         void measure_fragment_lengths(const ReadSet::UniqueReadCounts& counts)
@@ -519,9 +560,35 @@ class FragmentModelThread
         void measure_three_prime_dist(
                 pos_t start, pos_t end, strand_t strand,
                 pos_t exon_three_prime_dist, pos_t tlen,
+                const boost::shared_ptr<twobitseq> seq0,
+                const boost::shared_ptr<twobitseq> seq1,
                 const ReadSet::UniqueReadCounts& counts)
         {
+            /* TODO:
+             * Use sb (if non-null) to get the bias across the interval in
+             * question and weight reads.
+             *
+             * This mean three_prime_dist_counts needs to by floating point. */
+
             if (tlen <= constants::transcript_3p_dist_pad) return;
+
+            if ((size_t) tlen > mate1_seqbias[0].size()) {
+                mate1_seqbias[0].resize(tlen);
+                mate1_seqbias[1].resize(tlen);
+            }
+
+            std::fill(mate1_seqbias[0].begin(), mate1_seqbias[0].begin() + tlen, 1.0);
+            std::fill(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen, 1.0);
+
+            if (sb && seq0 && seq1) {
+                for (pos_t pos = start; pos <= end; ++pos) {
+                    mate1_seqbias[0][pos] = sb->get_mate1_bias(*seq0, pos);
+                    mate1_seqbias[0][pos] = sb->get_mate1_bias(
+                            *seq1, seq1->size() - pos - 1);
+                }
+                std::reverse(mate1_seqbias[1].begin(),
+                             mate1_seqbias[1].begin() + tlen);
+            }
 
             /* find the right bin */
             size_t bin = constants::transcript_3p_num_bins - 1;
@@ -531,9 +598,9 @@ class FragmentModelThread
                 }
                 --bin;
             }
-            std::vector<unsigned int>& three_prime_dist_counts_0 =
+            std::vector<double>& three_prime_dist_counts_0 =
                 binned_three_prime_dist_counts_0[bin];
-            std::vector<unsigned int>& three_prime_dist_counts_1 =
+            std::vector<double>& three_prime_dist_counts_1 =
                 binned_three_prime_dist_counts_1[bin];
 
             ReadSet::UniqueReadCounts::const_iterator i;
@@ -543,6 +610,7 @@ class FragmentModelThread
                     if (!j->mate1) continue;
                     pos_t d = j->mate1->strand == strand_pos ?
                                   j->mate1->start : j->mate1->end;
+                    double w = mate1_seqbias[j->mate1->strand][d];
                     if (strand == strand_pos) {
                         d = exon_three_prime_dist + end - d;
                     }
@@ -557,20 +625,21 @@ class FragmentModelThread
                             (tlen - constants::transcript_3p_dist_pad);
                         if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
 
-                        ++three_prime_dist_counts_0[d];
+                        three_prime_dist_counts_0[d] += 1.0 / w;
                     }
                     else {
                         d = d * constants::transcript_3p_dist_len /
                             (tlen - constants::transcript_3p_dist_pad);
                         if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
 
-                        ++three_prime_dist_counts_1[d];
+                        three_prime_dist_counts_1[d] += 1.0 / w;
                     }
                 }
             }
         }
 
         Queue<FragmentModelInterval*>& q;
+        const sequencing_bias* sb;
         boost::thread* t;
 };
 
@@ -600,6 +669,8 @@ void FragmentModel::estimate(TranscriptSet& ts,
                              const char* bam_fn,
                              const char* fa_fn)
 {
+    train_seqbias(bam_fn, fa_fn);
+
     Queue<FragmentModelInterval*> q(constants::max_estimate_queue_size);
 
     std::vector<FragmentModelInterval*> intervals;
@@ -650,15 +721,13 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
     std::vector<FragmentModelThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
-        threads.push_back(new FragmentModelThread(q));
+        threads.push_back(new FragmentModelThread(q, sb));
         threads.back()->start();
     }
 
     AlnCountTrie* alncnt = new AlnCountTrie();
-    PosTable mate1_pos_tab, mate2_pos_tab;
-    sam_scan(intervals, *alncnt,
-             mate1_pos_tab, mate2_pos_tab, q,
-             bam_fn, "Indexing reads");
+
+    sam_scan(intervals, *alncnt, q, bam_fn, fa_fn, "Indexing reads");
 
     /* Index multireads. */
     unsigned long total_reads = alncnt->size();
@@ -676,15 +745,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
     Logger::info("Reads: %lu, %0.1f%% with multiple alignments",
                  total_reads,
                  100.0 * (double) multireads.size() / (double) total_reads);
-
-    if (fa_fn != NULL) {
-        sb = new sequencing_bias(fa_fn,
-                                 mate1_pos_tab, mate2_pos_tab,
-                                 constants::seqbias_num_reads,
-                                 constants::seqbias_left_pos,
-                                 constants::seqbias_right_pos);
-    }
-    else sb = NULL;
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         q.push(NULL);
@@ -851,6 +911,60 @@ void FragmentModel::estimate(TranscriptSet& ts,
         delete threads[i];
     }
 }
+
+
+/* Train seqbias model, setting this->sb to something non-null.
+ *
+ * Args:
+ *   bam_fn: Filename of sorted bam file.
+ *   fa_fn: Filename of fasta file. May be null.
+ *   
+ */
+void FragmentModel::train_seqbias(const char* bam_fn, const char* fa_fn)
+{
+    if (fa_fn == NULL) {
+        sb = NULL;
+        return;
+    }
+
+    const char* task_name = "Preparing to train seqbias model";
+    Logger::push_task(task_name);
+
+    PosTable mate1_pos_tab, mate2_pos_tab;
+
+    samfile_t* bam_f;
+    bam_f = samopen(bam_fn, "rb", NULL);
+    if (bam_f == NULL) {
+        bam_f = samopen(bam_fn, "r", NULL);
+    }
+    if (bam_f == NULL) {
+        Logger::abort("Can't open SAM/BAM file %s.\n", bam_fn);
+    }
+
+    bam1_t* b = bam_init1();
+    size_t read_num = 0;
+    while (samread(bam_f, b) > 0 &&
+           read_num < constants::seqbias_num_collected_reads) {
+        if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
+
+        /* Count numbers of alignments by read. */
+        if (b->core.flag & BAM_FREAD2) {
+            if (b->core.n_cigar == 1) mate2_pos_tab.add(b, bam_f);
+        }
+        else {
+            if (b->core.n_cigar == 1) mate1_pos_tab.add(b, bam_f);
+        }
+        ++read_num;
+    }
+
+    Logger::pop_task(task_name);
+
+    sb = new sequencing_bias(fa_fn, mate1_pos_tab, mate2_pos_tab,
+                             constants::seqbias_num_reads,
+                             constants::seqbias_left_pos,
+                             constants::seqbias_right_pos);
+}
+
 
 
 float FragmentModel::frag_len_p(pos_t frag_len)

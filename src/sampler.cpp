@@ -645,7 +645,8 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
             boost::shared_ptr<twobitseq> seq(new twobitseq(seqstr));
             free(seqstr);
 
-            for (j = j0; j < n && b->core.tid == intervals[j]->tid; ++j) {
+            for (j = j0; j < n &&intervals[j]->tid <= b->core.tid; ++j) {
+                if (intervals[j]->tid < b->core.tid) continue;
                 intervals[j]->seq = seq;
             }
 

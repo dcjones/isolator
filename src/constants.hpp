@@ -28,6 +28,10 @@ namespace constants
      * length distribution. */
     extern pos_t min_estimate_exon_length;
 
+    /* Read this many reads from the BAM file before training seqbias. It will
+     * then choose seqbias_num_reads at random from these to train on. */
+    extern size_t seqbias_num_collected_reads;
+
     /* The number of reads to train seqbias with. */
     extern size_t seqbias_num_reads;
 
