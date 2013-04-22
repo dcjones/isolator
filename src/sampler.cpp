@@ -1174,7 +1174,7 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     float frag_len_pr = frag_len_p(frag_len);
     if (frag_len_pr < constants::min_frag_len_pr) return 0.0;
 
-    return (frag_len_pr * w / tw) + constants::min_frag_weight;
+    return frag_len_pr * w + constants::min_frag_weight;
 }
 
 

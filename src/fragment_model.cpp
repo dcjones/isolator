@@ -572,22 +572,24 @@ class FragmentModelThread
 
             if (tlen <= constants::transcript_3p_dist_pad) return;
 
-            if ((size_t) tlen > mate1_seqbias[0].size()) {
-                mate1_seqbias[0].resize(tlen);
-                mate1_seqbias[1].resize(tlen);
+            pos_t elen = end - start + 1;
+
+            if ((size_t) elen > mate1_seqbias[0].size()) {
+                mate1_seqbias[0].resize(elen);
+                mate1_seqbias[1].resize(elen);
             }
 
-            std::fill(mate1_seqbias[0].begin(), mate1_seqbias[0].begin() + tlen, 1.0);
-            std::fill(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen, 1.0);
+            std::fill(mate1_seqbias[0].begin(), mate1_seqbias[0].begin() + elen, 1.0);
+            std::fill(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + elen, 1.0);
 
             if (sb && seq0 && seq1) {
                 for (pos_t pos = start; pos <= end; ++pos) {
-                    mate1_seqbias[0][pos] = sb->get_mate1_bias(*seq0, pos);
-                    mate1_seqbias[0][pos] = sb->get_mate1_bias(
+                    mate1_seqbias[0][pos - start] = sb->get_mate1_bias(*seq0, pos);
+                    mate1_seqbias[1][pos - start] = sb->get_mate1_bias(
                             *seq1, seq1->size() - pos - 1);
                 }
                 std::reverse(mate1_seqbias[1].begin(),
-                             mate1_seqbias[1].begin() + tlen);
+                             mate1_seqbias[1].begin() + elen);
             }
 
             /* find the right bin */
@@ -610,7 +612,8 @@ class FragmentModelThread
                     if (!j->mate1) continue;
                     pos_t d = j->mate1->strand == strand_pos ?
                                   j->mate1->start : j->mate1->end;
-                    double w = mate1_seqbias[j->mate1->strand][d];
+                    if (d < start || d > end) continue;
+                    double w = mate1_seqbias[j->mate1->strand][d - start];
                     if (strand == strand_pos) {
                         d = exon_three_prime_dist + end - d;
                     }
@@ -625,14 +628,14 @@ class FragmentModelThread
                             (tlen - constants::transcript_3p_dist_pad);
                         if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
 
-                        three_prime_dist_counts_0[d] += 1.0 / w;
+                        three_prime_dist_counts_0[d] += w;
                     }
                     else {
                         d = d * constants::transcript_3p_dist_len /
                             (tlen - constants::transcript_3p_dist_pad);
                         if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
 
-                        three_prime_dist_counts_1[d] += 1.0 / w;
+                        three_prime_dist_counts_1[d] += w;
                     }
                 }
             }
