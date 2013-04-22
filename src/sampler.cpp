@@ -811,7 +811,6 @@ class SamplerInitThread
         /* Temprorary space for computing sequence bias, indexed by strand. */
         std::vector<float> mate1_seqbias[2];
         std::vector<float> mate2_seqbias[2];
-        std::vector<float> mate1_3pbias[2];
 
         /* Exonic length of the transcript whos bias is stored in
          * mate1/mate2_seqbias. */
@@ -988,16 +987,12 @@ void SamplerInitThread::transcript_sequence_bias(
         mate1_seqbias[1].resize(tlen);
         mate2_seqbias[0].resize(tlen);
         mate2_seqbias[1].resize(tlen);
-        mate1_3pbias[0].resize(tlen);
-        mate1_3pbias[1].resize(tlen);
     }
 
     std::fill(mate1_seqbias[0].begin(), mate1_seqbias[0].begin() + tlen, 1.0);
     std::fill(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen, 1.0);
     std::fill(mate2_seqbias[0].begin(), mate2_seqbias[0].begin() + tlen, 1.0);
     std::fill(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen, 1.0);
-    std::fill(mate1_3pbias[0].begin(), mate1_3pbias[0].begin() + tlen, 1.0);
-    std::fill(mate1_3pbias[1].begin(), mate1_3pbias[1].begin() + tlen, 1.0);
 
     if (fm.sb == NULL || locus.seq == NULL) return;
 
@@ -1015,7 +1010,6 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
-    // 3' bias
 
     // Find the right bin.
     size_t bin = constants::transcript_3p_num_bins - 1;
@@ -1058,6 +1052,24 @@ void SamplerInitThread::transcript_sequence_bias(
                 tp_bias_0[bin]->pdf(p) * constants::transcript_3p_dist_scale;
         }
     }
+
+#if 0
+    // XXX: trying this bullshit again
+    if (tlen >= 1000) {
+        if (t.strand == strand_pos) {
+            for (pos_t pos = tlen - 1; pos >= tlen - 200; --pos) {
+                mate1_seqbias[0][pos] *= 2.0;
+                mate1_seqbias[1][pos] *= 2.0;
+            }
+        }
+        else {
+            for (pos_t pos = 0; pos < 200; ++pos) {
+                mate1_seqbias[0][pos] *= 2.0;
+                mate1_seqbias[1][pos] *= 2.0;
+            }
+        }
+    }
+#endif
 }
 
 
@@ -1076,8 +1088,7 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
          * probability is extremely small (i.e., so that it suffocates any
          * effect from bias.). */
         if (frag_len_pr < constants::transcript_len_min_frag_pr) {
-            //ws[frag_len] = (float) (trans_len - frag_len + 1);
-            ws[frag_len] = 0.0;
+            ws[frag_len] = (float) (trans_len - frag_len + 1);
             continue;
         }
 
@@ -1939,26 +1950,6 @@ class MultireadSamplerThread
 
 void Sampler::run(unsigned int num_samples, SampleDB& out)
 {
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (t->transcript_id == "ENST00000435360") {
-            float z = 0.0;
-            for (size_t i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
-                z += weight_matrix->rows[t->id][i];
-            }
-
-            fprintf(stderr, "A\n");
-        }
-        else if (t->transcript_id == "ENST00000253408") {
-            float z = 0.0;
-            for (size_t i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
-                z += weight_matrix->rows[t->id][i];
-            }
-
-            fprintf(stderr, "B\n");
-        }
-    }
-
-
     /* Initial mixtures */
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         tmix[i] = 1.0 / (float) component_num_transcripts[transcript_component[i]];

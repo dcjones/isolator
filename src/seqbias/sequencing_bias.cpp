@@ -483,23 +483,23 @@ void sequencing_bias::buildn(motif** Mn,
     double** gc = Mn == &M1 ? gc1 : gc2;
     std::deque<twobitseq*>::iterator seqit;
 
-    gc[0] = new double[L + 1 + R];
-    std::fill(gc[0], gc[0] + (L + 1 + R), 1.0);
+    gc[0] = new double[L + R + 2];
+    std::fill(gc[0], gc[0] + (L + R + 2), 1.0);
     for (seqit = background_seqs.begin(); seqit != background_seqs.end(); seqit++) {
         ++gc[0][(*seqit)->gc_count()];
     }
-    for (pos_t i = 0; i < L + 1 + R; ++i) {
-        gc[0][i] /= (double) background_seqs.size() + L + 1 + R;
+    for (pos_t i = 0; i < L + R + 2; ++i) {
+        gc[0][i] /= (double) background_seqs.size() + L + R + 2;
     }
 
 
-    gc[1] = new double[L + 1 + R];
-    std::fill(gc[0], gc[0] + (L + 1 + R), 1.0);
+    gc[1] = new double[L + R + 2];
+    std::fill(gc[1], gc[1] + (L + R + 2), 1.0);
     for (seqit = foreground_seqs.begin(); seqit != foreground_seqs.end(); seqit++) {
         ++gc[1][(*seqit)->gc_count()];
     }
-    for (pos_t i = 0; i < L + 1 + R; ++i) {
-        gc[1][i] /= (double) background_seqs.size() + L + 1 + R;
+    for (pos_t i = 0; i < L + R + 2; ++i) {
+        gc[1][i] /= (double) background_seqs.size() + L + R + 2;
     }
 
 
@@ -613,16 +613,20 @@ double sequencing_bias::get_maten_bias(const motif* Mn,
 {
     if (Mn == NULL || pos < L || (pos_t) seq.size() - pos <= R) return 1.0;
 
-    size_t gc_cnt = seq.gc_count(pos, L + 1 + R);
+#if 0
+    size_t gc_cnt = seq.gc_count(pos, pos + L + R);
     double gc_adj;
     if (Mn == M1) {
+        //gc_adj = gc1[1][gc_cnt] = gc1[0][gc_cnt];
         gc_adj = gc1[0][gc_cnt] / gc1[1][gc_cnt];
     }
     else {
+        //gc_adj = gc2[1][gc_cnt] / gc2[0][gc_cnt];
         gc_adj = gc2[0][gc_cnt] / gc2[1][gc_cnt];
     }
+#endif
 
-    return gc_adj * Mn->eval(seq, pos - L);
+    return Mn->eval(seq, pos - L);
 }
 
 

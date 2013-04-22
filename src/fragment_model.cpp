@@ -354,7 +354,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
             if (b->core.n_cigar == 1) mate2_pos_tab.add(b, bam_f);
             T.inc_mate2(bam1_qname(b));
         }
-        else {
+        else if (b->core.flag & BAM_FREAD1) {
             if (b->core.n_cigar == 1) mate1_pos_tab.add(b, bam_f);
             T.inc_mate1(bam1_qname(b));
         }
