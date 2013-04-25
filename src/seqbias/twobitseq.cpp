@@ -273,9 +273,13 @@ void twobitseq::copy(const twobitseq& src, pos_t src_start, pos_t dest_start, po
 {
     // This would be faster if we copied more than one nucleotide at a time, but I'm not
     // too worried about it right now.
-
     while (n-- > 0) {
-        setnuc(dest_start++, src.getnuc(src_start++));
+        if (0 <= src_start && src_start < (pos_t) this->n) {
+            setnuc(dest_start++, src.getnuc(src_start++));
+        }
+        else {
+            setnuc(dest_start++, 0);
+        }
     }
 }
 
