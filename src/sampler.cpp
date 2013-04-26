@@ -1053,24 +1053,6 @@ void SamplerInitThread::transcript_sequence_bias(
                 tp_bias_0[bin]->pdf(p) * constants::transcript_3p_dist_scale;
         }
     }
-
-#if 0
-    // XXX: trying this bullshit again
-    if (tlen >= 1000) {
-        if (t.strand == strand_pos) {
-            for (pos_t pos = tlen - 1; pos >= tlen - 200; --pos) {
-                mate1_seqbias[0][pos] *= 2.0;
-                mate1_seqbias[1][pos] *= 2.0;
-            }
-        }
-        else {
-            for (pos_t pos = 0; pos < 200; ++pos) {
-                mate1_seqbias[0][pos] *= 2.0;
-                mate1_seqbias[1][pos] *= 2.0;
-            }
-        }
-    }
-#endif
 }
 
 
