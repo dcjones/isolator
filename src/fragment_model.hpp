@@ -11,7 +11,7 @@
 typedef std::pair<unsigned int, unsigned int> MateCount;
 
 
-/* This is a trie that maps read ids to a pair of integers giving the number
+/* This a is a trie that maps read ids to a pair of integers giving the number
  * of alignments of the first and second mate, respectively. */
 class AlnCountTrie
 {
@@ -124,11 +124,9 @@ class FragmentModel
         EmpDist* frag_len_dist;
 
         /* Distribution over distance from 3' end. */
-        EmpDist* tp_bias[2];
-
-        /* Linear model for bias. */
-        double tp_bias_c0[2];
-        double tp_bias_c1[2];
+        // Of length: constants::transcript_3p_num_bins
+        EmpDist* tp_bias_0[5];
+        EmpDist* tp_bias_1[5];
 };
 
 
