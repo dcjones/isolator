@@ -1973,11 +1973,11 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
     for (unsigned int c = 0; c < num_components; ++c) cs[c] = c;
 
 
-    float p_max = -INFINITY;
     unsigned int burnin_samples = constants::sampler_burnin_samples;
 
     const char* task_name = "Sampling";
-    Logger::push_task(task_name, num_samples + burnin_samples);
+    Logger::push_task(task_name, num_samples + burnin_samples +
+                      constants::sampler_hillclimb_samples);
 
     for (unsigned int sample_num = 0; sample_num < num_samples; ) {
         /* Sample multiread alignments */
@@ -2048,7 +2048,8 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
             cmix[c] /= z;
         }
 
-        if(burnin_samples == 0) {
+        /* Record a new sample */
+        if(burnin_samples == 0 && sample_num < constants::sampler_hillclimb_samples) {
             double total_weight = 0.0, new_total_weight = 0.0;
             for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
                 if (transcript_weights[i] < constants::min_transcript_weight) {
@@ -2058,11 +2059,6 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
                     samples[i][sample_num] =
                         tmix[i] * cmix[transcript_component[i]] /
                         transcript_weights[i];
-
-#if 0
-                    samples[i][sample_num] =
-                        tmix[i] * cmix[transcript_component[i]];
-#endif
 
                     total_weight += samples[i][sample_num];
                 }
@@ -2081,23 +2077,40 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
                 samples[i][sample_num] /= new_total_weight;
             }
 
-            /* Have we improved the overall probability? */
-            float p = 0.0;
-            for (unsigned int c = 0; c < num_components; ++c) {
-                p += fastlog2(cmix[c]) * frag_count_sums[c];
-                p += dotlog(frag_counts[c], frag_probs[c],
-                            component_frag[c + 1] - component_frag[c]);
+            ++sample_num;
+        }
+        /* Update the current maximum posterior */
+        else if (sample_num >= constants::sampler_hillclimb_samples) {
+            double total_weight = 0.0, new_total_weight = 0.0;
+            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+                if (transcript_weights[i] < constants::min_transcript_weight) {
+                    maxpost_tmix[i] = 0.0;
+                }
+                else {
+                    maxpost_tmix[i] =
+                        tmix[i] * cmix[transcript_component[i]] /
+                        transcript_weights[i];
+
+                    total_weight += maxpost_tmix[i];
+                }
             }
 
-            if (p > p_max) {
-                p_max = p;
-                for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-                    maxpost_tmix[i] = samples[i][sample_num];
+            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+                maxpost_tmix[i] /= total_weight;
+
+                if (maxpost_tmix[i] < constants::round_down_eps) {
+                    maxpost_tmix[i] = 0.0;
                 }
+                new_total_weight += maxpost_tmix[i];
+            }
+
+            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+                maxpost_tmix[i] /= new_total_weight;
             }
 
             ++sample_num;
         }
+        /* Throw a sample away */
         else {
             --burnin_samples;
         }
