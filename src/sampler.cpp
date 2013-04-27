@@ -1012,9 +1012,11 @@ void SamplerInitThread::transcript_sequence_bias(
             d = tlen - pos - 1;
             if (d >= constants::transcript_3p_dist_len) {
                 mate1_seqbias[0][pos] *=
-                    constants::transcript_3p_dist_scale * fm.tp_bias_c0[0] + d * fm.tp_bias_c1[0];
+                    constants::transcript_3p_dist_scale *
+                    std::max(1e-4, (fm.tp_bias_c0[0] + d * fm.tp_bias_c1[0]));
                 mate1_seqbias[1][pos] *=
-                    constants::transcript_3p_dist_scale * fm.tp_bias_c0[1] + d * fm.tp_bias_c1[1];
+                    constants::transcript_3p_dist_scale *
+                    std::max(1e-4, (fm.tp_bias_c0[1] + d * fm.tp_bias_c1[1]));
             }
             else {
                 mate1_seqbias[0][pos] *=
@@ -1028,9 +1030,11 @@ void SamplerInitThread::transcript_sequence_bias(
         for (pos_t pos = 0; pos < tlen; ++pos) {
             if (pos >= constants::transcript_3p_dist_len) {
                 mate1_seqbias[0][pos] *=
-                    constants::transcript_3p_dist_scale * fm.tp_bias_c0[1] + pos * fm.tp_bias_c1[1];
+                    constants::transcript_3p_dist_scale *
+                    std::max(1e-4, (fm.tp_bias_c0[1] + pos * fm.tp_bias_c1[1]));
                 mate1_seqbias[1][pos] *=
-                    constants::transcript_3p_dist_scale * fm.tp_bias_c0[0] + pos * fm.tp_bias_c1[0];
+                    constants::transcript_3p_dist_scale *
+                    std::max(1e-4, (fm.tp_bias_c0[0] + pos * fm.tp_bias_c1[0]));
             }
             else {
                 mate1_seqbias[0][pos] *=
@@ -1229,7 +1233,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     for (size_t i = 0; i < constants::num_threads; ++i) threads[i]->join();
 
     unsigned int* idxmap = weight_matrix->compact();
-    Logger::debug("Weight-matrix dimensions: %lu x %lu",
+    Logger::info("Weight-matrix dimensions: %lu x %lu",
             (unsigned long) weight_matrix->nrow,
             (unsigned long) weight_matrix->ncol);
 

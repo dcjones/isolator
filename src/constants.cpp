@@ -22,13 +22,13 @@ float                constants::zero_eps                     = 1e-16;
 float                constants::round_down_eps               = 1e-14;
 pos_t                constants::transcript_5p_extension      = 0;
 pos_t                constants::transcript_3p_extension      = 0;
-pos_t                constants::transcript_3p_dist_len       = 500;
+pos_t                constants::transcript_3p_dist_len       = 1000;
 pos_t                constants::transcript_3p_dist_pad       = 200;
-float                constants::transcript_3p_dist_w         = 0.01;
+float                constants::transcript_3p_dist_w         = 0.95;
 size_t               constants::transcript_3p_num_bins       = 5;
 pos_t                constants::transcript_3p_bins[4] =
     {800, 1200, 1600, 2000};
-float                constants::transcript_3p_dist_scale     = 20.0;
+float                constants::transcript_3p_dist_scale     = 10000.0;
 float                constants::min_transcript_weight        = 5.0;
 float                constants::tmix_prior_prec              = 0.01;
 unsigned int         constants::sampler_component_block_size = 50;

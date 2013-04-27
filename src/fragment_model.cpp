@@ -559,8 +559,6 @@ class FragmentModelThread
                 const boost::shared_ptr<twobitseq> seq1,
                 const ReadSet::UniqueReadCounts& counts)
         {
-            if (tlen <= constants::transcript_3p_dist_pad) return;
-
             pos_t elen = end - start + 1;
 
             if ((size_t) elen > mate1_seqbias[0].size()) {
@@ -577,8 +575,6 @@ class FragmentModelThread
                     mate1_seqbias[1][pos - start] = sb->get_mate1_bias(
                             *seq1, seq1->size() - pos - 1);
                 }
-                std::reverse(mate1_seqbias[1].begin(),
-                             mate1_seqbias[1].begin() + elen);
             }
 
             ReadSet::UniqueReadCounts::const_iterator i;
@@ -654,33 +650,32 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         pos_t tlen = t->exonic_length();
-        if (tlen >= constants::transcript_3p_dist_len + constants::transcript_3p_dist_pad) {
-            pos_t d = 0;
-            if (t->strand == strand_neg) {
-                for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
-                    intervals.push_back(new FragmentModelInterval(
-                                t->seqname,
-                                e->start,
-                                e->end,
-                                t->strand,
-                                d,
-                                tlen,
-                                FragmentModelInterval::THREE_PRIME_EXONIC));
-                    d += e->end - e->start + 1;
-                }
+        if (tlen < constants::transcript_3p_dist_len + constants::transcript_3p_dist_pad) continue;
+        pos_t d = 0;
+        if (t->strand == strand_neg) {
+            for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
+                intervals.push_back(new FragmentModelInterval(
+                            t->seqname,
+                            e->start,
+                            e->end,
+                            t->strand,
+                            d,
+                            tlen,
+                            FragmentModelInterval::THREE_PRIME_EXONIC));
+                d += e->end - e->start + 1;
             }
-            else {
-                for (Transcript::reverse_iterator e = t->rbegin(); e != t->rend(); ++e) {
-                    intervals.push_back(new FragmentModelInterval(
-                                t->seqname,
-                                e->start,
-                                e->end,
-                                t->strand,
-                                d,
-                                tlen,
-                                FragmentModelInterval::THREE_PRIME_EXONIC));
-                    d += e->end - e->start + 1;
-                }
+        }
+        else {
+            for (Transcript::reverse_iterator e = t->rbegin(); e != t->rend(); ++e) {
+                intervals.push_back(new FragmentModelInterval(
+                            t->seqname,
+                            e->start,
+                            e->end,
+                            t->strand,
+                            d,
+                            tlen,
+                            FragmentModelInterval::THREE_PRIME_EXONIC));
+                d += e->end - e->start + 1;
             }
         }
     }
@@ -728,8 +723,8 @@ void FragmentModel::estimate(TranscriptSet& ts,
     for (pos_t k = 0; k < constants::transcript_3p_dist_len; ++k) {
         tp_dist_values[k] = k;
     }
-    std::vector<double> tp_dist_weights;
-    std::vector<unsigned int> tp_dist_counts;
+    std::vector<double> tp_dist_weights(constants::transcript_3p_dist_len);
+    std::vector<unsigned int> tp_dist_counts(constants::transcript_3p_dist_len);
 
     // positions for fitting the linear model
     std::vector<double> ys(constants::transcript_3p_dist_len -
@@ -743,9 +738,11 @@ void FragmentModel::estimate(TranscriptSet& ts,
         std::fill(tp_dist_weights.begin(), tp_dist_weights.end(), 0.0);
         for (size_t i = 0; i < constants::num_threads; ++i) {
             for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
-                tp_dist_weights[j] += threads[j]->tp_dist_weights[strand][j];
+                tp_dist_weights[j] += threads[i]->tp_dist_weights[strand][j];
             }
         }
+
+        std::fill(tp_dist_counts.begin(), tp_dist_counts.end(), 0);
         for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
             tp_dist_counts[j] += (unsigned int) tp_dist_weights[j];
         }
@@ -758,7 +755,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
         for (pos_t j = 0; j < constants::transcript_3p_dist_len -
                                constants::transcript_3p_dist_pad; ++j) {
             tp_dist_weights[j] = tp_bias[strand]->pdf(
-                    constants::transcript_3p_dist_len + j);
+                    constants::transcript_3p_dist_pad + j);
         }
 
         double cov00, cov01, cov10, sumsq;
@@ -766,6 +763,19 @@ void FragmentModel::estimate(TranscriptSet& ts,
                        constants::transcript_3p_dist_len - constants::transcript_3p_dist_pad,
                        &tp_bias_c0[strand], &tp_bias_c1[strand],
                        &cov00, &cov01, &cov10, &sumsq);
+
+        Logger::info("c0[%d], c1[%d] = %e, %e", strand, strand,
+                     tp_bias_c0[strand], tp_bias_c1[strand]);
+
+        /* DEBUGGING */
+        char fn[100];
+        sprintf(fn, "tp_bias_%zu.tsv", strand);
+        FILE* out = fopen(fn, "w");
+        fprintf(out, "d\tp\n");
+        for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
+            fprintf(out, "%ld\t%e\n", j, tp_bias[strand]->pdf(j));
+        }
+        fclose(out);
     }
 
     /* Collect strand specificity statistics. */
