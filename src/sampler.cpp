@@ -717,15 +717,19 @@ class SamplerInitThread
                 frag_len_dist = NULL;
             }
 
-            tp_bias[0] = new EmpDist(*fm.tp_bias[0]);
-            tp_bias[1] = new EmpDist(*fm.tp_bias[1]);
+            for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
+                tp_bias[bin][0] = new EmpDist(*fm.tp_bias[bin][0]);
+                tp_bias[bin][1] = new EmpDist(*fm.tp_bias[bin][1]);
+            }
         }
 
         ~SamplerInitThread()
         {
             delete frag_len_dist;
-            delete tp_bias[0];
-            delete tp_bias[1];
+            for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
+                delete tp_bias[bin][0];
+                delete tp_bias[bin][1];
+            }
             /* Note: we are not free weight_matrix_entries and
              * multiread_entries. This get's done in Sampler::Sampler.
              * It's all part of the delicate dance involved it minimizing
@@ -800,9 +804,9 @@ class SamplerInitThread
         boost::thread* thread;
 
         /* Copy the fragment length distribution to avoid contention between
-         * threads. Of length constants::transrcipt_3p_num_bins. */
+         * threads. */
         EmpDist* frag_len_dist;
-        EmpDist* tp_bias[2];
+        EmpDist* tp_bias[5][2];
 
         /* Temprorary space for computing sequence bias, indexed by strand. */
         std::vector<float> mate1_seqbias[2];
@@ -1006,6 +1010,9 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
+    size_t bin = constants::transcript_3p_num_bins - 1;
+    for (; bin > 0 && tlen <= constants::transcript_3p_bins[bin-1]; --bin);
+
     if (t.strand == strand_pos) {
         pos_t d;
         for (pos_t pos = 0; pos < tlen; ++pos) {
@@ -1013,16 +1020,16 @@ void SamplerInitThread::transcript_sequence_bias(
             if (d >= constants::transcript_3p_dist_len) {
                 mate1_seqbias[0][pos] *=
                     constants::transcript_3p_dist_scale *
-                    std::max(1e-4, (fm.tp_bias_c0[0] + d * fm.tp_bias_c1[0]));
+                    std::max(1e-4, (fm.tp_bias_c0[bin][0] + d * fm.tp_bias_c1[bin][0]));
                 mate1_seqbias[1][pos] *=
                     constants::transcript_3p_dist_scale *
-                    std::max(1e-4, (fm.tp_bias_c0[1] + d * fm.tp_bias_c1[1]));
+                    std::max(1e-4, (fm.tp_bias_c0[bin][1] + d * fm.tp_bias_c1[bin][1]));
             }
             else {
                 mate1_seqbias[0][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[0]->pdf(d);
+                    constants::transcript_3p_dist_scale * tp_bias[bin][0]->pdf(d);
                 mate1_seqbias[1][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[1]->pdf(d);
+                    constants::transcript_3p_dist_scale * tp_bias[bin][1]->pdf(d);
             }
         }
     }
@@ -1031,16 +1038,16 @@ void SamplerInitThread::transcript_sequence_bias(
             if (pos >= constants::transcript_3p_dist_len) {
                 mate1_seqbias[0][pos] *=
                     constants::transcript_3p_dist_scale *
-                    std::max(1e-4, (fm.tp_bias_c0[1] + pos * fm.tp_bias_c1[1]));
+                    std::max(1e-4, (fm.tp_bias_c0[bin][1] + pos * fm.tp_bias_c1[bin][1]));
                 mate1_seqbias[1][pos] *=
                     constants::transcript_3p_dist_scale *
-                    std::max(1e-4, (fm.tp_bias_c0[0] + pos * fm.tp_bias_c1[0]));
+                    std::max(1e-4, (fm.tp_bias_c0[bin][0] + pos * fm.tp_bias_c1[bin][0]));
             }
             else {
                 mate1_seqbias[0][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[1]->pdf(pos);
+                    constants::transcript_3p_dist_scale * tp_bias[bin][1]->pdf(pos);
                 mate1_seqbias[1][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[0]->pdf(pos);
+                    constants::transcript_3p_dist_scale * tp_bias[bin][0]->pdf(pos);
             }
         }
     }
@@ -2049,11 +2056,6 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
                     samples[i][sample_num] =
                         tmix[i] * cmix[transcript_component[i]] /
                         transcript_weights[i];
-
-#if 0
-                    samples[i][sample_num] =
-                        tmix[i] * cmix[transcript_component[i]];
-#endif
 
                     total_weight += samples[i][sample_num];
                 }

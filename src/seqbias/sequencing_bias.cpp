@@ -361,7 +361,7 @@ void sequencing_bias::buildn(motif** Mn,
 
     /* background sampling */
     int bg_samples = 2; // make this many samples for each read
-    int bg_sample_num;  // keep track of the number of samples made
+    int bg_sample_num; // keep track of the number of samples made
     pos_t bg_pos;
 
     int            seqlen    = 0;
@@ -373,7 +373,7 @@ void sequencing_bias::buildn(motif** Mn,
     local_seq[L+R+1] = '\0';
 
     std::vector<ReadPos>::iterator i;
-    for (i = S.begin(); i != S.begin() + max_reads; ++i) {
+    for (i = S.begin(); i != S.end() && i != S.begin() + max_reads; ++i) {
 
         /* Load/switch sequences (chromosomes) as they are encountered in the
          * read stream. The idea here is to avoid thrashing by loading a large
