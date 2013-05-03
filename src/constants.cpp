@@ -23,8 +23,8 @@ float                constants::round_down_eps               = 1e-14;
 pos_t                constants::transcript_5p_extension      = 0;
 pos_t                constants::transcript_3p_extension      = 0;
 pos_t                constants::transcript_3p_dist_len       = 1000;
-pos_t                constants::transcript_3p_dist_pad       = 400;
-float                constants::transcript_3p_dist_w         = 0.90;
+pos_t                constants::transcript_3p_dist_pad       = 300;
+float                constants::transcript_3p_dist_w         = 0.01;
 size_t               constants::transcript_3p_num_bins       = 3;
 pos_t                constants::transcript_3p_bins[3]        =
     {0, 400, 900};

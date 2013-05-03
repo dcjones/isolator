@@ -568,7 +568,7 @@ class FragmentModelThread
             if (tlen < constants::transcript_3p_bins[0]) return;
 
             size_t bin = constants::transcript_3p_num_bins - 1;
-            //for (; bin > 0 && tlen < constants::transcript_3p_bins[bin]; --bin);
+            for (; bin > 0 && tlen < constants::transcript_3p_bins[bin]; --bin);
 
             pos_t elen = end - start + 1;
 
@@ -597,9 +597,53 @@ class FragmentModelThread
 
             ReadSet::UniqueReadCounts::const_iterator i;
             for (i = counts.begin(); i != counts.end(); ++i) {
-                AlignedReadIterator j(*i->first);
-                for (; j != AlignedReadIterator(); ++j) {
-                    if (!j->mate1) continue;
+                for (std::vector<Alignment*>::iterator j = i->first->mate1.begin();
+                        j != i->first->mate1.end(); ++j) {
+                    pos_t d = (*j)->strand == strand_pos ?
+                        (*j)->start : (*j)->end;
+                    if (d < start || d > end) continue;
+                    double w = mate1_seqbias[(*j)->strand][d - start];
+                    if (strand == strand_pos) {
+                        d = exon_three_prime_dist + end - d;
+                    }
+                    else {
+                        d = exon_three_prime_dist + d - start;
+                    }
+
+                    if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
+
+                    if (strand == (*j)->strand) {
+                        tp_dist_weights[bin][0][0][d] += 1.0 / w;
+                    }
+                    else {
+                        tp_dist_weights[bin][0][1][d] += 1.0 / w;
+                    }
+                }
+
+                for (std::vector<Alignment*>::iterator j = i->first->mate2.begin();
+                    j != i->first->mate2.end(); ++j) {
+                    pos_t d = (*j)->strand == strand_pos ?
+                        (*j)->start : (*j)->end;
+                    if (d < start || d > end) continue;
+                    double w = mate2_seqbias[(*j)->strand][d - start];
+                    if (strand == strand_pos) {
+                        d = exon_three_prime_dist + end - d;
+                    }
+                    else {
+                        d = exon_three_prime_dist + d - start;
+                    }
+
+                    if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
+
+                    if (strand == (*j)->strand) {
+                        tp_dist_weights[bin][0][0][d] += 1.0 / w;
+                    }
+                    else {
+                        tp_dist_weights[bin][0][1][d] += 1.0 / w;
+                    }
+                }
+
+#if 0
 
                     if (j->mate1) {
                         pos_t d = j->mate1->strand == strand_pos ?
@@ -616,10 +660,10 @@ class FragmentModelThread
                         if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
 
                         if (strand == j->mate1->strand) {
-                            tp_dist_weights[bin][0][0][d] += w;
+                            tp_dist_weights[bin][0][0][d] += 1.0 / w;
                         }
                         else {
-                            tp_dist_weights[bin][0][1][d] += w;
+                            tp_dist_weights[bin][0][1][d] += 1.0 / w;
                         }
                     }
 
@@ -638,13 +682,14 @@ class FragmentModelThread
                         if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
 
                         if (strand == j->mate2->strand) {
-                            tp_dist_weights[bin][1][0][d] += w;
+                            tp_dist_weights[bin][1][0][d] += 1.0 / w;
                         }
                         else {
-                            tp_dist_weights[bin][1][1][d] += w;
+                            tp_dist_weights[bin][1][1][d] += 1.0 / w;
                         }
                     }
                 }
+#endif
             }
         }
 
@@ -703,7 +748,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         pos_t tlen = t->exonic_length();
         if (tlen < constants::transcript_3p_dist_pad) continue;
-        if (tlen < constants::transcript_3p_dist_len + constants::transcript_3p_dist_pad) continue;
+        //if (tlen < constants::transcript_3p_dist_len + constants::transcript_3p_dist_pad) continue;
         //if (tlen < constants::transcript_3p_bins[0]) continue;
         pos_t d = 0;
         if (t->strand == strand_neg) {
