@@ -718,8 +718,10 @@ class SamplerInitThread
             }
 
             for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
-                tp_bias[bin][0] = new EmpDist(*fm.tp_bias[bin][0]);
-                tp_bias[bin][1] = new EmpDist(*fm.tp_bias[bin][1]);
+                tp_bias[bin][0][0] = new EmpDist(*fm.tp_bias[bin][0][0]);
+                tp_bias[bin][0][1] = new EmpDist(*fm.tp_bias[bin][0][1]);
+                tp_bias[bin][1][0] = new EmpDist(*fm.tp_bias[bin][1][0]);
+                tp_bias[bin][1][1] = new EmpDist(*fm.tp_bias[bin][1][1]);
             }
         }
 
@@ -727,8 +729,10 @@ class SamplerInitThread
         {
             delete frag_len_dist;
             for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
-                delete tp_bias[bin][0];
-                delete tp_bias[bin][1];
+                delete tp_bias[bin][0][0];
+                delete tp_bias[bin][0][1];
+                delete tp_bias[bin][1][0];
+                delete tp_bias[bin][1][1];
             }
             /* Note: we are not free weight_matrix_entries and
              * multiread_entries. This get's done in Sampler::Sampler.
@@ -806,7 +810,7 @@ class SamplerInitThread
         /* Copy the fragment length distribution to avoid contention between
          * threads. */
         EmpDist* frag_len_dist;
-        EmpDist* tp_bias[5][2];
+        EmpDist* tp_bias[3][2][2];
 
         /* Temprorary space for computing sequence bias, indexed by strand. */
         std::vector<float> mate1_seqbias[2];
@@ -1011,45 +1015,92 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
     size_t bin = constants::transcript_3p_num_bins - 1;
-    for (; bin > 0 && tlen <= constants::transcript_3p_bins[bin-1]; --bin);
+    //for (; bin > 0 && tlen < constants::transcript_3p_bins[bin]; --bin);
+    //if (bin < constants::transcript_3p_num_bins - 1) ++bin;
+
+
+    //double cdf0 = tp_bias[bin][0]->cdf(tlen);
+    //double cdf1 = tp_bias[bin][1]->cdf(tlen);
+
+    // TODO: Holy fuck is this ugly.
 
     if (t.strand == strand_pos) {
         pos_t d;
         for (pos_t pos = 0; pos < tlen; ++pos) {
             d = tlen - pos - 1;
-            if (d >= constants::transcript_3p_dist_len) {
+            //if (d >= constants::transcript_3p_dist_len) {
                 mate1_seqbias[0][pos] *=
                     constants::transcript_3p_dist_scale *
-                    std::max(1e-4, (fm.tp_bias_c0[bin][0] + d * fm.tp_bias_c1[bin][0]));
+                    std::max(1e-4, (fm.tp_bias_c0[bin][0][0] + d * fm.tp_bias_c1[bin][0][0]));
                 mate1_seqbias[1][pos] *=
                     constants::transcript_3p_dist_scale *
-                    std::max(1e-4, (fm.tp_bias_c0[bin][1] + d * fm.tp_bias_c1[bin][1]));
-            }
-            else {
-                mate1_seqbias[0][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[bin][0]->pdf(d);
-                mate1_seqbias[1][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[bin][1]->pdf(d);
-            }
+                    std::max(1e-4, (fm.tp_bias_c0[bin][0][1] + d * fm.tp_bias_c1[bin][0][1]));
+
+                //mate2_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale *
+                    //std::max(1e-4, (fm.tp_bias_c0[bin][1][0] + d * fm.tp_bias_c1[bin][1][0]));
+                //mate2_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale *
+                    //std::max(1e-4, (fm.tp_bias_c0[bin][1][1] + d * fm.tp_bias_c1[bin][1][1]));
+            //}
+            //else {
+                //mate1_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(d);
+                //mate1_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(d);
+
+                //mate2_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][1][0]->pdf(d);
+                //mate2_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][1][1]->pdf(d);
+            //}
         }
     }
     else {
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            if (pos >= constants::transcript_3p_dist_len) {
+            //if (pos >= constants::transcript_3p_dist_len) {
                 mate1_seqbias[0][pos] *=
                     constants::transcript_3p_dist_scale *
-                    std::max(1e-4, (fm.tp_bias_c0[bin][1] + pos * fm.tp_bias_c1[bin][1]));
+                    std::max(1e-4, (fm.tp_bias_c0[bin][0][1] + pos * fm.tp_bias_c1[bin][0][1]));
                 mate1_seqbias[1][pos] *=
                     constants::transcript_3p_dist_scale *
-                    std::max(1e-4, (fm.tp_bias_c0[bin][0] + pos * fm.tp_bias_c1[bin][0]));
-            }
-            else {
-                mate1_seqbias[0][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[bin][1]->pdf(pos);
-                mate1_seqbias[1][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[bin][0]->pdf(pos);
-            }
+                    std::max(1e-4, (fm.tp_bias_c0[bin][0][0] + pos * fm.tp_bias_c1[bin][0][0]));
+
+                //mate2_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale *
+                    //std::max(1e-4, (fm.tp_bias_c0[bin][1][1] + pos * fm.tp_bias_c1[bin][1][1]));
+                //mate2_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale *
+                    //std::max(1e-4, (fm.tp_bias_c0[bin][1][0] + pos * fm.tp_bias_c1[bin][1][0]));
+            //}
+            //else {
+                //mate1_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(pos);
+                //mate1_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(pos);
+
+                //mate2_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][1][1]->pdf(pos);
+                //mate2_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][1][0]->pdf(pos);
+            //}
         }
+    }
+
+    if (t.transcript_id == "ENST00000233143") {
+        FILE* out = fopen("ENST00000233143.0.tsv", "w");
+        fprintf(out, "i\tw\n");
+        for (pos_t i = 0; i < tlen; ++i) {
+            fprintf(out, "%ld\t%e\n", i, mate1_seqbias[0][i]);
+        }
+        fclose(out);
+
+        out = fopen("ENST00000233143.1.tsv", "w");
+        fprintf(out, "i\tw\n");
+        for (pos_t i = 0; i < tlen; ++i) {
+            fprintf(out, "%ld\t%e\n", i, mate1_seqbias[1][i]);
+        }
+        fclose(out);
     }
 }
 
@@ -1105,9 +1156,22 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         tw += frag_len_pr * ws[frag_len];
     }
 
+    if (t.transcript_id == "ENST00000233143") {
+        FILE* out = fopen("ENST00000233143.tlen.tsv", "w");
+        fprintf(out, "frag_len\tp\n");
+        for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
+            fprintf(out, "%ld\t%e\n", frag_len, frag_len_p(frag_len));
+        }
+        fclose(out);
+    }
+
     if (!finite(tw) || tw <= constants::min_transcript_weight) {
         return constants::min_transcript_weight;
     }
+
+    // XXX
+    //if (trans_len < 500) tw *= 0.6;
+    //if (trans_len > 1000) tw *= 1.5;
 
     return tw;
 }
@@ -1130,7 +1194,17 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
                                     a.mate1->start : a.mate1->end);
         if (offset < 0 || offset >= tlen) return 0.0;
 
+        //double cdf;
+        //if (a.mate1->strand == t.strand) {
+            //cdf = tp_bias[constants::transcript_3p_num_bins - 1][0]->cdf(tlen);
+        //}
+        //else {
+            //cdf = tp_bias[constants::transcript_3p_num_bins - 1][1]->cdf(tlen);
+        //}
+
+
         w *= mate1_seqbias[a.mate1->strand][offset];
+
     }
 
     if (a.mate2) {
@@ -1154,7 +1228,7 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     float frag_len_pr = frag_len_p(frag_len);
     if (frag_len_pr < constants::min_frag_len_pr) return 0.0;
 
-    return frag_len_pr * w + constants::min_frag_weight;
+    return frag_len_pr * w;
 }
 
 

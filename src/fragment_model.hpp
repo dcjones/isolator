@@ -123,12 +123,16 @@ class FragmentModel
         /* Distribution over fragment lengths. */
         EmpDist* frag_len_dist;
 
+        /* The following arrays are indexed as:
+         *  bin, mate, strand
+         */
+
         /* Distribution over distance from 3' end. */
-        EmpDist* tp_bias[5][2];
+        EmpDist* tp_bias[3][2][2];
 
         /* Linear model for bias. */
-        double tp_bias_c0[5][2];
-        double tp_bias_c1[5][2];
+        double tp_bias_c0[3][2][2];
+        double tp_bias_c1[3][2][2];
 };
 
 
