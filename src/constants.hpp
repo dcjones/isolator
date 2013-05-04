@@ -152,6 +152,9 @@ namespace constants
 
     /* Number of initial burn-in samples to generate and throw away. */
     extern unsigned int sampler_burnin_samples;
+
+    /* Number of hillclimbing iterations. */
+    extern unsigned int sampler_hillclimb_samples;
 }
 
 #endif
