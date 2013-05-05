@@ -337,7 +337,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
     bam1_t* b = bam_init1();
     int32_t last_tid = -1;
     int32_t last_pos = -1;
-    while (samread(bam_f, b) > 0) {
+    while (samread(bam_f, b) >= 0) {
         ++read_num;
 
         if (read_num % 1000 == 0) {
@@ -348,7 +348,9 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
             }
         }
 
-        if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
+        if (b->core.flag & BAM_FUNMAP ||
+            (b->core.flag & BAM_FPAIRED && !(b->core.flag & BAM_FPROPER_PAIR)) ||
+            b->core.tid < 0) continue;
 
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
@@ -816,72 +818,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
     }
 
 
-    // Collect 3' distance distribution stats
-
-    std::vector<unsigned int> tp_dist_values(constants::transcript_3p_dist_len);
-    for (pos_t k = 0; k < constants::transcript_3p_dist_len; ++k) {
-        tp_dist_values[k] = k;
-    }
-    std::vector<double> tp_dist_weights(constants::transcript_3p_dist_len);
-    std::vector<unsigned int> tp_dist_counts(constants::transcript_3p_dist_len);
-
-    // positions for fitting the linear model
-    std::vector<double> ys(constants::transcript_3p_dist_len -
-                           constants::transcript_3p_dist_pad);
-    for (pos_t j = 0; j < constants::transcript_3p_dist_len -
-                           constants::transcript_3p_dist_pad; ++j) {
-        ys[j] = constants::transcript_3p_dist_pad + j;
-    }
-
-    for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
-        for (size_t mate = 0; mate <= 1; ++mate) {
-            for (size_t strand = 0; strand <= 1; ++strand) {
-                std::fill(tp_dist_weights.begin(), tp_dist_weights.end(), 0.0);
-                for (size_t i = 0; i < constants::num_threads; ++i) {
-                    for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
-                        tp_dist_weights[j] += threads[i]->tp_dist_weights[bin][mate][strand][j];
-                    }
-                }
-
-                std::fill(tp_dist_counts.begin(), tp_dist_counts.end(), 0);
-                for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
-                    tp_dist_counts[j] += (unsigned int) tp_dist_weights[j];
-                }
-
-                tp_bias[bin][mate][strand] = new EmpDist(&tp_dist_values.at(0),
-                                                         &tp_dist_counts.at(0),
-                                                         constants::transcript_3p_dist_len,
-                                                         constants::transcript_3p_dist_w);
-
-                for (pos_t j = 0; j < constants::transcript_3p_dist_len -
-                                       constants::transcript_3p_dist_pad; ++j) {
-                    tp_dist_weights[j] = tp_bias[bin][mate][strand]->pdf(
-                            constants::transcript_3p_dist_pad + j);
-                }
-
-                double cov00, cov01, cov10, sumsq;
-                gsl_fit_linear(&ys.at(0), 1, &tp_dist_weights.at(0), 1,
-                               constants::transcript_3p_dist_len - constants::transcript_3p_dist_pad,
-                               &tp_bias_c0[bin][mate][strand], &tp_bias_c1[bin][mate][strand],
-                               &cov00, &cov01, &cov10, &sumsq);
-
-                /* XXX DEBUGGING */
-                Logger::info("c0[%zu][%zu][%d], c1[%zu][%zu][%d] = %e, %e",
-                             bin, mate, strand, bin, mate, strand,
-                             tp_bias_c0[bin][mate][strand], tp_bias_c1[bin][mate][strand]);
-
-                char fn[100];
-                sprintf(fn, "tp_bias_%zu_%zu_%zu.tsv", bin, mate, strand);
-                FILE* out = fopen(fn, "w");
-                fprintf(out, "d\tp\n");
-                for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
-                    fprintf(out, "%ld\t%e\n", j, tp_bias[bin][mate][strand]->pdf(j));
-                }
-                fclose(out);
-            }
-        }
-    }
-
     /* Collect strand specificity statistics. */
     unsigned long strand_bias[2] = {0, 0};
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -953,6 +889,86 @@ void FragmentModel::estimate(TranscriptSet& ts,
         Logger::info("Too few paired-end reads to estimate fragment length distribution.");
     }
 
+
+    // Collect 3' distance distribution stats
+
+    std::vector<unsigned int> tp_dist_values(constants::transcript_3p_dist_len);
+    for (pos_t k = 0; k < constants::transcript_3p_dist_len; ++k) {
+        tp_dist_values[k] = k;
+    }
+    std::vector<double> tp_dist_weights(constants::transcript_3p_dist_len);
+    std::vector<unsigned int> tp_dist_counts(constants::transcript_3p_dist_len);
+
+    // positions for fitting the linear model
+    std::vector<double> ys(constants::transcript_3p_dist_len -
+                           constants::transcript_3p_dist_pad);
+    for (pos_t j = 0; j < constants::transcript_3p_dist_len -
+                           constants::transcript_3p_dist_pad; ++j) {
+        ys[j] = constants::transcript_3p_dist_pad + j;
+    }
+
+    for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
+        for (size_t mate = 0; mate <= 1; ++mate) {
+            for (size_t strand = 0; strand <= 1; ++strand) {
+                std::fill(tp_dist_weights.begin(), tp_dist_weights.end(), 0.0);
+                for (size_t i = 0; i < constants::num_threads; ++i) {
+                    for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
+                        tp_dist_weights[j] += threads[i]->tp_dist_weights[bin][mate][strand][j];
+                    }
+                }
+
+                // Take into account fragment length distribution for 3' bias,
+                // so we don't doubly penalize reads at the ends.
+#if 0
+                if (strand == 0 && frag_len_dist) {
+                    for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
+                        tp_dist_weights[j] /= frag_len_dist->cdf(j);
+                        if (!finite(tp_dist_weights[j])) {
+                            tp_dist_weights[j] = 0.0;
+                        }
+                    }
+                }
+#endif
+
+                std::fill(tp_dist_counts.begin(), tp_dist_counts.end(), 0);
+                for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
+                    tp_dist_counts[j] += (unsigned int) tp_dist_weights[j];
+                }
+
+                tp_bias[bin][mate][strand] = new EmpDist(&tp_dist_values.at(0),
+                                                         &tp_dist_counts.at(0),
+                                                         constants::transcript_3p_dist_len,
+                                                         constants::transcript_3p_dist_w);
+
+                for (pos_t j = 0; j < constants::transcript_3p_dist_len -
+                                       constants::transcript_3p_dist_pad; ++j) {
+                    tp_dist_weights[j] = tp_bias[bin][mate][strand]->pdf(
+                            constants::transcript_3p_dist_pad + j);
+                }
+
+                double cov00, cov01, cov10, sumsq;
+                gsl_fit_linear(&ys.at(0), 1, &tp_dist_weights.at(0), 1,
+                               constants::transcript_3p_dist_len - constants::transcript_3p_dist_pad,
+                               &tp_bias_c0[bin][mate][strand], &tp_bias_c1[bin][mate][strand],
+                               &cov00, &cov01, &cov10, &sumsq);
+
+                /* XXX DEBUGGING */
+                Logger::info("c0[%zu][%zu][%d], c1[%zu][%zu][%d] = %e, %e",
+                             bin, mate, strand, bin, mate, strand,
+                             tp_bias_c0[bin][mate][strand], tp_bias_c1[bin][mate][strand]);
+
+                char fn[100];
+                sprintf(fn, "tp_bias_%zu_%zu_%zu.tsv", bin, mate, strand);
+                FILE* out = fopen(fn, "w");
+                fprintf(out, "d\tp\n");
+                for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
+                    fprintf(out, "%ld\t%e\n", j, tp_bias[bin][mate][strand]->pdf(j));
+                }
+                fclose(out);
+            }
+        }
+    }
+
     for (size_t i = 0; i < constants::num_threads; ++i) {
         delete threads[i];
     }
@@ -989,9 +1005,11 @@ void FragmentModel::train_seqbias(const char* bam_fn, const char* fa_fn)
 
     bam1_t* b = bam_init1();
     size_t read_num = 0;
-    while (samread(bam_f, b) > 0 &&
+    while (samread(bam_f, b) >= 0 &&
            read_num < constants::seqbias_num_collected_reads) {
-        if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
+        if (b->core.flag & BAM_FUNMAP ||
+            (b->core.flag & BAM_FPAIRED && !(b->core.flag & BAM_FPROPER_PAIR)) ||
+            b->core.tid < 0) continue;
 
         /* Count numbers of alignments by read. */
         if (b->core.flag & BAM_FREAD2) {

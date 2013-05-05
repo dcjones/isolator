@@ -608,7 +608,7 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
     bam1_t* b = bam_init1();
     int32_t last_tid = -1;
     int32_t last_pos = -1;
-    while (samread(bam_f, b) > 0) {
+    while (samread(bam_f, b) >= 0) {
         ++read_num;
 
         if (read_num % 1000 == 0) {
@@ -619,7 +619,9 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
             }
         }
 
-        if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
+        if (b->core.flag & BAM_FUNMAP ||
+            (b->core.flag & BAM_FPAIRED && !(b->core.flag & BAM_FPROPER_PAIR)) ||
+            b->core.tid < 0) continue;
 
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
@@ -877,6 +879,10 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
                 has_compatible_transcript = true;
                 break;
             }
+            // XXX
+            //else if (t->transcript_id == "ENST00000233143") {
+                //fprintf(stderr, "AAA");
+            //}
         }
 
         if (has_compatible_transcript) {
@@ -924,7 +930,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
              r != multiread_set.end(); ++r) {
             for (AlignedReadIterator a(*r->second); a != AlignedReadIterator(); ++a) {
                 float w = fragment_weight(*t, *a);
-                if (w > constants::min_frag_weight) {
+                if (w > 0.0) {
                     /* TODO: estimate alignment probability */
                     multiread_entries.push_back(
                             MultireadEntry(r->first, t->id, w, 1.0));
@@ -934,7 +940,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 
         for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
             float w = fragment_weight(*t, f->first);
-            if (w > constants::min_frag_weight) {
+            if (w > 0.0) {
                 weight_matrix.push(t->id, f->second.first, w);
             }
         }
@@ -965,7 +971,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         std::vector<MultireadEntry>::iterator j0;
         for (j0 = j = i; j != k; ++j) {
             if (j->transcript_idx != j0->transcript_idx) {
-                if (w > constants::min_frag_weight) {
+                if (w > 0.0) {
                     weight_matrix.push(j0->transcript_idx, frag_idx, w);
                 }
                 j0 = j;
@@ -974,7 +980,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 
             w += j->align_pr * j->frag_weight;
         }
-        if (w > constants::min_frag_weight) {
+        if (w > 0.0) {
             weight_matrix.push(j0->transcript_idx, frag_idx, w);
         }
     }
@@ -1028,7 +1034,7 @@ void SamplerInitThread::transcript_sequence_bias(
         pos_t d;
         for (pos_t pos = 0; pos < tlen; ++pos) {
             d = tlen - pos - 1;
-            if (d >= constants::transcript_3p_dist_len) {
+            //if (d >= constants::transcript_3p_dist_len) {
                 mate1_seqbias[0][pos] *=
                     constants::transcript_3p_dist_scale *
                     std::max(1e-4, (fm.tp_bias_c0[bin][0][0] + d * fm.tp_bias_c1[bin][0][0]));
@@ -1042,23 +1048,23 @@ void SamplerInitThread::transcript_sequence_bias(
                 //mate2_seqbias[1][pos] *=
                     //constants::transcript_3p_dist_scale *
                     //std::max(1e-4, (fm.tp_bias_c0[bin][1][1] + d * fm.tp_bias_c1[bin][1][1]));
-            }
-            else {
-                mate1_seqbias[0][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(d);
-                mate1_seqbias[1][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(d);
+            //}
+            //else {
+                //mate1_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(d);
+                //mate1_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(d);
 
                 //mate2_seqbias[0][pos] *=
                     //constants::transcript_3p_dist_scale * tp_bias[bin][1][0]->pdf(d);
                 //mate2_seqbias[1][pos] *=
                     //constants::transcript_3p_dist_scale * tp_bias[bin][1][1]->pdf(d);
-            }
+            //}
         }
     }
     else {
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            if (pos >= constants::transcript_3p_dist_len) {
+            //if (pos >= constants::transcript_3p_dist_len) {
                 mate1_seqbias[0][pos] *=
                     constants::transcript_3p_dist_scale *
                     std::max(1e-4, (fm.tp_bias_c0[bin][0][1] + pos * fm.tp_bias_c1[bin][0][1]));
@@ -1072,18 +1078,18 @@ void SamplerInitThread::transcript_sequence_bias(
                 //mate2_seqbias[1][pos] *=
                     //constants::transcript_3p_dist_scale *
                     //std::max(1e-4, (fm.tp_bias_c0[bin][1][0] + pos * fm.tp_bias_c1[bin][1][0]));
-            }
-            else {
-                mate1_seqbias[0][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(pos);
-                mate1_seqbias[1][pos] *=
-                    constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(pos);
+            //}
+            //else {
+                //mate1_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(pos);
+                //mate1_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(pos);
 
                 //mate2_seqbias[0][pos] *=
                     //constants::transcript_3p_dist_scale * tp_bias[bin][1][1]->pdf(pos);
                 //mate2_seqbias[1][pos] *=
                     //constants::transcript_3p_dist_scale * tp_bias[bin][1][0]->pdf(pos);
-            }
+            //}
         }
     }
 
@@ -1169,10 +1175,6 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         return constants::min_transcript_weight;
     }
 
-    // XXX
-    //if (trans_len < 500) tw *= 0.6;
-    //if (trans_len > 1000) tw *= 1.5;
-
     return tw;
 }
 
@@ -1181,7 +1183,14 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
                                          const AlignmentPair& a)
 {
     pos_t frag_len = a.frag_len(t);
-    if (frag_len < 0) return 0.0;
+    if (frag_len < 0) {
+        // XXX
+        //if (t.transcript_id == "ENST00000233143") {
+            //fprintf(stderr, "here\n");
+        //}
+        return 0.0;
+
+    }
     else if (frag_len == 0) {
         pos_t max_frag_len = std::max(a.mate1->end - t.min_start + 1,
                                       t.max_end - a.mate1->start + 1);
@@ -1204,7 +1213,6 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
 
 
         w *= mate1_seqbias[a.mate1->strand][offset];
-
     }
 
     if (a.mate2) {
@@ -1214,6 +1222,10 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
 
         w *= mate2_seqbias[a.mate2->strand][offset];
     }
+
+    //pos_t start = t.get_offset(
+            //a.mate2 ? std::min<pos_t>(a.mate1->start, a.mate2->start) : a.mate1->start);
+    //float c = frag_len_c(tlen - start);
 
     // strand-specificity
     if (a.mate1) {
@@ -1227,8 +1239,10 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
 
     float frag_len_pr = frag_len_p(frag_len);
     if (frag_len_pr < constants::min_frag_len_pr) return 0.0;
+    if (frag_len_pr * w < constants::min_frag_weight) return 0.0;
 
-    return frag_len_pr * w;
+    //return frag_len_pr / tw;
+    return frag_len_pr * w / ws[frag_len] / frag_len_c(tlen);;
 }
 
 
@@ -1307,11 +1321,11 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
 
     sam_scan(intervals, bam_fn, fa_fn, "Estimating fragment weights");
 
-    /* Free a little space. */
-    fm.multireads.clear();
-
     for (size_t i = 0; i < constants::num_threads; ++i) q.push(NULL);
     for (size_t i = 0; i < constants::num_threads; ++i) threads[i]->join();
+
+    /* Free a little space. */
+    fm.multireads.clear();
 
     unsigned int* idxmap = weight_matrix->compact();
     Logger::info("Weight-matrix dimensions: %lu x %lu",
@@ -2005,10 +2019,51 @@ class MultireadSamplerThread
 
 void Sampler::run(unsigned int num_samples, SampleDB& out)
 {
+
+
     /* Initial mixtures */
+    // Alternative initialization that prefers the longest trascript.
+#if 0
+    for (unsigned int i = 0; i < num_components; ++i) {
+        unsigned int j_max = 0;
+        float max_weight = 0.0;
+        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
+            if (transcript_weights[component_transcripts[i][j]] > max_weight) {
+                j_max = j;
+                max_weight = transcript_weights[component_transcripts[i][j]];
+            }
+        }
+
+        tmix[component_transcripts[i][j_max]] =
+            1.0 - component_num_transcripts[i] * constants::zero_eps;
+
+        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
+            if (j != j_max) {
+                tmix[component_transcripts[i][j]] = constants::zero_eps;
+            }
+        }
+    }
+#endif
+
+#if 0
+    for (unsigned int i = 0; i < num_components; ++i) {
+        float w = 0.0;
+        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
+            w += transcript_weights[component_transcripts[i][j]];
+        }
+
+        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
+            tmix[component_transcripts[i][j]] =
+                transcript_weights[component_transcripts[i][j]] / w;
+        }
+    }
+#endif
+
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         tmix[i] = 1.0 / (float) component_num_transcripts[transcript_component[i]];
     }
+
+
     std::fill(cmix, cmix + num_components, 1.0 / (float) num_components);
     init_frag_probs();
 
@@ -2120,6 +2175,16 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
         for (unsigned int c = 0; c < num_components; ++c) {
             cmix[c] /= z;
         }
+
+
+        // DEBUGING XXX
+        //for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+            //if (t->transcript_id == "ENST00000233143") {
+                //Logger::info("ENST00000233143 has %f fragments.",
+                             //frag_count_sums[transcript_component[t->id]]);
+            //}
+        //}
+
 
         /* Record a new sample */
         if(burnin_samples == 0 && sample_num < num_samples) {
