@@ -128,11 +128,14 @@ class FragmentModel
          */
 
         /* Distribution over distance from 3' end. */
-        EmpDist* tp_bias[3][2][2];
+        EmpDist* tp_bias[2];
+        EmpDist* fp_bias[2];
 
         /* Linear model for bias. */
-        double tp_bias_c0[3][2][2];
-        double tp_bias_c1[3][2][2];
+        double tp_bias_c0[2];
+        double tp_bias_c1[2];
+        double fp_bias_c0[2];
+        double fp_bias_c1[2];
 };
 
 
