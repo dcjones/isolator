@@ -719,19 +719,23 @@ class SamplerInitThread
                 frag_len_dist = NULL;
             }
 
-            tp_bias[0] = new EmpDist(*fm.tp_bias[0]);
-            tp_bias[1] = new EmpDist(*fm.tp_bias[1]);
-            fp_bias[0] = new EmpDist(*fm.fp_bias[0]);
-            fp_bias[1] = new EmpDist(*fm.fp_bias[1]);
+            for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
+                tp_bias[bin][0][0] = new EmpDist(*fm.tp_bias[bin][0][0]);
+                tp_bias[bin][0][1] = new EmpDist(*fm.tp_bias[bin][0][1]);
+                tp_bias[bin][1][0] = new EmpDist(*fm.tp_bias[bin][1][0]);
+                tp_bias[bin][1][1] = new EmpDist(*fm.tp_bias[bin][1][1]);
+            }
         }
 
         ~SamplerInitThread()
         {
             delete frag_len_dist;
-            delete tp_bias[0];
-            delete tp_bias[1];
-            delete fp_bias[0];
-            delete fp_bias[1];
+            for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
+                delete tp_bias[bin][0][0];
+                delete tp_bias[bin][0][1];
+                delete tp_bias[bin][1][0];
+                delete tp_bias[bin][1][1];
+            }
             /* Note: we are not free weight_matrix_entries and
              * multiread_entries. This get's done in Sampler::Sampler.
              * It's all part of the delicate dance involved it minimizing
@@ -808,8 +812,7 @@ class SamplerInitThread
         /* Copy the fragment length distribution to avoid contention between
          * threads. */
         EmpDist* frag_len_dist;
-        EmpDist* tp_bias[2];
-        EmpDist* fp_bias[2];
+        EmpDist* tp_bias[3][2][2];
 
         /* Temprorary space for computing sequence bias, indexed by strand. */
         std::vector<float> mate1_seqbias[2];
@@ -876,6 +879,10 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
                 has_compatible_transcript = true;
                 break;
             }
+            // XXX
+            //else if (t->transcript_id == "ENST00000233143") {
+                //fprintf(stderr, "AAA");
+            //}
         }
 
         if (has_compatible_transcript) {
@@ -1013,92 +1020,96 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
-#if 0
-    // three prime
-    if (t.strand == strand_pos) {
-        pos_t tp_dist;
-        for (pos_t pos = 0; pos < tlen; ++pos) {
-            tp_dist = tlen - pos - 1;
-            if (tp_dist >= constants::tp_dist_len) {
-                mate1_seqbias[0][pos] *=
-                    constants::tp_fp_dist_scale *
-                    std::max(1e-8, (fm.tp_bias_c0[0] + tp_dist * fm.tp_bias_c1[0]));
-                mate1_seqbias[1][pos] *=
-                    constants::tp_fp_dist_scale *
-                    std::max(1e-8, (fm.tp_bias_c0[1] + tp_dist * fm.tp_bias_c1[1]));
-            }
-            else {
-                mate1_seqbias[0][pos] *=
-                    constants::tp_fp_dist_scale * tp_bias[0]->pdf(tp_dist);
-                mate1_seqbias[1][pos] *=
-                    constants::tp_fp_dist_scale * tp_bias[1]->pdf(tp_dist);
-            }
-        }
-    }
-    else {
-        pos_t tp_dist;
-        for (pos_t pos = 0; pos < tlen; ++pos) {
-            tp_dist = pos;
-            if (tp_dist >= constants::tp_dist_len) {
-                mate1_seqbias[0][pos] *=
-                    constants::tp_fp_dist_scale *
-                    std::max(1e-8, (fm.tp_bias_c0[1] + pos * fm.tp_bias_c1[1]));
-                mate1_seqbias[1][pos] *=
-                    constants::tp_fp_dist_scale *
-                    std::max(1e-8, (fm.tp_bias_c0[0] + pos * fm.tp_bias_c1[0]));
-            }
-            else {
-                mate1_seqbias[0][pos] *=
-                    constants::tp_fp_dist_scale * tp_bias[1]->pdf(tp_dist);
-                mate1_seqbias[1][pos] *=
-                    constants::tp_fp_dist_scale * tp_bias[0]->pdf(tp_dist);
-            }
-        }
-    }
-#endif
+    size_t bin = constants::transcript_3p_num_bins - 1;
+    for (; bin > 0 && tlen < constants::transcript_3p_bins[bin]; --bin);
+    //if (bin < constants::transcript_3p_num_bins - 1) ++bin;
 
-    // five prime
+
+    //double cdf0 = tp_bias[bin][0]->cdf(tlen);
+    //double cdf1 = tp_bias[bin][1]->cdf(tlen);
+
+    // TODO: Holy fuck is this ugly.
+
     if (t.strand == strand_pos) {
-        pos_t fp_dist;
+        pos_t d;
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            fp_dist = pos;
-            if (fp_dist >= constants::fp_dist_len) {
+            d = tlen - pos - 1;
+            //if (d >= constants::transcript_3p_dist_len) {
                 mate1_seqbias[0][pos] *=
-                    constants::tp_fp_dist_scale *
-                    std::max(1e-8, (fm.fp_bias_c0[0] + fp_dist * fm.fp_bias_c1[0]));
+                    constants::transcript_3p_dist_scale *
+                    std::max(1e-4, (fm.tp_bias_c0[bin][0][0] + d * fm.tp_bias_c1[bin][0][0]));
                 mate1_seqbias[1][pos] *=
-                    constants::tp_fp_dist_scale *
-                    std::max(1e-8, (fm.fp_bias_c0[1] + fp_dist * fm.fp_bias_c1[1]));
-            }
-            else {
-                mate1_seqbias[0][pos] *=
-                    constants::tp_fp_dist_scale * fp_bias[0]->pdf(fp_dist);
-                mate1_seqbias[1][pos] *=
-                    constants::tp_fp_dist_scale * fp_bias[1]->pdf(fp_dist);
-            }
+                    constants::transcript_3p_dist_scale *
+                    std::max(1e-4, (fm.tp_bias_c0[bin][0][1] + d * fm.tp_bias_c1[bin][0][1]));
+
+                //mate2_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale *
+                    //std::max(1e-4, (fm.tp_bias_c0[bin][1][0] + d * fm.tp_bias_c1[bin][1][0]));
+                //mate2_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale *
+                    //std::max(1e-4, (fm.tp_bias_c0[bin][1][1] + d * fm.tp_bias_c1[bin][1][1]));
+            //}
+            //else {
+                //mate1_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(d);
+                //mate1_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(d);
+
+                //mate2_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][1][0]->pdf(d);
+                //mate2_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][1][1]->pdf(d);
+            //}
         }
     }
     else {
-        pos_t fp_dist;
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            fp_dist = tlen - pos - 1;
-            if (fp_dist >= constants::fp_dist_len) {
+            //if (pos >= constants::transcript_3p_dist_len) {
                 mate1_seqbias[0][pos] *=
-                    constants::tp_fp_dist_scale *
-                    std::max(1e-8, (fm.fp_bias_c0[1] + fp_dist * fm.fp_bias_c1[1]));
+                    constants::transcript_3p_dist_scale *
+                    std::max(1e-4, (fm.tp_bias_c0[bin][0][1] + pos * fm.tp_bias_c1[bin][0][1]));
                 mate1_seqbias[1][pos] *=
-                    constants::tp_fp_dist_scale *
-                    std::max(1e-8, (fm.fp_bias_c0[0] + fp_dist * fm.fp_bias_c1[0]));
-            }
-            else {
-                mate1_seqbias[0][pos] *=
-                    constants::tp_fp_dist_scale * fp_bias[1]->pdf(fp_dist);
-                mate1_seqbias[1][pos] *=
-                    constants::tp_fp_dist_scale * fp_bias[0]->pdf(fp_dist);
-            }
+                    constants::transcript_3p_dist_scale *
+                    std::max(1e-4, (fm.tp_bias_c0[bin][0][0] + pos * fm.tp_bias_c1[bin][0][0]));
+
+                //mate2_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale *
+                    //std::max(1e-4, (fm.tp_bias_c0[bin][1][1] + pos * fm.tp_bias_c1[bin][1][1]));
+                //mate2_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale *
+                    //std::max(1e-4, (fm.tp_bias_c0[bin][1][0] + pos * fm.tp_bias_c1[bin][1][0]));
+            //}
+            //else {
+                //mate1_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(pos);
+                //mate1_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(pos);
+
+                //mate2_seqbias[0][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][1][1]->pdf(pos);
+                //mate2_seqbias[1][pos] *=
+                    //constants::transcript_3p_dist_scale * tp_bias[bin][1][0]->pdf(pos);
+            //}
         }
+    }
+
+    if (t.transcript_id == "ENST00000233143") {
+        FILE* out = fopen("ENST00000233143.0.tsv", "w");
+        fprintf(out, "i\tw\n");
+        for (pos_t i = 0; i < tlen; ++i) {
+            fprintf(out, "%ld\t%e\n", i, mate1_seqbias[0][i]);
+        }
+        fclose(out);
+
+        out = fopen("ENST00000233143.1.tsv", "w");
+        fprintf(out, "i\tw\n");
+        for (pos_t i = 0; i < tlen; ++i) {
+            fprintf(out, "%ld\t%e\n", i, mate1_seqbias[1][i]);
+        }
+        fclose(out);
     }
 }
+
 
 
 float SamplerInitThread::transcript_weight(const Transcript& t)
@@ -1163,44 +1174,6 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
     if (!finite(tw) || tw <= constants::min_transcript_weight) {
         return constants::min_transcript_weight;
     }
-
-
-    // Various totally unjustifiable scaling strategies.
-
-#if 0
-    if (t.transcript_id == "ENST00000233143") {
-        tw *= 0.5;
-    }
-#endif
-
-    //if (tlen > 200) tw *= std::min<pos_t>(800, tlen - 200);
-
-#if 0
-    if (tlen < 300) {
-        tw *= 0.1;
-    }
-    else if (tlen < 500) {
-        tw *= 0.3;
-    }
-    else if (tlen < 1000) {
-        tw *= 0.8;
-    }
-    else if (tlen < 1500) {
-        tw *= 0.9;
-    }
-#endif
-
-#if 0
-    if (tlen < 300) {
-        tw *= 0.3;
-    }
-    else if (tlen < 500) {
-        tw *= 0.5;
-    }
-    else if (tlen < 1000) {
-        tw *= 0.8;
-    }
-#endif
 
     return tw;
 }
@@ -1922,11 +1895,9 @@ void MCMCThread::run_inter_transcript(unsigned int u, unsigned int v)
 
 void MCMCThread::run_component(unsigned int u)
 {
-    S.cmix[u] = S.frag_count_sums[u];
-    // XXX
-    //float prec = S.frag_count_sums[u] +
-                 //S.component_num_transcripts[u] * constants::tmix_prior_prec;
-    //S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
+    float prec = S.frag_count_sums[u] +
+                 S.component_num_transcripts[u] * constants::tmix_prior_prec;
+    S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
 }
 
 
@@ -1997,13 +1968,6 @@ class MultireadSamplerThread
                         sumprob += *S.multiread_alignments[block.u][i].prob * S.cmix[c];
                         *S.multiread_alignments[block.u][i].count = 0;
                     }
-
-#if 0
-                    // XXX Assign evently
-                    for (unsigned int i = 0; i < k; ++i) {
-                        *S.multiread_alignments[block.u][i].count = 1.0 / (float) k;
-                    }
-#endif
 
                     if (hillclimb) {
                         for (unsigned int i = 0; i < k; ++i) {
@@ -2129,8 +2093,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
     std::vector<MultireadSamplerThread*> multiread_threads(constants::num_threads);
     for (size_t i = 0; i < constants::num_threads; ++i) {
         multiread_threads[i] = new MultireadSamplerThread(*this, multiread_queue);
-        // XXX
-        multiread_threads[i]->hillclimb = true;
+        multiread_threads[i]->hillclimb = false;
     }
 
     unsigned int* cs = new unsigned int [num_components];
@@ -2214,6 +2177,14 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
         }
 
 
+        // DEBUGING XXX
+        //for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+            //if (t->transcript_id == "ENST00000233143") {
+                //Logger::info("ENST00000233143 has %f fragments.",
+                             //frag_count_sums[transcript_component[t->id]]);
+            //}
+        //}
+
 
         /* Record a new sample */
         if(burnin_samples == 0 && sample_num < num_samples) {
@@ -2243,32 +2214,6 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
             for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
                 samples[i][sample_num] /= new_total_weight;
             }
-
-        // DEBUGING XXX
-#if 0
-        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-
-            if (t->transcript_id == "ENST00000233143") {
-                double n = 0.0;
-                for (size_t i = 0; i < num_components; ++i) {
-                    unsigned int component_size = component_frag[i + 1] - component_frag[i];
-                    for (unsigned int j = 0; j < component_size; ++j) {
-                        n += frag_counts[i][j];
-                    }
-                }
-
-                Logger::info("ENST00000233143: %f", samples[t->id][sample_num]);
-
-                //Logger::info("n = %e", n);
-                //Logger::info("ENST00000233143 has %f fragments.",
-                             //frag_count_sums[transcript_component[t->id]]);
-                //Logger::info("ENST00000233143 has cmix = %e",
-                             //cmix[transcript_component[t->id]]);
-                //Logger::info("ENST00000233143 has tmix = %e",
-                             //tmix[t->id]);
-            }
-        }
-#endif
 
             ++sample_num;
 
