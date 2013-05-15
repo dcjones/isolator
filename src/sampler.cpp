@@ -1024,6 +1024,29 @@ void SamplerInitThread::transcript_sequence_bias(
     for (; bin > 0 && tlen < constants::transcript_3p_bins[bin]; --bin);
     //if (bin < constants::transcript_3p_num_bins - 1) ++bin;
 
+#if 0
+    float z0 = bin == constants::transcript_3p_num_bins - 1 ? 1.0 :
+            fm.tp_bias[constants::transcript_3p_num_bins - 1][0][0]->cdf(
+                    constants::transcript_3p_bins[bin + 1]);
+    float z1 = bin == constants::transcript_3p_num_bins - 1 ? 1.0 :
+            fm.tp_bias[constants::transcript_3p_num_bins - 1][0][1]->cdf(
+                    constants::transcript_3p_bins[bin + 1]);
+#endif
+
+    float z0 = 1.0, z1 = 1.0;
+    if (bin != constants::transcript_3p_num_bins - 1) {
+        float c1, c0, binlen;
+        binlen = constants::transcript_3p_bins[bin + 1];
+        c0 = fm.tp_bias_c0[constants::transcript_3p_num_bins - 1][0][0];
+        c1 = fm.tp_bias_c1[constants::transcript_3p_num_bins - 1][0][0];
+        z0 = c0 * binlen + c1 * (binlen * binlen) / 2.0;
+        z0 -= c0 * 200.0  + c1 * (200.0 * 200.0) / 2.0;
+
+        c0 = fm.tp_bias_c0[constants::transcript_3p_num_bins - 1][0][1];
+        c1 = fm.tp_bias_c1[constants::transcript_3p_num_bins - 1][0][1];
+        z1 = c0 * binlen + c1 * (binlen * binlen) / 2.0;
+    }
+
 
     //double cdf0 = tp_bias[bin][0]->cdf(tlen);
     //double cdf1 = tp_bias[bin][1]->cdf(tlen);
@@ -1034,12 +1057,14 @@ void SamplerInitThread::transcript_sequence_bias(
         pos_t d;
         for (pos_t pos = 0; pos < tlen; ++pos) {
             d = tlen - pos - 1;
-            //if (d >= constants::transcript_3p_dist_len) {
+#if 0
+            if (d >= constants::transcript_3p_dist_len) {
+#endif
                 mate1_seqbias[0][pos] *=
-                    constants::transcript_3p_dist_scale *
+                    z0 * constants::transcript_3p_dist_scale *
                     std::max(1e-4, (fm.tp_bias_c0[bin][0][0] + d * fm.tp_bias_c1[bin][0][0]));
                 mate1_seqbias[1][pos] *=
-                    constants::transcript_3p_dist_scale *
+                    z1 * constants::transcript_3p_dist_scale *
                     std::max(1e-4, (fm.tp_bias_c0[bin][0][1] + d * fm.tp_bias_c1[bin][0][1]));
 
                 //mate2_seqbias[0][pos] *=
@@ -1048,28 +1073,32 @@ void SamplerInitThread::transcript_sequence_bias(
                 //mate2_seqbias[1][pos] *=
                     //constants::transcript_3p_dist_scale *
                     //std::max(1e-4, (fm.tp_bias_c0[bin][1][1] + d * fm.tp_bias_c1[bin][1][1]));
-            //}
-            //else {
-                //mate1_seqbias[0][pos] *=
-                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(d);
-                //mate1_seqbias[1][pos] *=
-                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(d);
+#if 0
+            }
+            else {
+                mate1_seqbias[0][pos] *=
+                    z0 * constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(d);
+                mate1_seqbias[1][pos] *=
+                    z1 * constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(d);
 
                 //mate2_seqbias[0][pos] *=
                     //constants::transcript_3p_dist_scale * tp_bias[bin][1][0]->pdf(d);
                 //mate2_seqbias[1][pos] *=
                     //constants::transcript_3p_dist_scale * tp_bias[bin][1][1]->pdf(d);
-            //}
+            }
+#endif
         }
     }
     else {
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            //if (pos >= constants::transcript_3p_dist_len) {
+#if 0
+            if (pos >= constants::transcript_3p_dist_len) {
+#endif
                 mate1_seqbias[0][pos] *=
-                    constants::transcript_3p_dist_scale *
+                    z1 * constants::transcript_3p_dist_scale *
                     std::max(1e-4, (fm.tp_bias_c0[bin][0][1] + pos * fm.tp_bias_c1[bin][0][1]));
                 mate1_seqbias[1][pos] *=
-                    constants::transcript_3p_dist_scale *
+                    z0 * constants::transcript_3p_dist_scale *
                     std::max(1e-4, (fm.tp_bias_c0[bin][0][0] + pos * fm.tp_bias_c1[bin][0][0]));
 
                 //mate2_seqbias[0][pos] *=
@@ -1078,18 +1107,20 @@ void SamplerInitThread::transcript_sequence_bias(
                 //mate2_seqbias[1][pos] *=
                     //constants::transcript_3p_dist_scale *
                     //std::max(1e-4, (fm.tp_bias_c0[bin][1][0] + pos * fm.tp_bias_c1[bin][1][0]));
-            //}
-            //else {
-                //mate1_seqbias[0][pos] *=
-                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(pos);
-                //mate1_seqbias[1][pos] *=
-                    //constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(pos);
+#if 0
+            }
+            else {
+                mate1_seqbias[0][pos] *=
+                    z1 * constants::transcript_3p_dist_scale * tp_bias[bin][0][1]->pdf(pos);
+                mate1_seqbias[1][pos] *=
+                    z0 * constants::transcript_3p_dist_scale * tp_bias[bin][0][0]->pdf(pos);
 
                 //mate2_seqbias[0][pos] *=
                     //constants::transcript_3p_dist_scale * tp_bias[bin][1][1]->pdf(pos);
                 //mate2_seqbias[1][pos] *=
                     //constants::transcript_3p_dist_scale * tp_bias[bin][1][0]->pdf(pos);
-            //}
+            }
+#endif
         }
     }
 
