@@ -440,8 +440,10 @@ class FragmentModelThread
             , t(NULL)
         {
             for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
-                tp_dist_weights[bin][0].resize(constants::transcript_3p_dist_len, 0.0);
-                tp_dist_weights[bin][1].resize(constants::transcript_3p_dist_len, 0.0);
+                tp_dist_weights[bin][0][0].resize(constants::transcript_3p_dist_len, 0.0);
+                tp_dist_weights[bin][0][1].resize(constants::transcript_3p_dist_len, 0.0);
+                tp_dist_weights[bin][1][0].resize(constants::transcript_3p_dist_len, 0.0);
+                tp_dist_weights[bin][1][1].resize(constants::transcript_3p_dist_len, 0.0);
             }
 
             strand_bias[0] = strand_bias[1] = 0;
@@ -515,7 +517,7 @@ class FragmentModelThread
 
         /* Distribution over distance from 3' end for same-strand and opposite
          * strand reads. */
-        std::vector<double> tp_dist_weights[3][2];
+        std::vector<double> tp_dist_weights[3][2][2];
 
         /* Mate1 sequence bias across the current interval. */
         std::vector<double> mate1_seqbias[2];
@@ -599,28 +601,97 @@ class FragmentModelThread
             for (i = counts.begin(); i != counts.end(); ++i) {
                 for (std::vector<Alignment*>::iterator j = i->first->mate1.begin();
                         j != i->first->mate1.end(); ++j) {
-                    pos_t pos = (*j)->strand == strand_pos ?
+                    pos_t d = (*j)->strand == strand_pos ?
                         (*j)->start : (*j)->end;
-                    if (pos < start || pos > end) continue;
-                    double w = mate1_seqbias[(*j)->strand][pos - start];
-
-                    pos_t off;
+                    if (d < start || d > end) continue;
+                    double w = mate1_seqbias[(*j)->strand][d - start];
                     if (strand == strand_pos) {
-                        off = exon_three_prime_dist + end - pos;
+                        d = exon_three_prime_dist + end - d;
                     }
                     else {
-                        off = exon_three_prime_dist + pos - start;
+                        d = exon_three_prime_dist + d - start;
                     }
 
-                    if (off < 0 || off >= constants::transcript_3p_dist_len) continue;
+                    if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
 
                     if (strand == (*j)->strand) {
-                        tp_dist_weights[bin][0][off] += 1.0 / w;
+                        tp_dist_weights[bin][0][0][d] += 1.0 / w;
                     }
                     else {
-                        tp_dist_weights[bin][1][off] += 1.0 / w;
+                        tp_dist_weights[bin][0][1][d] += 1.0 / w;
                     }
                 }
+
+                for (std::vector<Alignment*>::iterator j = i->first->mate2.begin();
+                    j != i->first->mate2.end(); ++j) {
+                    pos_t d = (*j)->strand == strand_pos ?
+                        (*j)->start : (*j)->end;
+                    if (d < start || d > end) continue;
+                    double w = mate2_seqbias[(*j)->strand][d - start];
+                    if (strand == strand_pos) {
+                        d = exon_three_prime_dist + end - d;
+                    }
+                    else {
+                        d = exon_three_prime_dist + d - start;
+                    }
+
+                    if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
+
+                    if (strand == (*j)->strand) {
+                        tp_dist_weights[bin][0][0][d] += 1.0 / w;
+                    }
+                    else {
+                        tp_dist_weights[bin][0][1][d] += 1.0 / w;
+                    }
+                }
+
+#if 0
+
+                    if (j->mate1) {
+                        pos_t d = j->mate1->strand == strand_pos ?
+                            j->mate1->start : j->mate1->end;
+                        if (d < start || d > end) continue;
+                        double w = mate1_seqbias[j->mate1->strand][d - start];
+                        if (strand == strand_pos) {
+                            d = exon_three_prime_dist + end - d;
+                        }
+                        else {
+                            d = exon_three_prime_dist + d - start;
+                        }
+
+                        if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
+
+                        if (strand == j->mate1->strand) {
+                            tp_dist_weights[bin][0][0][d] += 1.0 / w;
+                        }
+                        else {
+                            tp_dist_weights[bin][0][1][d] += 1.0 / w;
+                        }
+                    }
+
+                    if (j->mate2) {
+                        pos_t d = j->mate2->strand == strand_pos ?
+                            j->mate2->start : j->mate2->end;
+                        if (d < start || d > end) continue;
+                        double w = mate2_seqbias[j->mate2->strand][d - start];
+                        if (strand == strand_pos) {
+                            d = exon_three_prime_dist + end - d;
+                        }
+                        else {
+                            d = exon_three_prime_dist + d - start;
+                        }
+
+                        if (d < 0 || d >= constants::transcript_3p_dist_len) continue;
+
+                        if (strand == j->mate2->strand) {
+                            tp_dist_weights[bin][1][0][d] += 1.0 / w;
+                        }
+                        else {
+                            tp_dist_weights[bin][1][1][d] += 1.0 / w;
+                        }
+                    }
+                }
+#endif
             }
         }
 
@@ -630,10 +701,16 @@ class FragmentModelThread
 };
 
 
-FragmentModel::FragmentModel()
+    FragmentModel::FragmentModel()
     : sb(NULL)
-    , frag_len_dist(NULL)
+      , frag_len_dist(NULL)
 {
+    for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
+        tp_bias[bin][0][0] = NULL;
+        tp_bias[bin][0][1] = NULL;
+        tp_bias[bin][1][0] = NULL;
+        tp_bias[bin][1][1] = NULL;
+    }
 }
 
 
@@ -641,6 +718,12 @@ FragmentModel::~FragmentModel()
 {
     if (sb) delete sb;
     if (frag_len_dist) delete frag_len_dist;
+    for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
+        delete tp_bias[bin][0][0];
+        delete tp_bias[bin][0][1];
+        delete tp_bias[bin][1][0];
+        delete tp_bias[bin][1][1];
+    }
 }
 
 
@@ -667,18 +750,34 @@ void FragmentModel::estimate(TranscriptSet& ts,
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         pos_t tlen = t->exonic_length();
         if (tlen < constants::transcript_3p_dist_pad) continue;
-        pos_t off = 0;
-        for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
-            pos_t elen = e->end - e->start + 1;
-            intervals.push_back(new FragmentModelInterval(
-                        t->seqname,
-                        e->start,
-                        e->end,
-                        t->strand,
-                        t->strand == strand_pos ? tlen - off - elen : off,
-                        tlen,
-                        FragmentModelInterval::THREE_PRIME_EXONIC));
-            off += elen;
+        //if (tlen < constants::transcript_3p_dist_len + constants::transcript_3p_dist_pad) continue;
+        //if (tlen < constants::transcript_3p_bins[0]) continue;
+        pos_t d = 0;
+        if (t->strand == strand_neg) {
+            for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
+                intervals.push_back(new FragmentModelInterval(
+                            t->seqname,
+                            e->start,
+                            e->end,
+                            t->strand,
+                            d,
+                            tlen,
+                            FragmentModelInterval::THREE_PRIME_EXONIC));
+                d += e->end - e->start + 1;
+            }
+        }
+        else {
+            for (Transcript::reverse_iterator e = t->rbegin(); e != t->rend(); ++e) {
+                intervals.push_back(new FragmentModelInterval(
+                            t->seqname,
+                            e->start,
+                            e->end,
+                            t->strand,
+                            d,
+                            tlen,
+                            FragmentModelInterval::THREE_PRIME_EXONIC));
+                d += e->end - e->start + 1;
+            }
         }
     }
 
@@ -793,59 +892,80 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
     // Collect 3' distance distribution stats
 
-    // Used to try to remove edge effects to to fragment lengths.
-    //pos_t med_frag_len = std::min<pos_t>(300, frag_len_dist->median());
-    pos_t med_frag_len = 300;
+    std::vector<unsigned int> tp_dist_values(constants::transcript_3p_dist_len);
+    for (pos_t k = 0; k < constants::transcript_3p_dist_len; ++k) {
+        tp_dist_values[k] = k;
+    }
+    std::vector<double> tp_dist_weights(constants::transcript_3p_dist_len);
+    std::vector<unsigned int> tp_dist_counts(constants::transcript_3p_dist_len);
 
     // positions for fitting the linear model
-    std::vector<double> tp_dist_pos(constants::transcript_3p_dist_len - med_frag_len);
-    for (pos_t j = 0; j < constants::transcript_3p_dist_len - med_frag_len; ++j) {
-        tp_dist_pos[j] = med_frag_len + j;
+    std::vector<double> ys(constants::transcript_3p_dist_len -
+                           constants::transcript_3p_dist_pad);
+    for (pos_t j = 0; j < constants::transcript_3p_dist_len -
+                           constants::transcript_3p_dist_pad; ++j) {
+        ys[j] = constants::transcript_3p_dist_pad + j;
     }
 
-    // values for fitting the linear model
-    std::vector<double> tp_dist_weights(constants::transcript_3p_dist_len);
-
     for (size_t bin = 0; bin < constants::transcript_3p_num_bins; ++bin) {
-        for (size_t strand = 0; strand <= 1; ++strand) {
-            std::fill(tp_dist_weights.begin(), tp_dist_weights.end(), 0.0);
-            for (size_t i = 0; i < constants::num_threads; ++i) {
-                for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
-                    tp_dist_weights[j] += threads[i]->tp_dist_weights[bin][strand][j];
+        for (size_t mate = 0; mate <= 1; ++mate) {
+            for (size_t strand = 0; strand <= 1; ++strand) {
+                std::fill(tp_dist_weights.begin(), tp_dist_weights.end(), 0.0);
+                for (size_t i = 0; i < constants::num_threads; ++i) {
+                    for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
+                        tp_dist_weights[j] += threads[i]->tp_dist_weights[bin][mate][strand][j];
+                    }
                 }
+
+                // Take into account fragment length distribution for 3' bias,
+                // so we don't doubly penalize reads at the ends.
+#if 0
+                if (strand == 0 && frag_len_dist) {
+                    for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
+                        tp_dist_weights[j] /= frag_len_dist->cdf(j);
+                        if (!finite(tp_dist_weights[j])) {
+                            tp_dist_weights[j] = 0.0;
+                        }
+                    }
+                }
+#endif
+
+                std::fill(tp_dist_counts.begin(), tp_dist_counts.end(), 0);
+                for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
+                    tp_dist_counts[j] += (unsigned int) tp_dist_weights[j];
+                }
+
+                tp_bias[bin][mate][strand] = new EmpDist(&tp_dist_values.at(0),
+                                                         &tp_dist_counts.at(0),
+                                                         constants::transcript_3p_dist_len,
+                                                         constants::transcript_3p_dist_w);
+
+                for (pos_t j = 0; j < constants::transcript_3p_dist_len -
+                                       constants::transcript_3p_dist_pad; ++j) {
+                    tp_dist_weights[j] = tp_bias[bin][mate][strand]->pdf(
+                            constants::transcript_3p_dist_pad + j);
+                }
+
+                double cov00, cov01, cov10, sumsq;
+                gsl_fit_linear(&ys.at(0), 1, &tp_dist_weights.at(0), 1,
+                               constants::transcript_3p_dist_len - constants::transcript_3p_dist_pad,
+                               &tp_bias_c0[bin][mate][strand], &tp_bias_c1[bin][mate][strand],
+                               &cov00, &cov01, &cov10, &sumsq);
+
+                /* XXX DEBUGGING */
+                Logger::info("c0[%zu][%zu][%d], c1[%zu][%zu][%d] = %e, %e",
+                             bin, mate, strand, bin, mate, strand,
+                             tp_bias_c0[bin][mate][strand], tp_bias_c1[bin][mate][strand]);
+
+                char fn[100];
+                sprintf(fn, "tp_bias_%zu_%zu_%zu.tsv", bin, mate, strand);
+                FILE* out = fopen(fn, "w");
+                fprintf(out, "d\tp\n");
+                for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
+                    fprintf(out, "%ld\t%e\n", j, tp_bias[bin][mate][strand]->pdf(j));
+                }
+                fclose(out);
             }
-
-
-            double sum_weight = 0.0;
-            for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
-                sum_weight += tp_dist_weights[j];
-            }
-            for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
-                tp_dist_weights[j] /= sum_weight;
-            }
-
-            // XXX
-            char fn[200];
-            sprintf(fn, "tp_dist_weights_%zu_%zu.tsv", bin, strand);
-            FILE* out = fopen(fn, "w");
-            fprintf(out, "pos\tw\n");
-            for (pos_t j = 0; j < constants::transcript_3p_dist_len; ++j) {
-                fprintf(out, "%ld\t%e\n", j, tp_dist_weights[j]);
-            }
-            fclose(out);
-
-
-            double cov00, cov01, cov10, sumsq;
-            pos_t dist_len = bin == constants::transcript_3p_num_bins - 1 ?
-                constants::transcript_3p_dist_len : constants::transcript_3p_bins[bin + 1];
-            gsl_fit_linear(&tp_dist_pos.at(0), 1, &tp_dist_weights.at(med_frag_len), 1,
-                           dist_len - med_frag_len,
-                           &tp_bias_c0[bin][strand], &tp_bias_c1[bin][strand],
-                           &cov00, &cov01, &cov10, &sumsq);
-
-            Logger::info("c0[%zu][%zu], c1[%zu][%zu] = %e, %e",
-                         bin, strand, bin, strand,
-                         tp_bias_c0[bin][strand], tp_bias_c1[bin][strand]);
         }
     }
 
