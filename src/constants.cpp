@@ -28,7 +28,7 @@ float                constants::transcript_3p_dist_w         = 0.01;
 size_t               constants::transcript_3p_num_bins       = 3;
 pos_t                constants::transcript_3p_bins[3]        =
     {0, 500, 900};
-float                constants::transcript_3p_dist_scale     = 10000.0;
+float                constants::transcript_3p_dist_scale     = 100000.0;
 float                constants::min_transcript_weight        = 5.0;
 float                constants::tmix_prior_prec              = 0.01;
 unsigned int         constants::sampler_component_block_size = 50;
