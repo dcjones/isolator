@@ -102,24 +102,16 @@ namespace constants
     extern pos_t transcript_5p_extension;
     extern pos_t transcript_3p_extension;
 
-    /* Length of emperical distribution over distance from 3' end. */
-    extern pos_t transcript_3p_dist_len;
-
-    /* Record values past the end of the actual distribution length for
-     * smoothing to work out correctly. */
-    extern pos_t transcript_3p_dist_pad;
-
     /* Transcript 3' bias is conditioned on transcript length, binned into the
      * following bins. Each number is an upper bound for a bin. */
-    extern size_t transcript_3p_num_bins;
-    extern pos_t transcript_3p_bins[3];
+    extern size_t tp_num_length_bins;
+    extern pos_t tp_length_bins[4];
 
-    /* Smoothing used on the emperical distribution  over distance from 3' end.
-     * */
-    extern float transcript_3p_dist_w;
+    /* Number of position bins. */
+    extern size_t tp_num_bins;
 
-    /* Scale probabilities from the 3p dist to avoid underflow. */
-    extern float transcript_3p_dist_scale;
+    /* */
+    extern pos_t tp_pad;
 
     /* It's possible for a transcript to get assigned exceedingly low weight,
      * given the fragment length distribution. Then when a single read lands

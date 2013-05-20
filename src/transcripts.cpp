@@ -304,6 +304,7 @@ void TranscriptSet::read_gtf(FILE* f)
         Transcript::iterator e1 = t->second->begin();
         u = e1->start;
         v = e1->end;
+#if 0
         if (t->second->strand == strand_pos) {
             if (t->second->exonic_length() < 400) {
                 u = std::max<pos_t>(0, u - 100);
@@ -320,6 +321,7 @@ void TranscriptSet::read_gtf(FILE* f)
                 u = std::max<pos_t>(0, u - constants::transcript_3p_extension);
             }
         }
+#endif
         t->second->erase(e1);
         t->second->insert(Exon(u, v));
         t->second->min_start = u;
@@ -327,6 +329,7 @@ void TranscriptSet::read_gtf(FILE* f)
         Transcript::reverse_iterator e2 = t->second->rbegin();
         u = e2->start;
         v = e2->end;
+#if 0
         if (t->second->strand == strand_pos) {
             if (t->second->exonic_length() < 400) {
                 v += 100;
@@ -343,6 +346,7 @@ void TranscriptSet::read_gtf(FILE* f)
                 v += constants::transcript_5p_extension;
             }
         }
+#endif
         t->second->erase(--e2.base());
         t->second->insert(Exon(u, v));
         t->second->max_end = v;

@@ -51,7 +51,7 @@ class sequencing_bias
         /** destructor */
         ~sequencing_bias();
 
-        /** Compute the bias across the given region. 
+        /** Compute the bias across the given region.
          *
          * The vector returned must be freed with 'delete []'.
          */
