@@ -797,12 +797,16 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
     for (size_t bin = 0; bin < constants::tp_num_length_bins; ++bin) {
         for (size_t strand = 0; strand <= 1; ++strand) {
-            double z = 0.0;
             for (size_t i = 0; i < constants::num_threads; ++i) {
                 for (size_t j = 0; j < constants::tp_num_bins; ++j) {
                     tp_dist[bin][strand][j] += threads[i]->tp_dist_weights[bin][strand][j];
-                    z += threads[i]->tp_dist_weights[bin][strand][j];
                 }
+            }
+
+            tp_dist[bin][strand][0] = 0.0; // XXX
+            double z = 0.0;
+            for (size_t j = 0; j < constants::tp_num_bins; ++j) {
+                z += tp_dist[bin][strand][j];
             }
 
             for (size_t j = 0; j < constants::tp_num_bins; ++j) {
@@ -816,7 +820,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
     for (size_t bin = 0; bin < constants::tp_num_length_bins - 1; ++bin) {
         for (int strand = 0; strand < 2; ++strand) {
             // normalizing by 3' end
-#if 0
             double rpos = 1.0 - (double) constants::tp_length_bins[bin] /
                 (double) constants::tp_length_bins[constants::tp_num_length_bins - 1];
             size_t j0 = rpos * constants::tp_num_bins;
@@ -827,7 +830,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
             }
 
             z = (z / (constants::tp_num_bins - j0)) / (1.0 / constants::tp_num_bins);
-#endif
 
             // normalizing by 5' end
 #if 0
@@ -843,10 +845,12 @@ void FragmentModel::estimate(TranscriptSet& ts,
             z = (z / j0) / (1.0 / constants::tp_num_bins);
 #endif
 
+#if 0
             double z =
                 tp_dist[constants::tp_num_length_bins - 1][strand][
                     constants::tp_num_bins/2] /
                 tp_dist[bin][strand][constants::tp_num_bins/2];
+#endif
 
 
             Logger::info("%zu %d => %f", bin, strand, z);
