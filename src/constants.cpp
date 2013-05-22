@@ -24,9 +24,11 @@ pos_t                constants::transcript_5p_extension      = 0;
 pos_t                constants::transcript_3p_extension      = 0;
 size_t               constants::tp_num_length_bins           = 4;
 pos_t                constants::tp_length_bins[4]            =
-    {500, 1000, 1500, 2000};
+    //{500, 1000, 1500, 2000};
+    {300, 576, 880, 2019};
 size_t               constants::tp_num_bins                  = 25;
 pos_t                constants::tp_pad                       = 200;
+int                  constants::tp_fold_cutoff               = 3;
 float                constants::min_transcript_weight        = 5.0;
 float                constants::tmix_prior_prec              = 0.01;
 unsigned int         constants::sampler_component_block_size = 50;

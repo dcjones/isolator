@@ -113,6 +113,12 @@ namespace constants
     /* */
     extern pos_t tp_pad;
 
+    /* When measure positional bias, exclude transcripts that have more than an
+     * X-fold difference between number of reads in the first half and second
+     * half.
+     */
+    extern int tp_fold_cutoff;
+
     /* It's possible for a transcript to get assigned exceedingly low weight,
      * given the fragment length distribution. Then when a single read lands
      * there, it is assumed that the trascript is very highly expressed. More

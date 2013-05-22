@@ -50,6 +50,8 @@ Transcript::Transcript(const Transcript& other)
     , max_end(other.max_end)
     , start_codon(other.start_codon)
     , stop_codon(other.stop_codon)
+    , biotype(other.biotype)
+    , source(other.source)
     , id(other.id)
 {
 }
@@ -266,6 +268,9 @@ void TranscriptSet::read_gtf(FILE* f)
             continue;
         }
 
+        str_t* t_biotype = reinterpret_cast<str_t*>(
+                str_map_get(row->attributes, "gene_biotype", 12));
+
         Transcript& t = ts[t_id->s];
 
         if (t.empty()) {
@@ -273,6 +278,8 @@ void TranscriptSet::read_gtf(FILE* f)
             t.gene_id = g_id->s;
             t.transcript_id = t_id->s;
             t.strand = (strand_t) row->strand;
+            t.source = row->source->s;
+            if (t_biotype) t.biotype = t_biotype->s;
         }
 
         pos_t pos = (t.strand == strand_pos ? row->start : row->end) - 1;
@@ -300,11 +307,11 @@ void TranscriptSet::read_gtf(FILE* f)
         t->second->id = next_id++;
 
         /* Extend each transcript 3' and 5' end by some fixed ammount. */
+#if 0
         pos_t u, v;
         Transcript::iterator e1 = t->second->begin();
         u = e1->start;
         v = e1->end;
-#if 0
         if (t->second->strand == strand_pos) {
             if (t->second->exonic_length() < 400) {
                 u = std::max<pos_t>(0, u - 100);
@@ -321,15 +328,15 @@ void TranscriptSet::read_gtf(FILE* f)
                 u = std::max<pos_t>(0, u - constants::transcript_3p_extension);
             }
         }
-#endif
         t->second->erase(e1);
         t->second->insert(Exon(u, v));
         t->second->min_start = u;
+#endif
 
+#if 0
         Transcript::reverse_iterator e2 = t->second->rbegin();
         u = e2->start;
         v = e2->end;
-#if 0
         if (t->second->strand == strand_pos) {
             if (t->second->exonic_length() < 400) {
                 v += 100;
@@ -346,10 +353,10 @@ void TranscriptSet::read_gtf(FILE* f)
                 v += constants::transcript_5p_extension;
             }
         }
-#endif
         t->second->erase(--e2.base());
         t->second->insert(Exon(u, v));
         t->second->max_end = v;
+#endif
 
         transcripts.insert(*t->second);
     }

@@ -187,33 +187,29 @@ class FragmentModelInterval
             THREE_PRIME_EXONIC
         } type;
 
-        FragmentModelInterval(const Interval& interval,
-                              IntervalType type)
+        FragmentModelInterval(IntervalType type,
+                              const Interval& interval)
             : type(type)
             , seqname(interval.seqname)
             , start(interval.start)
             , end(interval.end)
             , strand(interval.strand)
-            , five_prime_dist(-1)
-            , tlen(-1)
             , tid(-1)
         {
         }
 
-        FragmentModelInterval(SeqName seqname,
+        FragmentModelInterval(IntervalType type,
+                              SeqName seqname,
                               pos_t start,
                               pos_t end,
                               strand_t strand,
-                              pos_t five_prime_dist,
-                              pos_t tlen,
-                              IntervalType type)
+                              const Transcript* transcript=NULL)
             : type(type)
             , seqname(seqname)
             , start(start)
             , end(end)
             , strand(strand)
-            , five_prime_dist(five_prime_dist)
-            , tlen(tlen)
+            , transcript(transcript)
             , tid(-1)
         {
         }
@@ -241,20 +237,17 @@ class FragmentModelInterval
         pos_t start, end;
         strand_t strand;
 
-        // Exon's distance from the 3' end of the transcript.
-        pos_t five_prime_dist;
-
-        // Transcript length
-        pos_t tlen;
-
         // Sequence associated with the intervals seqname.
-        boost::shared_ptr<twobitseq> seq0;
-        boost::shared_ptr<twobitseq> seq1;
+        boost::shared_ptr<twobitseq> seq;
+
+        // Transcript associated with the locus.
+        const Transcript* transcript;
 
     private:
         /* A the sequence ID assigned by the BAM file, so we can arrange
          * intervals in the same order. */
         int32_t tid;
+
 
         friend void sam_scan(std::vector<FragmentModelInterval*>& intervals,
                              AlnCountTrie& T,
@@ -370,15 +363,12 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
                         bam_f->header->target_name[b->core.tid]);
             }
 
-            boost::shared_ptr<twobitseq> seq0(new twobitseq(seqstr));
-            boost::shared_ptr<twobitseq> seq1(new twobitseq(*seq0));
-            seq1->revcomp();
+            boost::shared_ptr<twobitseq> seq(new twobitseq(seqstr));
             free(seqstr);
 
             for (j = j0; j < n && intervals[j]->tid <= b->core.tid; ++j) {
                 if (intervals[j]->tid < b->core.tid) continue;
-                intervals[j]->seq0 = seq0;
-                intervals[j]->seq1 = seq1;
+                intervals[j]->seq = seq;
             }
         }
 
@@ -473,14 +463,8 @@ class FragmentModelThread
                 }
                 else if (interval->type == FragmentModelInterval::THREE_PRIME_EXONIC) {
                     interval->rs.make_unique_read_counts(read_counts);
-                    measure_transcript_position(interval->start,
-                                                interval->end,
-                                                interval->strand,
-                                                interval->five_prime_dist,
-                                                interval->tlen,
-                                                interval->seq0,
-                                                interval->seq1,
-                                                read_counts);
+                    measure_transcript_position(
+                            read_counts, interval->seq, *interval->transcript);
                     read_counts.clear();
                 }
 
@@ -520,6 +504,12 @@ class FragmentModelThread
         /* Mate1 sequence bias across the current interval. */
         std::vector<double> mate1_seqbias[2];
 
+        /* Start positions of mate1 reads. */
+        std::vector<int> mate1_positions[2];
+
+        /* Transcript sequences. */
+        twobitseq tseq[2];
+
     private:
         void measure_fragment_lengths(const ReadSet::UniqueReadCounts& counts)
         {
@@ -558,65 +548,161 @@ class FragmentModelThread
         }
 
         void measure_transcript_position(
-                pos_t start, pos_t end, strand_t strand,
-                pos_t exon_five_prime_dist, pos_t tlen,
-                const boost::shared_ptr<twobitseq> seq0,
-                const boost::shared_ptr<twobitseq> seq1,
-                const ReadSet::UniqueReadCounts& counts)
+                ReadSet::UniqueReadCounts& read_counts,
+                boost::shared_ptr<twobitseq> seq,
+                const Transcript& t)
         {
+            pos_t tlen = t.exonic_length();
             size_t bin = constants::tp_num_length_bins - 1;
             for (; bin > 0 && tlen < constants::tp_length_bins[bin]; --bin);
 
             if (tlen < constants::tp_length_bins[bin]) return;
 
-            pos_t elen = end - start + 1;
-
-            if ((size_t) elen > mate1_seqbias[0].size()) {
-                mate1_seqbias[0].resize(elen);
-                mate1_seqbias[1].resize(elen);
+            // Tally mate1 start positions
+            if ((size_t) tlen > mate1_positions[0].size()) {
+                mate1_positions[0].resize(tlen);
+                mate1_positions[1].resize(tlen);
             }
 
-            std::fill(mate1_seqbias[0].begin(), mate1_seqbias[0].begin() + elen, 1.0);
-            std::fill(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + elen, 1.0);
+            std::fill(mate1_positions[0].begin(), mate1_positions[0].begin() + tlen, 0);
+            std::fill(mate1_positions[1].begin(), mate1_positions[1].begin() + tlen, 0);
 
-            if (sb && seq0 && seq1) {
-                for (pos_t pos = start; pos <= end; ++pos) {
-                    mate1_seqbias[0][pos - start] = sb->get_mate1_bias(*seq0, pos);
-                    mate1_seqbias[1][pos - start] = sb->get_mate1_bias(
-                            *seq1, seq1->size() - pos - 1);
+            for (ReadSet::UniqueReadCounts::iterator r = read_counts.begin();
+                    r != read_counts.end(); ++r) {
+                for (std::vector<Alignment*>::iterator a = r->first->mate1.begin();
+                        a != r->first->mate1.end(); ++a) {
+                    pos_t pos = (*a)->strand == strand_pos ?
+                                (*a)->start : (*a)->end;
+                    pos_t off = t.get_offset(pos);
+
+                    if (off < 0 || off >= tlen) continue;
+                    mate1_positions[(*a)->strand][off] = 1;
                 }
             }
 
-            ReadSet::UniqueReadCounts::const_iterator i;
-            for (i = counts.begin(); i != counts.end(); ++i) {
-                for (std::vector<Alignment*>::iterator j = i->first->mate1.begin();
-                        j != i->first->mate1.end(); ++j) {
-                    pos_t pos = (*j)->strand == strand_pos ?
-                        (*j)->start : (*j)->end;
-                    if (pos < start || pos > end) continue;
+            size_t coverage = 0;
+            for (pos_t pos = 0; pos < tlen; ++pos) {
+                if (mate1_positions[0][pos] || mate1_positions[1][pos]) ++coverage;
+            }
 
-                    double w = mate1_seqbias[(*j)->strand][pos - start];
-                    pos_t tpos;
-                    if (strand == strand_pos) {
-                        tpos = exon_five_prime_dist + pos - start;
-                    }
-                    else {
-                        tpos = exon_five_prime_dist + end - pos;
-                    }
+            if ((double) coverage / tlen < 0.2) return;
 
-                    if (strand == (*j)->strand) {
-                        double rpos = tpos / (double) (tlen - constants::tp_pad);
-                        if (rpos < 0.0 || rpos >= 1.0) continue;
-                        int d = rpos * constants::tp_num_bins;
-                        tp_dist_weights[bin][0][d] += 1.0 / w;
-                    }
-                    else {
-                        double rpos = (tpos - constants::tp_pad) /
-                            (double) (tlen - constants::tp_pad);
-                        if (rpos < 0.0 || rpos >= 1.0) continue;
-                        int d = rpos * constants::tp_num_bins;
-                        tp_dist_weights[bin][1][d] += 1.0 / w;
-                    }
+
+            // Heuristically decide whether coverage is good enough to use.
+            int edge_count[2] = {0, 0};
+#if 0
+            for (pos_t pos = 0; pos < 100; ++pos) {
+                edge_count[0] += mate1_positions[0][pos] + mate1_positions[1][pos];
+            }
+
+            for (pos_t pos = 100; pos < 200; ++pos) {
+                edge_count[1] += mate1_positions[0][pos] + mate1_positions[1][pos];
+            }
+
+            if (edge_count[0] > constants::tp_fold_cutoff * edge_count[1] ||
+                edge_count[1] > constants::tp_fold_cutoff * edge_count[0]) {
+                return;
+            }
+
+            edge_count[0] = edge_count[1] = 0;
+            for (pos_t pos = tlen - 200; pos < tlen - 100; ++pos) {
+                edge_count[0] += mate1_positions[0][pos] + mate1_positions[1][pos];
+            }
+
+            for (pos_t pos = tlen - 100; pos < tlen; ++pos) {
+                edge_count[1] += mate1_positions[0][pos] + mate1_positions[1][pos];
+            }
+
+            if (edge_count[0] > constants::tp_fold_cutoff * edge_count[1] ||
+                edge_count[1] > constants::tp_fold_cutoff * edge_count[0]) {
+                return;
+            }
+#endif
+
+            // XXX
+            // Find transcripts that are bizarrely 5' biased.
+            edge_count[0] = edge_count[1] = 0;
+            if (t.strand == strand_pos) {
+                for (pos_t pos = 0; pos < 50; ++pos) {
+                    edge_count[0] += mate1_positions[0][pos] + mate1_positions[1][pos];
+                }
+
+                for (pos_t pos = 50; pos < 100; ++pos) {
+                    edge_count[1] += mate1_positions[0][pos] + mate1_positions[1][pos];
+                }
+            }
+            else {
+                for (pos_t pos = tlen - 50; pos < tlen; ++pos) {
+                    edge_count[0] += mate1_positions[0][pos] + mate1_positions[1][pos];
+                }
+
+                for (pos_t pos = tlen - 100; pos < tlen; ++pos) {
+                    edge_count[1] += mate1_positions[0][pos] + mate1_positions[1][pos];
+                }
+            }
+
+            if (tlen < 500 && edge_count[0] + edge_count[1] > 40 && edge_count[0] > 3 * edge_count[1]) {
+                Logger::info("weird transcript: %s", t.transcript_id.get().c_str());
+            }
+
+
+            // Get sequence bias
+            if ((size_t) tlen > mate1_seqbias[0].size()) {
+                mate1_seqbias[0].resize(tlen);
+                mate1_seqbias[1].resize(tlen);
+            }
+
+            if (sb && seq) {
+                t.get_sequence(tseq[0], *seq, sb->getL(), sb->getR());
+                t.get_sequence(tseq[1], *seq, sb->getR(), sb->getL());
+                tseq[1].revcomp();
+
+                for (pos_t pos = 0; pos < tlen; ++pos) {
+                    mate1_seqbias[0][pos] = sb->get_mate1_bias(tseq[0], pos + sb->getL());
+                    mate1_seqbias[1][pos] = sb->get_mate1_bias(tseq[1], pos + sb->getL());
+                }
+                std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
+            }
+            else {
+                std::fill(mate1_seqbias[0].begin(), mate1_seqbias[0].begin() + tlen, 1.0);
+                std::fill(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen, 1.0);
+            }
+
+            if (t.strand == strand_pos) {
+                for (pos_t pos = 0; pos < tlen; ++pos) {
+                    double rpos = pos / (double) (tlen - constants::tp_pad);
+                    if (rpos < 0.0 || rpos >= 1.0) continue;
+                    int d = rpos * constants::tp_num_bins;
+                    tp_dist_weights[bin][0][d] +=
+                        mate1_positions[0][pos] / mate1_seqbias[0][pos];
+                }
+
+                for (pos_t pos = 0; pos < tlen; ++pos) {
+                    double rpos = (pos - constants::tp_pad) /
+                        (double) (tlen - constants::tp_pad);
+                    if (rpos < 0.0 || rpos >= 1.0) continue;
+                    int d = rpos * constants::tp_num_bins;
+                    tp_dist_weights[bin][1][d] +=
+                        mate1_positions[1][pos] / mate1_seqbias[1][pos];
+                }
+            }
+            else {
+                for (pos_t pos = 0; pos < tlen; ++pos) {
+                    double rpos = (tlen - pos - 1 - constants::tp_pad) /
+                        (double) (tlen - constants::tp_pad);
+                    if (rpos < 0.0 || rpos >= 1.0) continue;
+                    int d = rpos * constants::tp_num_bins;
+                    tp_dist_weights[bin][1][d] +=
+                        mate1_positions[0][pos] / mate1_seqbias[0][pos];
+                }
+
+                for (pos_t pos = 0; pos < tlen; ++pos) {
+                    double rpos = (tlen - pos - 1) /
+                        (double) (tlen - constants::tp_pad);
+                    if (rpos < 0.0 || rpos >= 1.0) continue;
+                    int d = rpos * constants::tp_num_bins;
+                    tp_dist_weights[bin][0][d] +=
+                        mate1_positions[1][pos] / mate1_seqbias[1][pos];
                 }
             }
         }
@@ -660,29 +746,33 @@ void FragmentModel::estimate(TranscriptSet& ts,
     std::vector<Interval>::iterator interval;
     for (interval = exonic.begin(); interval != exonic.end(); ++interval) {
         intervals.push_back(new FragmentModelInterval(
-                    *interval,
-                    FragmentModelInterval::EXONIC));
+                    FragmentModelInterval::EXONIC,
+                    *interval));
     }
 
-
+    int tp_cnt = 0;
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         pos_t tlen = t->exonic_length();
         if (tlen < constants::tp_pad) continue;
-        pos_t d = 0;
-        for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
-                pos_t elen = e->end - e->start + 1;
-                intervals.push_back(new FragmentModelInterval(
-                            t->seqname,
-                            e->start,
-                            e->end,
-                            t->strand,
-                            t->strand == strand_pos ?
-                                d : tlen - d - elen,
-                            tlen,
-                            FragmentModelInterval::THREE_PRIME_EXONIC));
-                d += elen;
+
+        if (t->biotype != "protein_coding" || t->source != "protein_coding" ||
+                (t->start_codon == -1 && t->stop_codon != -1) ||
+                (t->start_codon != -1 && t->stop_codon == -1)) {
+            continue;
         }
+
+        intervals.push_back(new FragmentModelInterval(
+                    FragmentModelInterval::THREE_PRIME_EXONIC,
+                    t->seqname,
+                    t->min_start,
+                    t->max_end,
+                    t->strand,
+                    &(*t)));
+        ++tp_cnt;
     }
+
+    Logger::info("Using %d transcripts to train tp bias.", (int) tp_cnt);
+
 
 
     std::vector<FragmentModelThread*> threads;
@@ -803,7 +893,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
                 }
             }
 
-            tp_dist[bin][strand][0] = 0.0; // XXX
             double z = 0.0;
             for (size_t j = 0; j < constants::tp_num_bins; ++j) {
                 z += tp_dist[bin][strand][j];
@@ -855,9 +944,11 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
             Logger::info("%zu %d => %f", bin, strand, z);
 
+#if 0
             for (size_t j = 0; j < constants::tp_num_bins; ++j) {
                 tp_dist[bin][strand][j] *= z;
             }
+#endif
         }
     }
 
