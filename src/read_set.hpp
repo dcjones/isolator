@@ -161,8 +161,6 @@ class ReadSet
         /* Make a unique read count from the read set. */
         void make_unique_read_counts(UniqueReadCounts& counts);
 
-        const std::set<Alignment*> mate1_alignments() const;
-
     private:
         /* Map of read ids to a AligneRead objects. */
         hattrie_t* rs;

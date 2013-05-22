@@ -574,26 +574,6 @@ void ReadSet::make_unique_read_counts(ReadSet::UniqueReadCounts& counts)
 }
 
 
-const std::set<Alignment*> ReadSet::mate1_alignments() const
-{
-    std::set<Alignment*> mate1s;
-    if (rs == NULL) return mate1s;
-    hattrie_iter_t* i;
-    ReadSet::UniqueReadCounts::iterator j;
-    for (i = hattrie_iter_begin(rs, false);
-         !hattrie_iter_finished(i);
-         hattrie_iter_next(i)) {
-        AlignedRead** r = reinterpret_cast<AlignedRead**>(hattrie_iter_val(i));
-
-        std::vector<Alignment*>::iterator j;
-        for (j = (*r)->mate1.begin(); j != (*r)->mate1.end(); ++j) {
-            mate1s.insert(*j);
-        }
-    }
-    return mate1s;
-}
-
-
 ReadSetIterator::ReadSetIterator()
     : it(NULL)
 {
