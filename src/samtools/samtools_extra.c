@@ -126,3 +126,16 @@ size_t samtell(samfile_t* fp)
 }
 
 
+uint32_t bam_calend2(const bam1_core_t *c, const uint32_t* cigar)
+{
+	uint32_t k, end;
+	end = c->pos;
+	for (k = 0; k < c->n_cigar; ++k) {
+		int op = cigar[k] & BAM_CIGAR_MASK;
+		if (op == BAM_CMATCH || op == BAM_CDEL || op == BAM_CREF_SKIP || op == BAM_CSOFT_CLIP)
+			end += cigar[k] >> BAM_CIGAR_SHIFT;
+	}
+	return end;
+}
+
+

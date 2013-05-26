@@ -64,7 +64,7 @@ bool Alignment::operator < (const Alignment& other) const
     else if (strand != other.strand) return strand < other.strand;
     else if (cigar_len != other.cigar_len) return cigar_len < other.cigar_len;
     else {
-        return memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t));
+        return memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t)) < 0;
     }
 }
 
@@ -151,21 +151,43 @@ bool AlignedRead::operator < (const AlignedRead& other) const
     if      (start != other.start) return start < other.start;
     else if (end   != other.end)   return end   < other.end;
 
+    std::set<Alignment*, AlignmentPtrCmp> S, T;
+    std::set<Alignment*, AlignmentPtrCmp>::iterator i, j;
 
-    std::set<Alignment*> S, T;
+    if (this->mate1.size() > 0) {
+        S.insert(this->mate1.begin(), this->mate1.end());
+        T.insert(other.mate1.begin(), other.mate1.end());
 
-    S.insert(this->mate1.begin(), this->mate1.end());
-    T.insert(other.mate1.begin(), other.mate1.end());
+        if (S.size() != T.size()) return S.size() < T.size();
 
-    if (S != T) return S < T;
+        i = S.begin();
+        j = T.begin();
+        while (i != S.end()) {
+            if (**i < **j) return true;
+            ++i;
+            ++j;
+        }
 
-    S.clear();
-    T.clear();
+        S.clear();
+        T.clear();
+    }
 
-    S.insert(this->mate2.begin(), this->mate2.end());
-    T.insert(other.mate2.begin(), other.mate2.end());
+    if (this->mate2.size() > 0) {
+        S.insert(this->mate2.begin(), this->mate2.end());
+        T.insert(other.mate2.begin(), other.mate2.end());
 
-    return S < T;
+        if (S.size() != T.size()) return S.size() < T.size();
+
+        i = S.begin();
+        j = T.begin();
+        while (i != S.end()) {
+            if (**i < **j) return true;
+            ++i;
+            ++j;
+        }
+    }
+
+    return false;
 }
 
 
@@ -532,7 +554,7 @@ void ReadSet::add_alignment(const bam1_t* b)
     if (b->core.flag & BAM_FREAD2) r->mate2.push_back(a);
     else                           r->mate1.push_back(a);
 
-    if (r->start == -1 || r->start < a->start) r->start = a->start;
+    if (r->start == -1 || r->start > a->start) r->start = a->start;
     if (r->end   == -1 || r->end   < a->end)   r->end   = a->end;
 }
 

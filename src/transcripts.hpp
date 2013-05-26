@@ -84,6 +84,9 @@ class Transcript : public std::set<Exon>
         pos_t start_codon;
         pos_t stop_codon;
 
+        GeneBiotype biotype;
+        GeneSource source;
+
         /* A sequential identifier, unique within the container TranscriptSet. */
         unsigned int id;
 

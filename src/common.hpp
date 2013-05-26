@@ -35,6 +35,12 @@ typedef boost::flyweight<std::string, boost::flyweights::tag<transcript_id_tag> 
 struct seq_name_tag {};
 typedef boost::flyweight<std::string, boost::flyweights::tag<transcript_id_tag> > SeqName;
 
+struct gene_biotype_tag {};
+typedef boost::flyweight<std::string, boost::flyweights::tag<gene_biotype_tag> > GeneBiotype;
+
+struct gene_source_tag {};
+typedef boost::flyweight<std::string, boost::flyweights::tag<gene_source_tag> > GeneSource;
+
 #define UNUSED(x) (void)(x)
 
 #endif

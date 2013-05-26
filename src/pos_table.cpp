@@ -43,7 +43,7 @@ void PosTable::add(bam1_t* b, samfile_t* bam_f)
 
     int strand = bam1_strand(b);
     int32_t pos;
-    if (strand) pos = bam_calend(&b->core, bam1_cigar(b)) - 1;
+    if (strand) pos = bam_calend2(&b->core, bam1_cigar(b)) - 1;
     else        pos = b->core.pos;
 
     if (subtable.values[strand].empty() || subtable.values[strand].back().pos != pos) {

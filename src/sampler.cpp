@@ -675,7 +675,7 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
                 continue;
             }
 
-            pos_t b_end = (pos_t) bam_calend(&b->core, bam1_cigar(b)) - 1;
+            pos_t b_end = (pos_t) bam_calend2(&b->core, bam1_cigar(b)) - 1;
             if (b_end <= intervals[j]->ts.max_end) {
                 intervals[j]->add_alignment(b);
             }
@@ -865,10 +865,6 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
                 has_compatible_transcript = true;
                 break;
             }
-            // XXX
-            //else if (t->transcript_id == "ENST00000233143") {
-                //fprintf(stderr, "AAA");
-            //}
         }
 
         if (has_compatible_transcript) {
@@ -964,7 +960,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
                 w = 0.0;
             }
 
-            w += j->align_pr * j->frag_weight;
+            w = std::max<double>(w, j->align_pr * j->frag_weight);
         }
         if (w > 0.0) {
             weight_matrix.push(j0->transcript_idx, frag_idx, w);
@@ -1006,7 +1002,26 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
-    if (tlen <= constants::tp_pad) return;
+    if (tlen <= 100) return;
+
+    if (t.strand == strand_neg) {
+        for (pos_t pos = 0; pos < 100; ++pos) {
+            mate1_seqbias[0][pos] = 1.0;
+            mate2_seqbias[0][pos] = 1.0;
+            mate1_seqbias[1][pos] = 1.0;
+            mate2_seqbias[1][pos] = 1.0;
+        }
+    }
+    else {
+        for (pos_t pos = tlen - 100; pos < tlen; ++pos) {
+            mate1_seqbias[0][pos] = 1.0;
+            mate2_seqbias[0][pos] = 1.0;
+            mate1_seqbias[1][pos] = 1.0;
+            mate2_seqbias[1][pos] = 1.0;
+        }
+    }
+
+    return;
 
     size_t bin = constants::tp_num_length_bins - 1;
     for (; bin > 0 && tlen < constants::tp_length_bins[bin]; --bin);
@@ -1037,6 +1052,7 @@ void SamplerInitThread::transcript_sequence_bias(
         }
     }
 
+#if 0
     if (t.transcript_id == "ENST00000284292") {
 
         FILE* out = fopen("ENST00000284292.0.tsv", "w");
@@ -1053,6 +1069,7 @@ void SamplerInitThread::transcript_sequence_bias(
         }
         fclose(out);
     }
+#endif
 }
 
 
@@ -1107,7 +1124,7 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         tw += frag_len_pr * ws[frag_len];
     }
 
-    // XXX
+#if 0
     if (t.transcript_id == "ENST00000233143") {
         FILE* out = fopen("ENST00000233143.tlen.tsv", "w");
         fprintf(out, "frag_len\tp\n");
@@ -1116,6 +1133,7 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         }
         fclose(out);
     }
+#endif
 
     if (!finite(tw) || tw <= constants::min_transcript_weight) {
         tw = 0.0;
@@ -1141,6 +1159,12 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?
                                     a.mate1->start : a.mate1->end);
         if (offset < 0 || offset >= tlen) return 0.0;
+
+#if 0
+        // Try throwing away 5' reads, for whatever reason.
+        if (t.strand == strand_pos && a.mate1->strand == strand_pos && offset < 40) return 0.0;
+        if (t.strand == strand_neg && a.mate1->strand == strand_neg && tlen - offset < 40) return 0.0;
+#endif
 
         //double cdf;
         //if (a.mate1->strand == t.strand) {
@@ -1903,6 +1927,8 @@ class MultireadSamplerThread
 
                     float sumprob = 0.0;
                     unsigned int k = S.multiread_num_alignments[block.u];
+
+
                     for (unsigned int i = 0; i < k; ++i) {
                         sumprob += *S.multiread_alignments[block.u][i].prob * S.cmix[c];
                         *S.multiread_alignments[block.u][i].count = 0;
@@ -2032,7 +2058,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
     std::vector<MultireadSamplerThread*> multiread_threads(constants::num_threads);
     for (size_t i = 0; i < constants::num_threads; ++i) {
         multiread_threads[i] = new MultireadSamplerThread(*this, multiread_queue);
-        multiread_threads[i]->hillclimb = false;
+        multiread_threads[i]->hillclimb = true;
     }
 
     unsigned int* cs = new unsigned int [num_components];
@@ -2236,7 +2262,8 @@ void Sampler::init_frag_probs()
 {
     for (unsigned int i = 0; i < num_components; ++i) {
         unsigned component_size = component_frag[i + 1] - component_frag[i];
-        std::fill(frag_probs[i], frag_probs[i] + component_size, 0.0f);
+        //std::fill(frag_probs[i], frag_probs[i] + component_size, 0.0f);
+        std::fill(frag_probs[i], frag_probs[i] + component_size, 1e-8);
     }
 
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {

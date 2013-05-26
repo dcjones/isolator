@@ -29,6 +29,9 @@ void bam_init_header_hash(bam_header_t *header);
 char* faidx_fetch_seq_forced_lower(const faidx_t* fai, const char *c_name, int p_beg_i, int p_end_i);
 
 
+/* Calculate read end-point include soft-clipping. */
+uint32_t bam_calend2(const bam1_core_t *c, const uint32_t* cigar);
+
 #ifdef __cplusplus
 }
 #endif

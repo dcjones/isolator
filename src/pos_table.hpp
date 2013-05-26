@@ -6,6 +6,7 @@
 
 #include "common.hpp"
 #include "samtools/sam.h"
+#include "samtools/samtools_extra.h"
 
 
 /* A simple read position structure. */

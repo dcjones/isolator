@@ -26,7 +26,7 @@ size_t               constants::tp_num_length_bins           = 4;
 pos_t                constants::tp_length_bins[4]            =
     {500, 1000, 1500, 2000};
 size_t               constants::tp_num_bins                  = 25;
-pos_t                constants::tp_pad                       = 200;
+pos_t                constants::tp_pad                       = 0;
 float                constants::min_transcript_weight        = 5.0;
 float                constants::tmix_prior_prec              = 0.01;
 unsigned int         constants::sampler_component_block_size = 50;

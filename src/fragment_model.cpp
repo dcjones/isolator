@@ -473,7 +473,8 @@ class FragmentModelThread
                 }
                 else if (interval->type == FragmentModelInterval::THREE_PRIME_EXONIC) {
                     interval->rs.make_unique_read_counts(read_counts);
-                    measure_transcript_position(interval->start,
+                    measure_transcript_position(interval->seqname,
+                                                interval->start,
                                                 interval->end,
                                                 interval->strand,
                                                 interval->five_prime_dist,
@@ -558,12 +559,15 @@ class FragmentModelThread
         }
 
         void measure_transcript_position(
+                SeqName seqname,
                 pos_t start, pos_t end, strand_t strand,
                 pos_t exon_five_prime_dist, pos_t tlen,
                 const boost::shared_ptr<twobitseq> seq0,
                 const boost::shared_ptr<twobitseq> seq1,
                 const ReadSet::UniqueReadCounts& counts)
         {
+            if (counts.size() / (double) (end - start + 1) < 0.1) return;
+
             size_t bin = constants::tp_num_length_bins - 1;
             for (; bin > 0 && tlen < constants::tp_length_bins[bin]; --bin);
 
@@ -588,9 +592,33 @@ class FragmentModelThread
             }
 
             ReadSet::UniqueReadCounts::const_iterator i;
+            std::set<Alignment*, AlignmentPtrCmp> mate1s;
             for (i = counts.begin(); i != counts.end(); ++i) {
                 for (std::vector<Alignment*>::iterator j = i->first->mate1.begin();
                         j != i->first->mate1.end(); ++j) {
+                    mate1s.insert(*j);
+                }
+            }
+
+            size_t zero_count = 0;
+            size_t one_count = 0;
+#if 0
+            AlignedRead *x, *y = NULL;
+            for (i = counts.begin(); i != counts.end(); ++i) {
+                x = y;
+                y = i->first;
+                bool l = true, g = true;
+                if (x != NULL) {
+                    l = *x < *y;
+                    g = *y < *x;
+                }
+
+                for (std::vector<Alignment*>::iterator j = i->first->mate1.begin();
+                        j != i->first->mate1.end(); ++j) {
+#endif
+                for (std::set<Alignment*, AlignmentPtrCmp>::iterator j =
+                        mate1s.begin(); j != mate1s.end(); ++j) {
+
                     pos_t pos = (*j)->strand == strand_pos ?
                         (*j)->start : (*j)->end;
                     if (pos < start || pos > end) continue;
@@ -609,6 +637,9 @@ class FragmentModelThread
                         if (rpos < 0.0 || rpos >= 1.0) continue;
                         int d = rpos * constants::tp_num_bins;
                         tp_dist_weights[bin][0][d] += 1.0 / w;
+
+                        if (bin == 0 && d == 0) ++zero_count;
+                        if (bin == 0 && d == 3) ++one_count;
                     }
                     else {
                         double rpos = (tpos - constants::tp_pad) /
@@ -618,6 +649,16 @@ class FragmentModelThread
                         tp_dist_weights[bin][1][d] += 1.0 / w;
                     }
                 }
+#if 0
+            }
+#endif
+
+            //if (seqname == "7" && start == 5570154 && end == 5570220) {
+                //Logger::info("here: %zu", zero_count);
+            //}
+            if (bin == 0 && zero_count > 40) {
+                Logger::info("%s:%d-%d (%zu, %zu)", seqname.get().c_str(),
+                        start, end, zero_count, one_count);
             }
         }
 
@@ -665,13 +706,15 @@ void FragmentModel::estimate(TranscriptSet& ts,
     }
 
 
+    std::set<FragmentModelInterval*, FragmentModelIntervalPtrCmp> tp_intervals;
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         pos_t tlen = t->exonic_length();
-        if (tlen < constants::tp_pad) continue;
+        if (tlen < 300) continue;
+
         pos_t d = 0;
         for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
                 pos_t elen = e->end - e->start + 1;
-                intervals.push_back(new FragmentModelInterval(
+                FragmentModelInterval* interval = new FragmentModelInterval(
                             t->seqname,
                             e->start,
                             e->end,
@@ -679,7 +722,15 @@ void FragmentModel::estimate(TranscriptSet& ts,
                             t->strand == strand_pos ?
                                 d : tlen - d - elen,
                             tlen,
-                            FragmentModelInterval::THREE_PRIME_EXONIC));
+                            FragmentModelInterval::THREE_PRIME_EXONIC);
+                //if (tp_intervals.find(interval) != tp_intervals.end()) {
+                    //delete interval;
+                //}
+                //else {
+                    //tp_intervals.insert(interval);
+                    intervals.push_back(interval);
+                //}
+
                 d += elen;
         }
     }
@@ -803,7 +854,15 @@ void FragmentModel::estimate(TranscriptSet& ts,
                 }
             }
 
-            tp_dist[bin][strand][0] = 0.0; // XXX
+            if (bin == 0 && strand == 0) {
+                Logger::info("tp_dist[0][0][0] = %f", tp_dist[0][0][0]);
+                Logger::info("tp_dist[0][0][1] = %f", tp_dist[0][0][1]);
+                Logger::info("tp_dist[0][0][2] = %f", tp_dist[0][0][2]);
+                Logger::info("tp_dist[0][0][3] = %f", tp_dist[0][0][3]);
+                Logger::info("tp_dist[0][0][4] = %f", tp_dist[0][0][4]);
+                Logger::info("tp_dist[0][0][5] = %f", tp_dist[0][0][5]);
+            }
+
             double z = 0.0;
             for (size_t j = 0; j < constants::tp_num_bins; ++j) {
                 z += tp_dist[bin][strand][j];
@@ -812,6 +871,10 @@ void FragmentModel::estimate(TranscriptSet& ts,
             for (size_t j = 0; j < constants::tp_num_bins; ++j) {
                 tp_dist[bin][strand][j] /= z;
             }
+
+            // XXX The magic happens here!
+            //tp_dist[bin][0][0] = 0.0;
+            //tp_dist[bin][0][1] = 0.0;
         }
     }
 
@@ -819,7 +882,19 @@ void FragmentModel::estimate(TranscriptSet& ts,
     // Normalize to each other
     for (size_t bin = 0; bin < constants::tp_num_length_bins - 1; ++bin) {
         for (int strand = 0; strand < 2; ++strand) {
+
+            // normalize by midpoint
+            double u = tp_dist[bin][strand][constants::tp_num_bins/2];
+
+            pos_t pos = 0.5 * constants::tp_length_bins[bin];
+            double rpos = 1.0 - (double) pos /
+                constants::tp_length_bins[constants::tp_num_length_bins - 1];
+            double v = tp_dist[constants::tp_num_length_bins - 1][strand][rpos * constants::tp_num_bins];
+            double z = v / u;
+
+
             // normalizing by 3' end
+#if 0
             double rpos = 1.0 - (double) constants::tp_length_bins[bin] /
                 (double) constants::tp_length_bins[constants::tp_num_length_bins - 1];
             size_t j0 = rpos * constants::tp_num_bins;
@@ -830,6 +905,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
             }
 
             z = (z / (constants::tp_num_bins - j0)) / (1.0 / constants::tp_num_bins);
+#endif
 
             // normalizing by 5' end
 #if 0
@@ -869,6 +945,15 @@ void FragmentModel::estimate(TranscriptSet& ts,
         }
     }
 
+#if 0
+    // XXX intentionally downweighting the long bin
+    for (size_t strand = 0; strand <= 1; ++strand) {
+        for (size_t j = 0; j < constants::tp_num_bins; ++j) {
+            tp_dist[constants::tp_num_length_bins - 1][strand][j] *= 1.2;
+            tp_dist[constants::tp_num_length_bins - 2][strand][j] *= 1.1;
+        }
+    }
+#endif
 
     for (int strand = 0; strand < 2; ++strand) {
         FILE* out;
