@@ -986,24 +986,49 @@ void SamplerInitThread::transcript_sequence_bias(
     std::fill(mate2_seqbias[0].begin(), mate2_seqbias[0].begin() + tlen, 1.0);
     std::fill(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen, 1.0);
 
-    if (fm.sb == NULL || locus.seq == NULL) return;
+    if (fm.sb[0] == NULL || locus.seq == NULL) return;
 
-    t.get_sequence(tseq0, *locus.seq, fm.sb->getL(), fm.sb->getR());
-    t.get_sequence(tseq1, *locus.seq, fm.sb->getR(), fm.sb->getL());
+    t.get_sequence(tseq0, *locus.seq, constants::seqbias_left_pos, constants::seqbias_right_pos);
+    t.get_sequence(tseq1, *locus.seq, constants::seqbias_right_pos, constants::seqbias_left_pos);
     tseq1.revcomp();
 
     for (pos_t pos = 0; pos < tlen; ++pos) {
-        mate1_seqbias[0][pos] = fm.sb->get_mate1_bias(tseq0, pos + fm.sb->getL());
-        mate1_seqbias[1][pos] = fm.sb->get_mate1_bias(tseq1, pos + fm.sb->getL());
-        mate2_seqbias[0][pos] = fm.sb->get_mate2_bias(tseq0, pos + fm.sb->getL());
-        mate2_seqbias[1][pos] = fm.sb->get_mate2_bias(tseq1, pos + fm.sb->getL());
+        int bin[2] = {1,1};
+        if (t.strand == strand_pos) {
+            if (pos < constants::seqbias_fp_end) bin[0] = 0;
+            else if (tlen - pos < constants::seqbias_tp_end) bin[0] = 2;
+            else bin[0] = 1;
+
+            if (pos < constants::seqbias_tp_end) bin[1] = 2;
+            else if (tlen - pos < constants::seqbias_fp_end) bin[1] = 0;
+            else bin[1] = 1;
+        }
+        else {
+            if (pos < constants::seqbias_tp_end) bin[0] = 2;
+            else if (tlen - pos < constants::seqbias_fp_end) bin[0] = 0;
+            else bin[0] = 1;
+
+            if (pos < constants::seqbias_fp_end) bin[1] = 0;
+            else if (tlen - pos < constants::seqbias_tp_end) bin[1] = 2;
+            else bin[1] = 1;
+        }
+
+        mate1_seqbias[0][pos] = fm.sb[bin[0]]->get_mate1_bias(tseq0,
+                pos + constants::seqbias_left_pos);
+        mate1_seqbias[1][pos] = fm.sb[bin[1]]->get_mate1_bias(tseq1,
+                pos + constants::seqbias_left_pos);
+        mate2_seqbias[0][pos] = fm.sb[bin[0]]->get_mate2_bias(tseq0,
+                pos + constants::seqbias_left_pos);
+        mate2_seqbias[1][pos] = fm.sb[bin[1]]->get_mate2_bias(tseq1,
+                pos + constants::seqbias_left_pos);
     }
 
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
-    if (tlen <= 100) return;
+    if (tlen <= 200) return;
 
+#if 0
     if (t.strand == strand_neg) {
         for (pos_t pos = 0; pos < 100; ++pos) {
             mate1_seqbias[0][pos] = 1.0;
@@ -1020,8 +1045,9 @@ void SamplerInitThread::transcript_sequence_bias(
             mate2_seqbias[1][pos] = 1.0;
         }
     }
+#endif
 
-    return;
+    //return;
 
     size_t bin = constants::tp_num_length_bins - 1;
     for (; bin > 0 && tlen < constants::tp_length_bins[bin]; --bin);

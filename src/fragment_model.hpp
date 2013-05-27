@@ -97,7 +97,7 @@ class FragmentModel
         FragmentModel();
         ~FragmentModel();
         void estimate(TranscriptSet& ts, const char* bam_fn, const char* fa_fn);
-        void train_seqbias(const char* bam_fn, const char* fa_fn);
+        void train_seqbias(TranscriptSet& ts, const char* bam_fn, const char* fa_fn);
 
         /* Fragment length probability ,cdf, and median using a fallback when no
          * emperical distribution is available. */
@@ -118,7 +118,7 @@ class FragmentModel
         float strand_specificity;
 
         /* A model of sequence bias. */
-        sequencing_bias* sb;
+        sequencing_bias* sb[3];
 
         /* Distribution over fragment lengths. */
         EmpDist* frag_len_dist;

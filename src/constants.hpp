@@ -43,6 +43,11 @@ namespace constants
      * seqbias. */
     extern size_t seqbias_right_pos;
 
+    /* Seperate seqbias models are trained for the 3' end 5' ends of
+     * transcripts. These numbers define the extent of the ends. */
+    extern pos_t seqbias_tp_end;
+    extern pos_t seqbias_fp_end;
+
     /* Library type; how the mates in paired-end data sets were generated. */
     enum libtype_t {
         LIBTYPE_FR,  //  ======>--------<======
