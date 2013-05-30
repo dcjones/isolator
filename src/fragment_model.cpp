@@ -521,6 +521,8 @@ class FragmentModelThread
                 AlignedReadIterator j(*i->first);
                 for (; j != AlignedReadIterator(); ++j) {
                     if (j->mate1 == NULL || j->mate2 == NULL) continue;
+                    if (j->mate1->cigar_len != 1 || j->mate2->cigar_len != 1) continue;
+
                     pos_t len = j->naive_frag_len();
 
                     if (len <= 0 || len > constants::max_frag_len) continue;
@@ -663,14 +665,6 @@ class FragmentModelThread
 #if 0
             }
 #endif
-
-            //if (seqname == "7" && start == 5570154 && end == 5570220) {
-                //Logger::info("here: %zu", zero_count);
-            //}
-            if (bin == 0 && zero_count > 40) {
-                Logger::info("%s:%d-%d (%zu, %zu)", seqname.get().c_str(),
-                        start, end, zero_count, one_count);
-            }
         }
 
         Queue<FragmentModelInterval*>& q;
@@ -897,6 +891,22 @@ void FragmentModel::estimate(TranscriptSet& ts,
         for (int strand = 0; strand < 2; ++strand) {
 
 #if 0
+            // normalize by max
+            double u = 0.0;
+            for (size_t d = 0; d < constants::tp_num_bins; ++d) {
+                u = std::max<double>(u, tp_dist[bin][strand][d]);
+            }
+
+            double v = 0.0;
+            for (size_t d = 0; d < constants::tp_num_bins; ++d) {
+                v = std::max<double>(v, tp_dist[constants::tp_num_length_bins - 1][strand][d]);
+            }
+
+            double z = v / u;
+#endif
+
+
+#if 0
             // normalize by midpoint
             double u = tp_dist[bin][strand][constants::tp_num_bins/2];
 
@@ -907,6 +917,19 @@ void FragmentModel::estimate(TranscriptSet& ts,
             double z = v / u;
 #endif
 
+
+            // normalize by not-quite-midpoint
+            pos_t pos = constants::tp_length_bins[bin] - 200;
+            double rpos =  (double) pos / constants::tp_length_bins[bin];
+            double u = tp_dist[bin][strand][rpos * constants::tp_num_bins];
+
+            pos = constants::tp_length_bins[constants::tp_num_length_bins - 1] - 200;
+            rpos = (double) pos /
+                constants::tp_length_bins[constants::tp_num_length_bins - 1];
+            double v = tp_dist[constants::tp_num_length_bins - 1][strand][rpos * constants::tp_num_bins];
+            double z = v / u;
+
+#if 0
             // normalizing by 3' end
             double rpos = 1.0 - (double) constants::tp_length_bins[bin] /
                 (double) constants::tp_length_bins[constants::tp_num_length_bins - 1];
@@ -918,9 +941,10 @@ void FragmentModel::estimate(TranscriptSet& ts,
             }
 
             z = (z / (constants::tp_num_bins - j0)) / (1.0 / constants::tp_num_bins);
+#endif
 
-            // normalizing by 5' end
 #if 0
+            // normalizing by 5' end
             double rpos = (double) constants::tp_length_bins[bin] /
                 (double) constants::tp_length_bins[constants::tp_num_length_bins - 1];
             size_t j0 = rpos * constants::tp_num_bins;
@@ -940,6 +964,10 @@ void FragmentModel::estimate(TranscriptSet& ts,
                 tp_dist[bin][strand][constants::tp_num_bins/2];
 #endif
 
+#if 0
+            double z = tp_dist[constants::tp_num_length_bins - 1][strand][constants::tp_num_bins-1] /
+                tp_dist[bin][strand][constants::tp_num_bins-1];
+#endif
 
             Logger::info("%zu %d => %f", bin, strand, z);
 
@@ -1072,6 +1100,8 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
             pos_t pos = (*j)->strand == strand_pos ?
                 b->core.pos : bam_calend(&b->core, bam1_cigar(b)) - 1;
 
+            if (pos < (*j)->start || pos > (*j)->end) continue;
+
             // Add alignment somewhere
             pos_t off;
             if ((*j)->strand == strand_pos) {
@@ -1108,7 +1138,16 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
                                  constants::seqbias_num_reads,
                                  constants::seqbias_left_pos,
                                  constants::seqbias_right_pos);
+
+        /* XXX: dumping seqbias models */
+        char fn[100];
+        sprintf(fn, "seqbias_%d.dot", bin);
+        FILE* out = fopen(fn, "w");
+        fputs(sb[bin]->model_graph().c_str(), out);
+        fclose(out);
     }
+
+
 }
 
 

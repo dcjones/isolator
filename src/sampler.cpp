@@ -994,6 +994,7 @@ void SamplerInitThread::transcript_sequence_bias(
 
     for (pos_t pos = 0; pos < tlen; ++pos) {
         int bin[2] = {1,1};
+#if 0
         if (t.strand == strand_pos) {
             if (pos < constants::seqbias_fp_end) bin[0] = 0;
             else if (tlen - pos < constants::seqbias_tp_end) bin[0] = 2;
@@ -1012,6 +1013,7 @@ void SamplerInitThread::transcript_sequence_bias(
             else if (tlen - pos < constants::seqbias_tp_end) bin[1] = 2;
             else bin[1] = 1;
         }
+#endif
 
         mate1_seqbias[0][pos] = fm.sb[bin[0]]->get_mate1_bias(tseq0,
                 pos + constants::seqbias_left_pos);
@@ -1028,26 +1030,22 @@ void SamplerInitThread::transcript_sequence_bias(
 
     if (tlen <= 200) return;
 
-#if 0
-    if (t.strand == strand_neg) {
-        for (pos_t pos = 0; pos < 100; ++pos) {
+    //if (t.strand == strand_neg) {
+        for (pos_t pos = 0; pos < 15; ++pos) {
             mate1_seqbias[0][pos] = 1.0;
             mate2_seqbias[0][pos] = 1.0;
             mate1_seqbias[1][pos] = 1.0;
             mate2_seqbias[1][pos] = 1.0;
         }
-    }
-    else {
-        for (pos_t pos = tlen - 100; pos < tlen; ++pos) {
+    //}
+    //else {
+        for (pos_t pos = tlen - 15; pos < tlen; ++pos) {
             mate1_seqbias[0][pos] = 1.0;
             mate2_seqbias[0][pos] = 1.0;
             mate1_seqbias[1][pos] = 1.0;
             mate2_seqbias[1][pos] = 1.0;
         }
-    }
-#endif
-
-    //return;
+    //}
 
     size_t bin = constants::tp_num_length_bins - 1;
     for (; bin > 0 && tlen < constants::tp_length_bins[bin]; --bin);
@@ -1078,24 +1076,35 @@ void SamplerInitThread::transcript_sequence_bias(
         }
     }
 
-#if 0
-    if (t.transcript_id == "ENST00000284292") {
-
-        FILE* out = fopen("ENST00000284292.0.tsv", "w");
+    if (t.transcript_id == "ENST00000233143") {
+        FILE* out = fopen("ENST00000233143.mate1.0.tsv", "w");
         fprintf(out, "i\tw\n");
         for (pos_t i = 0; i < tlen; ++i) {
             fprintf(out, "%ld\t%e\n", i, mate1_seqbias[0][i]);
         }
         fclose(out);
 
-        out = fopen("ENST00000284292.1.tsv", "w");
+        out = fopen("ENST00000233143.mate1.1.tsv", "w");
         fprintf(out, "i\tw\n");
         for (pos_t i = 0; i < tlen; ++i) {
             fprintf(out, "%ld\t%e\n", i, mate1_seqbias[1][i]);
         }
         fclose(out);
+
+        out = fopen("ENST00000233143.mate2.0.tsv", "w");
+        fprintf(out, "i\tw\n");
+        for (pos_t i = 0; i < tlen; ++i) {
+            fprintf(out, "%ld\t%e\n", i, mate2_seqbias[0][i]);
+        }
+        fclose(out);
+
+        out = fopen("ENST00000233143.mate2.1.tsv", "w");
+        fprintf(out, "i\tw\n");
+        for (pos_t i = 0; i < tlen; ++i) {
+            fprintf(out, "%ld\t%e\n", i, mate2_seqbias[1][i]);
+        }
+        fclose(out);
     }
-#endif
 }
 
 
@@ -1212,10 +1221,6 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         w *= mate2_seqbias[a.mate2->strand][offset];
     }
 
-    //pos_t start = t.get_offset(
-            //a.mate2 ? std::min<pos_t>(a.mate1->start, a.mate2->start) : a.mate1->start);
-    //float c = frag_len_c(tlen - start);
-
     // strand-specificity
     if (a.mate1) {
         w *= a.mate1->strand == t.strand ?
@@ -1230,8 +1235,7 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     if (frag_len_pr < constants::min_frag_len_pr) return 0.0;
     if (frag_len_pr * w < constants::min_frag_weight) return 0.0;
 
-    //return frag_len_pr / tw;
-    return frag_len_pr * w / ws[frag_len] / frag_len_c(tlen);;
+    return frag_len_pr / tw;
 }
 
 
@@ -2084,7 +2088,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
     std::vector<MultireadSamplerThread*> multiread_threads(constants::num_threads);
     for (size_t i = 0; i < constants::num_threads; ++i) {
         multiread_threads[i] = new MultireadSamplerThread(*this, multiread_queue);
-        multiread_threads[i]->hillclimb = true;
+        multiread_threads[i]->hillclimb = false;
     }
 
     unsigned int* cs = new unsigned int [num_components];
@@ -2169,12 +2173,33 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
 
         // DEBUGING XXX
-        //for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-            //if (t->transcript_id == "ENST00000233143") {
-                //Logger::info("ENST00000233143 has %f fragments.",
-                             //frag_count_sums[transcript_component[t->id]]);
-            //}
-        //}
+        if (sample_num == 0) {
+            for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+                if (t->transcript_id == "ENST00000282470") {
+                    //Logger::info("ENST00000282470 has %ld fragments.",
+                                 //weight_matrix->rowlens[t->id]);
+                    Logger::info("ENST00000282470: %e", tmix[t->id]);
+
+                    //FILE* out = fopen("ENST00000282470.frag_prob.txt", "w");
+                    //for (unsigned int i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
+                        //fprintf(out, "%e\n", weight_matrix->rows[t->id][i]);
+                    //}
+                    //fclose(out);
+                }
+
+                if (t->transcript_id == "ENST00000503414") {
+                    //Logger::info("ENST00000503414 has %ld fragments.",
+                                 //weight_matrix->rowlens[t->id]);
+                    Logger::info("ENST00000503414: %e", tmix[t->id]);
+
+                    //FILE* out = fopen("ENST00000503414.frag_prob.txt", "w");
+                    //for (unsigned int i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
+                        //fprintf(out, "%e\n", weight_matrix->rows[t->id][i]);
+                    //}
+                    //fclose(out);
+                }
+            }
+        }
 
 
         /* Record a new sample */
@@ -2288,7 +2313,6 @@ void Sampler::init_frag_probs()
 {
     for (unsigned int i = 0; i < num_components; ++i) {
         unsigned component_size = component_frag[i + 1] - component_frag[i];
-        //std::fill(frag_probs[i], frag_probs[i] + component_size, 0.0f);
         std::fill(frag_probs[i], frag_probs[i] + component_size, 1e-8);
     }
 

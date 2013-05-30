@@ -27,7 +27,7 @@ Alignment::Alignment(const Alignment& a)
 Alignment::Alignment(const bam1_t* b)
 {
     start     = (pos_t)b->core.pos;
-    end       = bam_calend(&b->core, bam1_cigar(b)) - 1;
+    end       = bam_calend2(&b->core, bam1_cigar(b)) - 1;
     strand    = bam1_strand(b);
     cigar_len = b->core.n_cigar;
     cigar     = new uint32_t [b->core.n_cigar];
@@ -46,7 +46,7 @@ bool Alignment::operator == (const bam1_t* b) const
     if (this->start != (pos_t) b->core.pos) return false;
     if (this->strand != bam1_strand(b)) return false;
     if (this->cigar_len != b->core.n_cigar) return false;
-    if (this->end != (pos_t) (bam_calend(&b->core, bam1_cigar(b)) - 1)) return false;
+    if (this->end != (pos_t) (bam_calend2(&b->core, bam1_cigar(b)) - 1)) return false;
     return memcmp(cigar, bam1_cigar(b), cigar_len * sizeof(uint32_t)) == 0;
 }
 
@@ -327,7 +327,9 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
             }
             else {
                 if (!intron_compatible_cigar_op(c1->op)) return -1;
-                intron_len += c1->end - c1->start + 1;
+                if (c1->op != BAM_CSOFT_CLIP) {
+                    intron_len += c1->end - c1->start + 1;
+                }
             }
 
             ++c1;

@@ -417,14 +417,17 @@ void sequencing_bias::buildn(motif** Mn,
         /* adjust the current read position randomly, and sample */
         for (bg_sample_num = 0; bg_sample_num < bg_samples;) {
 
-            //bg_pos = i->pos + (pos_t)round_away(rand_gauss(1000));
+            //bg_pos = i->pos + (pos_t)round_away(rand_gauss(25));
+            bg_pos = i->pos + (pos_t)round_away(rand_gauss(25));
 
+#if 0
             if (rand() < RAND_MAX / 2) {
-                bg_pos = i->pos + 500 + (pos_t)rand_gauss(100);
+                bg_pos = i->pos + 50 + (pos_t)rand_gauss(100);
             }
             else {
-                bg_pos = i->pos - 500 + (pos_t)rand_gauss(100);
+                bg_pos = i->pos - 50 + (pos_t)rand_gauss(100);
             }
+#endif
 
             if (i->strand == strand_neg) {
                 if (bg_pos < R || bg_pos >= seqlen - L) continue;
