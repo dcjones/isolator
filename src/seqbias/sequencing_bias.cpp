@@ -189,10 +189,12 @@ sequencing_bias::sequencing_bias(const char* ref_fn,
                                  PosTable& T1, PosTable& T2,
                                  size_t max_reads,
                                  pos_t L, pos_t R,
+                                 double bgsd,
                                  double complexity_penalty)
     : ref_f(NULL)
     , M1(NULL)
     , M2(NULL)
+    , bgsd(bgsd)
 {
     gc1[0] = gc1[1] = gc2[0] = gc2[1] = NULL;
     build(ref_fn, T1, T2, max_reads, L, R,
@@ -417,8 +419,7 @@ void sequencing_bias::buildn(motif** Mn,
         /* adjust the current read position randomly, and sample */
         for (bg_sample_num = 0; bg_sample_num < bg_samples;) {
 
-            //bg_pos = i->pos + (pos_t)round_away(rand_gauss(25));
-            bg_pos = i->pos + (pos_t)round_away(rand_gauss(25));
+            bg_pos = i->pos + (pos_t)round_away(rand_gauss(bgsd));
 
 #if 0
             if (rand() < RAND_MAX / 2) {

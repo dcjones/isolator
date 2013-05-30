@@ -586,7 +586,8 @@ class FragmentModelThread
                         off = exon_five_prime_dist + end - pos;
                     }
 
-                    int bin;
+                    int bin = 1;
+#if 0
                     if (strand == strand_pos) {
                         if (off < constants::seqbias_fp_end) bin = 0;
                         else if (tlen - off < constants::seqbias_tp_end) bin = 2;
@@ -597,6 +598,7 @@ class FragmentModelThread
                         else if (tlen - off < constants::seqbias_fp_end) bin = 2;
                         else bin = 1;
                     }
+#endif
 
                     mate1_seqbias[0][pos - start] = sb[bin]->get_mate1_bias(*seq0, pos);
                     mate1_seqbias[1][pos - start] = sb[bin]->get_mate1_bias(
@@ -1133,6 +1135,25 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
         delete *i;
     }
 
+    sb[0] = new sequencing_bias(fa_fn, mate1_pos_tab[0], mate2_pos_tab[0],
+                                constants::seqbias_num_reads,
+                                constants::seqbias_left_pos,
+                                constants::seqbias_right_pos,
+                                25.0);
+
+    sb[1] = new sequencing_bias(fa_fn, mate1_pos_tab[1], mate2_pos_tab[1],
+                                constants::seqbias_num_reads,
+                                constants::seqbias_left_pos,
+                                constants::seqbias_right_pos,
+                                250.0);
+
+    sb[2] = new sequencing_bias(fa_fn, mate1_pos_tab[2], mate2_pos_tab[2],
+                                constants::seqbias_num_reads,
+                                constants::seqbias_left_pos,
+                                constants::seqbias_right_pos,
+                                25.0);
+
+#if 0
     for (int bin = 0; bin < 3; ++bin) {
         sb[bin] = new sequencing_bias(fa_fn, mate1_pos_tab[bin], mate2_pos_tab[bin],
                                  constants::seqbias_num_reads,
@@ -1146,6 +1167,7 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
         fputs(sb[bin]->model_graph().c_str(), out);
         fclose(out);
     }
+#endif
 
 
 }

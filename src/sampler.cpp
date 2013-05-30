@@ -1195,12 +1195,6 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
                                     a.mate1->start : a.mate1->end);
         if (offset < 0 || offset >= tlen) return 0.0;
 
-#if 0
-        // Try throwing away 5' reads, for whatever reason.
-        if (t.strand == strand_pos && a.mate1->strand == strand_pos && offset < 40) return 0.0;
-        if (t.strand == strand_neg && a.mate1->strand == strand_neg && tlen - offset < 40) return 0.0;
-#endif
-
         //double cdf;
         //if (a.mate1->strand == t.strand) {
             //cdf = tp_bias[constants::transcript_3p_num_bins - 1][0]->cdf(tlen);
