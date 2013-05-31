@@ -1028,7 +1028,7 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
-    if (tlen <= 200) return;
+    if (tlen <= 100) return;
 
     //if (t.strand == strand_neg) {
         for (pos_t pos = 0; pos < 15; ++pos) {
@@ -1076,29 +1076,29 @@ void SamplerInitThread::transcript_sequence_bias(
         }
     }
 
-    if (t.transcript_id == "ENST00000233143") {
-        FILE* out = fopen("ENST00000233143.mate1.0.tsv", "w");
+    if (t.transcript_id == "ENST00000284292") {
+        FILE* out = fopen("ENST00000284292.mate1.0.tsv", "w");
         fprintf(out, "i\tw\n");
         for (pos_t i = 0; i < tlen; ++i) {
             fprintf(out, "%ld\t%e\n", i, mate1_seqbias[0][i]);
         }
         fclose(out);
 
-        out = fopen("ENST00000233143.mate1.1.tsv", "w");
+        out = fopen("ENST00000284292.mate1.1.tsv", "w");
         fprintf(out, "i\tw\n");
         for (pos_t i = 0; i < tlen; ++i) {
             fprintf(out, "%ld\t%e\n", i, mate1_seqbias[1][i]);
         }
         fclose(out);
 
-        out = fopen("ENST00000233143.mate2.0.tsv", "w");
+        out = fopen("ENST00000284292.mate2.0.tsv", "w");
         fprintf(out, "i\tw\n");
         for (pos_t i = 0; i < tlen; ++i) {
             fprintf(out, "%ld\t%e\n", i, mate2_seqbias[0][i]);
         }
         fclose(out);
 
-        out = fopen("ENST00000233143.mate2.1.tsv", "w");
+        out = fopen("ENST00000284292.mate2.1.tsv", "w");
         fprintf(out, "i\tw\n");
         for (pos_t i = 0; i < tlen; ++i) {
             fprintf(out, "%ld\t%e\n", i, mate2_seqbias[1][i]);
@@ -1188,6 +1188,7 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
                                       t.max_end - a.mate1->start + 1);
         frag_len = std::min(max_frag_len, (pos_t) round(fm.frag_len_med()));
     }
+    else if (frag_len > tlen) return 0.0;
 
     float w = 1.0;
     if (a.mate1) {

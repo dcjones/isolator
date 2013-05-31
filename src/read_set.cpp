@@ -247,16 +247,13 @@ bool AlignmentPair::valid_frag() const
 /* A couple functions to assist with AlignmentPair::frag_len */
 static bool exon_compatible_cigar_op(uint8_t op)
 {
-    // TODO: what should be done in the case of indels ?
-    //return op == BAM_CMATCH;
-    return op == BAM_CMATCH || op == BAM_CSOFT_CLIP;
+    return op == BAM_CMATCH || op == BAM_CSOFT_CLIP | op == BAM_CINS || op == BAM_CDEL;
 }
 
 
 static bool intron_compatible_cigar_op(uint8_t op)
 {
-    //return op == BAM_CREF_SKIP;
-    return op == BAM_CREF_SKIP || op == BAM_CSOFT_CLIP;
+    return op == BAM_CREF_SKIP || op == BAM_CSOFT_CLIP | op == BAM_CINS || op == BAM_CDEL;
 }
 
 
@@ -299,22 +296,16 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     CigarIterator c1(*a1);
     pos_t intron_len = 0;
 
-    /* Allow soft-clipping at the beginning of the transcript to account for
-     * reads mapping into poly-A tails.. */
-#if 0
-    if (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
-        if (c1->end + 1 == e1->first.start &&
-            intergenic_compatible_cigar_op(c1->op) &&
-            t.strand == strand_neg) {
-            ++c1;
-        }
-    }
-#endif
+    if (c1->op == BAM_CSOFT_CLIP) return -1;
 
     while (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
         // case 1: e entirely preceedes c
         if (c1->start > e1->first.end) {
             ++e1;
+        }
+
+        else if (c1->op == BAM_CSOFT_CLIP) {
+            ++c1;
         }
 
         // case 2: c is contained within e
@@ -341,14 +332,6 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
         }
     }
 
-    /* alignment overhangs the transcript. */
-#if 0
-    if (c1 != CigarIterator()) {
-        if (!intergenic_compatible_cigar_op(c1->op)) return -1;
-        ++c1;
-        if (c1 != CigarIterator()) return -1;
-    }
-#endif
     if (c1 != CigarIterator()) {
         return -1;
     }
@@ -370,7 +353,12 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
             }
 
             if (e1 == e2) e2_sup_e1 = true;
+
             ++e2;
+        }
+
+        else if (c2->op == BAM_CSOFT_CLIP) {
+            ++c2;
         }
 
         // case 2: c is contained within e
@@ -395,24 +383,6 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     }
 
     if (c2 != CigarIterator()) return -1;
-
-#if 0
-    /* Allow soft-clipping at transcript ends. */
-    if (c2 != CigarIterator()) {
-        if (c2->start == t.max_end + 1 &&
-            intergenic_compatible_cigar_op(c2->op) &&
-            t.strand == strand_pos) {
-            ++c2;
-        }
-        else {
-            return -1;
-        }
-
-        if (c2 != CigarIterator()) {
-            return -1;
-        }
-    }
-#endif
 
     pos_t fraglen = a2->end - a1->start + 1 - intron_len;
     assert(fraglen > 0);

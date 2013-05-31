@@ -652,9 +652,6 @@ class FragmentModelThread
                         if (rpos < 0.0 || rpos >= 1.0) continue;
                         int d = rpos * constants::tp_num_bins;
                         tp_dist_weights[bin][0][d] += 1.0 / w;
-
-                        if (bin == 0 && d == 0) ++zero_count;
-                        if (bin == 0 && d == 3) ++one_count;
                     }
                     else {
                         double rpos = (tpos - constants::tp_pad) /
@@ -1145,7 +1142,7 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
                                 constants::seqbias_num_reads,
                                 constants::seqbias_left_pos,
                                 constants::seqbias_right_pos,
-                                250.0);
+                                150.0);
 
     sb[2] = new sequencing_bias(fa_fn, mate1_pos_tab[2], mate2_pos_tab[2],
                                 constants::seqbias_num_reads,
