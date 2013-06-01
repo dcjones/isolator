@@ -339,9 +339,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
             }
         }
 
-        if (b->core.flag & BAM_FUNMAP ||
-            (b->core.flag & BAM_FPAIRED && !(b->core.flag & BAM_FPROPER_PAIR)) ||
-            b->core.tid < 0) continue;
+        if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
 
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
@@ -1134,7 +1132,7 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
                                 constants::seqbias_num_reads,
                                 constants::seqbias_left_pos,
                                 constants::seqbias_right_pos,
-                                150.0);
+                                25.0);
 
     sb[2] = new sequencing_bias(fa_fn, mate1_pos_tab[2], mate2_pos_tab[2],
                                 constants::seqbias_num_reads,

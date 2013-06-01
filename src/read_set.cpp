@@ -218,10 +218,7 @@ bool AlignmentPair::operator < (const AlignmentPair& other) const
 
 bool AlignmentPair::valid_frag() const
 {
-    /* Reads with only mate1 are considered valid single-end reads, for our
-     * purposes */
-    if (mate1 == NULL) return false;
-    if (mate1 != NULL && mate2 == NULL) return true;
+    if (mate1 == NULL || mate2 == NULL) return true;
 
     switch (constants::libtype) {
         case constants::LIBTYPE_FR:
@@ -253,7 +250,7 @@ static bool exon_compatible_cigar_op(uint8_t op)
 
 static bool intron_compatible_cigar_op(uint8_t op)
 {
-    return op == BAM_CREF_SKIP || op == BAM_CSOFT_CLIP | op == BAM_CINS || op == BAM_CDEL;
+    return op == BAM_CREF_SKIP;
 }
 
 
@@ -300,12 +297,9 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     pos_t intron_len = 0;
 
     while (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
-        if (c1->op == BAM_CSOFT_CLIP) {
-            ++c1;
-        }
 
         // case 1: e entirely preceedes c
-        else if (c1->start > e1->first.end) {
+        if (c1->start > e1->first.end) {
             ++e1;
         }
 
@@ -347,12 +341,12 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     CigarIterator c2(*a2);
 
     while (e2 != TranscriptIntronExonIterator() && c2 != CigarIterator()) {
-        if (c2->op == BAM_CSOFT_CLIP) {
-            ++c2;
-        }
+        //if (c2->op == BAM_CSOFT_CLIP) {
+            //++c2;
+        //}
 
         // case 1: e entirely preceedes c
-        else if (c2->start > e2->first.end) {
+        if (c2->start > e2->first.end) {
             if (e2->second == INTRONIC_INTERVAL_TYPE && e2_sup_e1) {
                 intron_len += e2->first.end - e2->first.start + 1;
             }
@@ -448,6 +442,31 @@ void AlignedReadIterator::increment()
 {
     if (finished()) return;
     do {
+        if (r->mate1.size() == 0) {
+            do {
+                ++j;
+            } while (j < r->mate2.size() && r->mate2[j] == r->mate2[j - 1]);
+        }
+        else if (r->mate2.size() == 0) {
+            do {
+                ++i;
+            } while (i < r->mate1.size() && r->mate1[i] == r->mate1[i - 1]);
+        }
+        else {
+            do {
+                ++j;
+            } while (j < r->mate2.size() && r->mate2[j] == r->mate2[j - 1]);
+
+            if (j >= r->mate2.size()) {
+                j = 0;
+                do {
+                    ++i;
+                } while (i < r->mate1.size() && r->mate1[i] == r->mate1[i - 1]);
+            }
+        }
+
+
+#if 0
         if (r->paired && j < r->mate2.size()) {
             do {
                 ++j;
@@ -461,16 +480,20 @@ void AlignedReadIterator::increment()
 
             j = 0;
         }
+#endif
 
         p.mate1 = i < r->mate1.size() ? r->mate1[i] : NULL;
-        p.mate2 = (j < r->mate2.size() && r->paired) ? r->mate2[j] : NULL;
+        p.mate2 = j < r->mate2.size() ? r->mate2[j] : NULL;
     } while (!finished() && !p.valid_frag());
 }
 
 
 bool AlignedReadIterator::finished() const
 {
-    return r == NULL || i >= r->mate1.size() || (r->paired && j >= r->mate2.size());
+    return r == NULL ||
+        (r->mate1.size() == 0 && j >= r->mate2.size()) ||
+        (r->mate2.size() == 0 && i >= r->mate1.size()) ||
+        (r->mate1.size() > 0 && r->mate2.size() > 0 && i >= r->mate1.size());
 }
 
 

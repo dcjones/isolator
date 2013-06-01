@@ -490,6 +490,8 @@ class SamplerInitInterval
             , tid(-1)
             , q(q)
         {
+            start = std::max<pos_t>(0, ts.min_start - 1000);
+            end = ts.max_end + 1000;
         }
 
         void add_alignment(const bam1_t* b)
@@ -513,11 +515,11 @@ class SamplerInitInterval
             else if (ts.seqname != other.ts.seqname) {
                 return ts.seqname < other.ts.seqname;
             }
-            else if (ts.min_start != other.ts.min_start) {
-                return ts.min_start < other.ts.min_start;
+            else if (start != other.start) {
+                return start < other.start;
             }
             else {
-                return ts.max_end < other.ts.max_end;
+                return end < other.end;
             }
         }
 
@@ -526,6 +528,8 @@ class SamplerInitInterval
         boost::shared_ptr<twobitseq> seq;
 
         int32_t tid;
+        pos_t start, end;
+
     private:
         Queue<SamplerInitInterval*>& q;
 
@@ -619,9 +623,7 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
             }
         }
 
-        if (b->core.flag & BAM_FUNMAP ||
-            (b->core.flag & BAM_FPAIRED && !(b->core.flag & BAM_FPROPER_PAIR)) ||
-            b->core.tid < 0) continue;
+        if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
 
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
@@ -667,8 +669,8 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
                 continue;
             }
 
-            if (b->core.pos < intervals[j]->ts.min_start) break;
-            if (b->core.pos > intervals[j]->ts.max_end) {
+            if (b->core.pos < intervals[j]->start) break;
+            if (b->core.pos > intervals[j]->end) {
                 if (j == j0) {
                     intervals[j0++]->finish();
                 }
@@ -676,7 +678,7 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
             }
 
             pos_t b_end = (pos_t) bam_calend2(&b->core, bam1_cigar(b)) - 1;
-            if (b_end <= intervals[j]->ts.max_end) {
+            if (b_end <= intervals[j]->end) {
                 intervals[j]->add_alignment(b);
             }
         }
@@ -838,7 +840,6 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
     /* Collapse identical reads, filter out those that don't overlap any
      * transcript. */
     for (ReadSetIterator r(locus->rs); r != ReadSetIterator(); ++r) {
-        /* Skip multireads for now. */
         if (fm.blacklist.get(r->first) >= 0) continue;
         int multiread_num = fm.multireads.get(r->first);
         if (multiread_num >= 0) {
@@ -907,6 +908,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
         if (transcript_weights[t->id] < constants::min_transcript_weight) {
             continue;
         }
+
 
         for (MultireadSet::iterator r = multiread_set.begin();
              r != multiread_set.end(); ++r) {
@@ -1185,8 +1187,11 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
 
     if (frag_len < 0) return 0.0;
     else if (frag_len == 0) {
-        pos_t max_frag_len = std::max(a.mate1->end - t.min_start + 1,
-                                      t.max_end - a.mate1->start + 1);
+        pos_t max_frag_len;
+        if (a.mate1) max_frag_len = std::max(a.mate1->end - t.min_start + 1,
+                                             t.max_end - a.mate1->start + 1);
+        else         max_frag_len = std::max(a.mate2->end - t.min_start + 1,
+                                             t.max_end - a.mate2->start + 1);
         frag_len = std::min(max_frag_len, (pos_t) round(fm.frag_len_med()));
     }
     else if (frag_len > tlen) return 0.0;
@@ -1228,11 +1233,6 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     }
 
     float frag_len_pr = frag_len_p(frag_len);
-#if 0
-    if (t.transcript_id == "ENST00000233143") {
-        Logger::info("here");
-    }
-#endif
     if (frag_len_pr < constants::min_frag_len_pr) {
         return 0.0;
     }
@@ -1607,7 +1607,7 @@ class InferenceThread
                   (S.component_frag[c + 1] - S.component_frag[c]) * sizeof(float));
 
             //for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
-            for (unsigned int i = 0; i < std::min<size_t>(10, S.component_num_transcripts[c]); ++i) {
+            for (unsigned int i = 0; i < std::min<size_t>(5, S.component_num_transcripts[c]); ++i) {
                 double r = gsl_rng_uniform(rng);
                 unsigned int u = 0;
                 while (u < S.component_num_transcripts[c] - 1 &&
@@ -2027,18 +2027,15 @@ class MultireadSamplerThread
 
 void Sampler::run(unsigned int num_samples, SampleDB& out)
 {
-
-
     /* Initial mixtures */
-    // Alternative initialization that prefers the longest trascript.
-#if 0
     for (unsigned int i = 0; i < num_components; ++i) {
         unsigned int j_max = 0;
-        float max_weight = 0.0;
+        unsigned int max_frags = 0;
         for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
-            if (transcript_weights[component_transcripts[i][j]] > max_weight) {
+            unsigned int u = component_transcripts[i][j];
+            if (weight_matrix->rowlens[u] > max_frags) {
                 j_max = j;
-                max_weight = transcript_weights[component_transcripts[i][j]];
+                max_frags = weight_matrix->rowlens[u];
             }
         }
 
@@ -2051,7 +2048,6 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
             }
         }
     }
-#endif
 
 #if 0
     for (unsigned int i = 0; i < num_components; ++i) {
@@ -2067,9 +2063,11 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
     }
 #endif
 
+#if 0
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         tmix[i] = 1.0 / (float) component_num_transcripts[transcript_component[i]];
     }
+#endif
 
 
     std::fill(cmix, cmix + num_components, 1.0 / (float) num_components);
@@ -2186,6 +2184,17 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
 
         // DEBUGING XXX
+        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+            //if (t->transcript_id == "ENST00000233143") {
+                //Logger::info("ENST00000233143 has %f frags",
+                        //frag_count_sums[transcript_component[t->id]]);
+            //}
+
+            if (t->transcript_id == "ENST00000253408") {
+                Logger::info("ENST00000253408: %e", tmix[t->id]);
+            }
+        }
+
 #if 0
         if (sample_num == 0) {
             for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
