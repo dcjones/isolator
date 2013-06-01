@@ -1182,6 +1182,7 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
                                          const AlignmentPair& a)
 {
     pos_t frag_len = a.frag_len(t);
+
     if (frag_len < 0) return 0.0;
     else if (frag_len == 0) {
         pos_t max_frag_len = std::max(a.mate1->end - t.min_start + 1,
@@ -1227,7 +1228,14 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     }
 
     float frag_len_pr = frag_len_p(frag_len);
-    if (frag_len_pr < constants::min_frag_len_pr) return 0.0;
+#if 0
+    if (t.transcript_id == "ENST00000233143") {
+        Logger::info("here");
+    }
+#endif
+    if (frag_len_pr < constants::min_frag_len_pr) {
+        return 0.0;
+    }
     if (frag_len_pr * w < constants::min_frag_weight) return 0.0;
 
     return frag_len_pr / tw;
@@ -1598,12 +1606,22 @@ class InferenceThread
             acopy(S.frag_probs_prop[c], S.frag_probs[c],
                   (S.component_frag[c + 1] - S.component_frag[c]) * sizeof(float));
 
-            gsl_ran_shuffle(rng, S.component_transcripts[c],
-                            S.component_num_transcripts[c],
-                            sizeof(unsigned int));
-            for (unsigned int i = 0; i < S.component_num_transcripts[c] - 1; ++i) {
-                run_inter_transcript(S.component_transcripts[c][i],
-                                     S.component_transcripts[c][i + 1]);
+            //for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
+            for (unsigned int i = 0; i < std::min<size_t>(10, S.component_num_transcripts[c]); ++i) {
+                double r = gsl_rng_uniform(rng);
+                unsigned int u = 0;
+                while (u < S.component_num_transcripts[c] - 1 &&
+                       r > S.tmix[S.component_transcripts[c][u]]) {
+                    r -= S.tmix[S.component_transcripts[c][u]];
+                    ++u;
+                }
+
+                unsigned int v =
+                    gsl_rng_uniform_int(rng, S.component_num_transcripts[c] - 1);
+                if (v >= u) ++v;
+
+                run_inter_transcript(S.component_transcripts[c][u],
+                                     S.component_transcripts[c][v]);
             }
         }
 
@@ -2168,6 +2186,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
 
         // DEBUGING XXX
+#if 0
         if (sample_num == 0) {
             for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
                 if (t->transcript_id == "ENST00000282470") {
@@ -2195,6 +2214,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
                 }
             }
         }
+#endif
 
 
         /* Record a new sample */

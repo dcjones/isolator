@@ -15,7 +15,7 @@ unsigned int         constants::max_alignments               = 100;
 pos_t                constants::max_frag_len                 = 1000;
 float                constants::min_frag_len_pr              = 1e-4;
 float                constants::transcript_len_min_frag_pr   = 1e-3;
-float                constants::frag_len_dist_smoothing      = 0.1;
+float                constants::frag_len_dist_smoothing      = 0.01;
 size_t               constants::frag_len_min_pe_reads        = 10000;
 double               constants::frag_len_mu                  = 200.0;
 double               constants::frag_len_sd                  = 20.0;
@@ -27,7 +27,7 @@ pos_t                constants::transcript_3p_extension      = 0;
 size_t               constants::tp_num_length_bins           = 4;
 pos_t                constants::tp_length_bins[4]            =
     {500, 1000, 1500, 2000};
-size_t               constants::tp_num_bins                  = 15;
+size_t               constants::tp_num_bins                  = 25;
 pos_t                constants::tp_pad                       = 0;
 float                constants::min_transcript_weight        = 5.0;
 float                constants::tmix_prior_prec              = 0.01;

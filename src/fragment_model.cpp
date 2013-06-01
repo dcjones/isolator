@@ -828,14 +828,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
             sum_lens += g->second;
         }
 
-        /* prune fragment lengths with very low probability */
-        for (i = 0; i < frag_lens.size(); ++i) {
-            if ((float) frag_len_lens[i] / (float) sum_lens <
-                    constants::min_frag_len_pr) {
-                frag_len_lens[i] = 0;
-            }
-        }
-
         frag_len_dist = new EmpDist(frag_len_vals, frag_len_lens, frag_lens.size(),
                                     constants::frag_len_dist_smoothing);
 

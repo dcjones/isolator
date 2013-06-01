@@ -292,20 +292,21 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
         a2 = NULL;
     }
 
+    if (a1 && a1->start < t.min_start) return -1;
+    if (a2 && a2->end > t.max_end) return -1;
+
     TranscriptIntronExonIterator e1(t);
     CigarIterator c1(*a1);
     pos_t intron_len = 0;
 
-    if (c1->op == BAM_CSOFT_CLIP) return -1;
-
     while (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
-        // case 1: e entirely preceedes c
-        if (c1->start > e1->first.end) {
-            ++e1;
+        if (c1->op == BAM_CSOFT_CLIP) {
+            ++c1;
         }
 
-        else if (c1->op == BAM_CSOFT_CLIP) {
-            ++c1;
+        // case 1: e entirely preceedes c
+        else if (c1->start > e1->first.end) {
+            ++e1;
         }
 
         // case 2: c is contained within e
@@ -346,8 +347,12 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     CigarIterator c2(*a2);
 
     while (e2 != TranscriptIntronExonIterator() && c2 != CigarIterator()) {
+        if (c2->op == BAM_CSOFT_CLIP) {
+            ++c2;
+        }
+
         // case 1: e entirely preceedes c
-        if (c2->start > e2->first.end) {
+        else if (c2->start > e2->first.end) {
             if (e2->second == INTRONIC_INTERVAL_TYPE && e2_sup_e1) {
                 intron_len += e2->first.end - e2->first.start + 1;
             }
@@ -355,10 +360,6 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
             if (e1 == e2) e2_sup_e1 = true;
 
             ++e2;
-        }
-
-        else if (c2->op == BAM_CSOFT_CLIP) {
-            ++c2;
         }
 
         // case 2: c is contained within e
