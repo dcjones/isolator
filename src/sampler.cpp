@@ -624,6 +624,7 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
         }
 
         if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
+        if (b->core.qual < 5) continue;
 
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
@@ -840,6 +841,14 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
     /* Collapse identical reads, filter out those that don't overlap any
      * transcript. */
     for (ReadSetIterator r(locus->rs); r != ReadSetIterator(); ++r) {
+
+        for (TranscriptSetLocus::iterator t = locus->ts.begin();
+                t != locus->ts.end(); ++t) {
+            if (t->transcript_id == "ENST00000244513") {
+                Logger::info("here");
+            }
+        }
+
         if (fm.blacklist.get(r->first) >= 0) continue;
         int multiread_num = fm.multireads.get(r->first);
         if (multiread_num >= 0) {
@@ -988,7 +997,7 @@ void SamplerInitThread::transcript_sequence_bias(
     std::fill(mate2_seqbias[0].begin(), mate2_seqbias[0].begin() + tlen, 1.0);
     std::fill(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen, 1.0);
 
-    if (fm.sb[0] == NULL || locus.seq == NULL) return;
+    if (fm.sb[1] == NULL || locus.seq == NULL) return;
 
     t.get_sequence(tseq0, *locus.seq, constants::seqbias_left_pos, constants::seqbias_right_pos);
     t.get_sequence(tseq1, *locus.seq, constants::seqbias_right_pos, constants::seqbias_left_pos);
@@ -1030,8 +1039,6 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
-    if (tlen <= 100) return;
-
     //if (t.strand == strand_neg) {
         for (pos_t pos = 0; pos < 15; ++pos) {
             mate1_seqbias[0][pos] = 1.0;
@@ -1049,6 +1056,7 @@ void SamplerInitThread::transcript_sequence_bias(
         }
     //}
 
+#if 0
     size_t bin = constants::tp_num_length_bins - 1;
     for (; bin > 0 && tlen < constants::tp_length_bins[bin]; --bin);
 
@@ -1077,6 +1085,7 @@ void SamplerInitThread::transcript_sequence_bias(
             mate1_seqbias[1][pos] *= fm.tp_dist[bin][0][d];
         }
     }
+#endif
 
     if (t.transcript_id == "ENST00000284292") {
         FILE* out = fopen("ENST00000284292.mate1.0.tsv", "w");
@@ -1185,6 +1194,10 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
 {
     pos_t frag_len = a.frag_len(t);
 
+    if (t.transcript_id == "ENST00000244513") {
+        Logger::info("here");
+    }
+
     if (frag_len < 0) return 0.0;
     else if (frag_len == 0) {
         pos_t max_frag_len;
@@ -1238,7 +1251,7 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     }
     if (frag_len_pr * w < constants::min_frag_weight) return 0.0;
 
-    return frag_len_pr / tw;
+    return frag_len_pr * w / ws[frag_len];
 }
 
 
@@ -1903,7 +1916,10 @@ void MCMCThread::run_component(unsigned int u)
 {
     float prec = S.frag_count_sums[u] +
                  S.component_num_transcripts[u] * constants::tmix_prior_prec;
+    S.cmix[u] = prec;
+#if 0
     S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
+#endif
 }
 
 

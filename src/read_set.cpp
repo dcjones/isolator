@@ -69,6 +69,17 @@ bool Alignment::operator < (const Alignment& other) const
 }
 
 
+bool Alignment::operator == (const Alignment& other) const
+{
+    return start     == other.start &&
+           end       == other.end &&
+           strand    == other.strand &&
+           cigar_len == other.cigar_len &&
+           memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t)) == 0;
+}
+
+
+
 CigarIterator::CigarIterator()
     : owner(NULL)
     , i(0)
@@ -200,19 +211,18 @@ AlignmentPair::AlignmentPair()
 
 bool AlignmentPair::operator < (const AlignmentPair& other) const
 {
-    if (mate1 == NULL || other.mate1 == NULL) {
-        return mate1 < other.mate1;
-    }
+    if (mate1 == other.mate1 ||
+        (mate1 != NULL && other.mate1 != NULL && *mate1 == *other.mate1)) {
 
-    if (mate1 != other.mate1) {
-        return *mate1 < *other.mate1;
+        if (mate2 == NULL)            return other.mate2 != NULL;
+        else if (other.mate2 == NULL) return false;
+        else                          return *mate2 < *other.mate2;
     }
-
-    if (mate2 == NULL || other.mate2 == NULL) {
-        return mate2 < other.mate2;
+    else {
+        if (mate1 == NULL)            return other.mate1 != NULL;
+        else if (other.mate1 == NULL) return false;
+        else                          return *mate1 < *other.mate1;
     }
-
-    return *mate2 < *other.mate2;
 }
 
 
@@ -244,7 +254,7 @@ bool AlignmentPair::valid_frag() const
 /* A couple functions to assist with AlignmentPair::frag_len */
 static bool exon_compatible_cigar_op(uint8_t op)
 {
-    return op == BAM_CMATCH || op == BAM_CSOFT_CLIP | op == BAM_CINS || op == BAM_CDEL;
+    return op == BAM_CMATCH || op == BAM_CSOFT_CLIP || op == BAM_CINS || op == BAM_CDEL;
 }
 
 
@@ -297,7 +307,6 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     pos_t intron_len = 0;
 
     while (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
-
         // case 1: e entirely preceedes c
         if (c1->start > e1->first.end) {
             ++e1;
@@ -341,10 +350,6 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     CigarIterator c2(*a2);
 
     while (e2 != TranscriptIntronExonIterator() && c2 != CigarIterator()) {
-        //if (c2->op == BAM_CSOFT_CLIP) {
-            //++c2;
-        //}
-
         // case 1: e entirely preceedes c
         if (c2->start > e2->first.end) {
             if (e2->second == INTRONIC_INTERVAL_TYPE && e2_sup_e1) {
@@ -464,23 +469,6 @@ void AlignedReadIterator::increment()
                 } while (i < r->mate1.size() && r->mate1[i] == r->mate1[i - 1]);
             }
         }
-
-
-#if 0
-        if (r->paired && j < r->mate2.size()) {
-            do {
-                ++j;
-            } while (j < r->mate2.size() && r->mate2[j] == r->mate2[j - 1]);
-        }
-
-        if (!r->paired || j >= r->mate2.size()) {
-            do {
-                ++i;
-            } while(i < r->mate1.size() && r->mate1[i] == r->mate1[i - 1]);
-
-            j = 0;
-        }
-#endif
 
         p.mate1 = i < r->mate1.size() ? r->mate1[i] : NULL;
         p.mate2 = j < r->mate2.size() ? r->mate2[j] : NULL;
