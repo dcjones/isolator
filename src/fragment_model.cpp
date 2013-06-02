@@ -1134,7 +1134,7 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
                                 constants::seqbias_num_reads,
                                 constants::seqbias_left_pos,
                                 constants::seqbias_right_pos,
-                                1000.0);
+                                25.0);
 
 #if 0
     sb[2] = new sequencing_bias(fa_fn, mate1_pos_tab[2], mate2_pos_tab[2],

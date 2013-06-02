@@ -1039,6 +1039,8 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
+    if (tlen < 15) return;
+
     //if (t.strand == strand_neg) {
         for (pos_t pos = 0; pos < 15; ++pos) {
             mate1_seqbias[0][pos] = 1.0;
@@ -1056,7 +1058,6 @@ void SamplerInitThread::transcript_sequence_bias(
         }
     //}
 
-#if 0
     size_t bin = constants::tp_num_length_bins - 1;
     for (; bin > 0 && tlen < constants::tp_length_bins[bin]; --bin);
 
@@ -1085,7 +1086,6 @@ void SamplerInitThread::transcript_sequence_bias(
             mate1_seqbias[1][pos] *= fm.tp_dist[bin][0][d];
         }
     }
-#endif
 
     if (t.transcript_id == "ENST00000284292") {
         FILE* out = fopen("ENST00000284292.mate1.0.tsv", "w");
