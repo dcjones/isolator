@@ -9,6 +9,7 @@ Alignment::Alignment()
     , cigar_len(0)
     , cigar(NULL)
     , strand(strand_na)
+    , mapq(255)
 {
 }
 
@@ -18,6 +19,7 @@ Alignment::Alignment(const Alignment& a)
     start     = a.start;
     end       = a.end;
     strand    = a.strand;
+    mapq      = a.mapq;
     cigar_len = a.cigar_len;
     cigar = new uint32_t[cigar_len];
     memcpy(cigar, a.cigar, cigar_len * sizeof(uint32_t));
@@ -29,6 +31,7 @@ Alignment::Alignment(const bam1_t* b)
     start     = (pos_t)b->core.pos;
     end       = bam_calend2(&b->core, bam1_cigar(b)) - 1;
     strand    = bam1_strand(b);
+    mapq      = b->core.qual;
     cigar_len = b->core.n_cigar;
     cigar     = new uint32_t [b->core.n_cigar];
     memcpy(cigar, bam1_cigar(b), cigar_len * sizeof(uint32_t));
@@ -45,6 +48,7 @@ bool Alignment::operator == (const bam1_t* b) const
 {
     if (this->start != (pos_t) b->core.pos) return false;
     if (this->strand != bam1_strand(b)) return false;
+    if (this->mapq != b->core.qual) return false;
     if (this->cigar_len != b->core.n_cigar) return false;
     if (this->end != (pos_t) (bam_calend2(&b->core, bam1_cigar(b)) - 1)) return false;
     return memcmp(cigar, bam1_cigar(b), cigar_len * sizeof(uint32_t)) == 0;
@@ -62,6 +66,7 @@ bool Alignment::operator < (const Alignment& other) const
     if      (start  != other.start)  return start < other.start;
     else if (end    != other.end)    return end < other.end;
     else if (strand != other.strand) return strand < other.strand;
+    else if (mapq   != other.mapq)   return mapq < other.mapq;
     else if (cigar_len != other.cigar_len) return cigar_len < other.cigar_len;
     else {
         return memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t)) < 0;
@@ -74,10 +79,10 @@ bool Alignment::operator == (const Alignment& other) const
     return start     == other.start &&
            end       == other.end &&
            strand    == other.strand &&
+           mapq      == other.mapq &&
            cigar_len == other.cigar_len &&
            memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t)) == 0;
 }
-
 
 
 CigarIterator::CigarIterator()

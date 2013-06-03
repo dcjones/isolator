@@ -17,6 +17,10 @@ namespace constants
     /* Number of threads to use. */
     extern unsigned int num_threads;
 
+    /* Minimum allowable map quality. Alignments lower that this are thrown out.
+     * */
+    extern unsigned int min_map_qual;
+
     /* During the parameter estimation phase, a work queue of genomic intervals
      * is used to accumulate statistic in parallel. This parameter controls the
      * maximum number of items in that queue. If too large, memory becomes an

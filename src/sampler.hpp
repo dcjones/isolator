@@ -64,8 +64,8 @@ class Sampler
         /* A single multiread alignment. */
         struct MultireadAlignment
         {
-            float* prob;
-            float* count;
+            unsigned int component;
+            unsigned int frag;
         };
 
         /* A flat array of all the multiread alignments */

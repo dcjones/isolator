@@ -30,6 +30,7 @@ struct Alignment
     uint16_t  cigar_len;
     uint32_t* cigar;
     uint8_t   strand;
+    uint8_t   mapq;
 };
 
 

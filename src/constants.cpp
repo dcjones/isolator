@@ -2,6 +2,7 @@
 #include "constants.hpp"
 
 unsigned int         constants::num_threads                  = 1;
+unsigned int         constants::min_map_qual                 = 1;
 size_t               constants::max_estimate_queue_size      = 500;
 pos_t                constants::min_estimate_exon_length     = 200;
 size_t               constants::seqbias_num_collected_reads  = 500000;
