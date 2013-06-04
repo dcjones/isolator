@@ -125,7 +125,7 @@ class FragmentModel
 
         /* Three-prime/five-prime distribution indexed by length bin and strand.
          * */
-        std::vector<double> tp_dist[4][2];
+        EmpDist* tp_dist[2];
 };
 
 

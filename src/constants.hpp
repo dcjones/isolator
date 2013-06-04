@@ -122,6 +122,8 @@ namespace constants
     /* */
     extern pos_t tp_pad;
 
+    extern pos_t tp_len;
+
     /* It's possible for a transcript to get assigned exceedingly low weight,
      * given the fragment length distribution. Then when a single read lands
      * there, it is assumed that the trascript is very highly expressed. More

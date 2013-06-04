@@ -721,6 +721,14 @@ class SamplerInitThread
             else {
                 frag_len_dist = NULL;
             }
+
+            if (fm.tp_dist[0]) {
+                tp_dist[0] = fm.tp_dist[0];
+                tp_dist[1] = fm.tp_dist[1];
+            }
+            else {
+                tp_dist[0] = tp_dist[1] = NULL;
+            }
         }
 
         ~SamplerInitThread()
@@ -802,6 +810,8 @@ class SamplerInitThread
         /* Copy the fragment length distribution to avoid contention between
          * threads. */
         EmpDist* frag_len_dist;
+
+        EmpDist* tp_dist[2];
 
         /* Temprorary space for computing sequence bias, indexed by strand. */
         std::vector<float> mate1_seqbias[2];
@@ -1070,32 +1080,23 @@ void SamplerInitThread::transcript_sequence_bias(
     }
 #endif
 
-    size_t bin = constants::tp_num_length_bins - 1;
-    for (; bin > 0 && tlen < constants::tp_length_bins[bin]; --bin);
+
+    double norm[2] = {
+        fm.tp_dist[0]->pdf(500),
+        fm.tp_dist[1]->pdf(500) };
 
     if (t.strand == strand_pos) {
-        int d;
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            d = constants::tp_num_bins * (pos / (double) (tlen - constants::tp_pad));
-            d = std::max<int>(0, std::min<int>(d, constants::tp_num_bins - 1));
-            mate1_seqbias[0][pos] *= fm.tp_dist[bin][0][d];
-
-            d = constants::tp_num_bins * ((pos - constants::tp_pad) / (double) (tlen - constants::tp_pad));
-            d = std::max<int>(0, std::min<int>(d, constants::tp_num_bins - 1));
-            mate1_seqbias[1][pos] *= fm.tp_dist[bin][1][d];
+            pos_t off = std::min<pos_t>(tlen - pos - 1, constants::tp_len - 500);
+            mate1_seqbias[0][pos] *= fm.tp_dist[0]->pdf(off) / norm[0];
+            mate1_seqbias[1][pos] *= fm.tp_dist[1]->pdf(off) / norm[1];
         }
     }
     else {
-        int d;
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            pos_t p = tlen - pos - 1;
-            d = constants::tp_num_bins * ((p - constants::tp_pad) / (double) (tlen - constants::tp_pad));
-            d = std::max<int>(0, std::min<int>(d, constants::tp_num_bins - 1));
-            mate1_seqbias[0][pos] *= fm.tp_dist[bin][1][d];
-
-            d = constants::tp_num_bins * (p / (double) (tlen - constants::tp_pad));
-            d = std::max<int>(0, std::min<int>(d, constants::tp_num_bins - 1));
-            mate1_seqbias[1][pos] *= fm.tp_dist[bin][0][d];
+            pos_t off = std::min<pos_t>(pos, constants::tp_len - 500);
+            mate1_seqbias[0][pos] *= fm.tp_dist[1]->pdf(off) / norm[1];
+            mate1_seqbias[1][pos] *= fm.tp_dist[0]->pdf(off) / norm[0];
         }
     }
 }
