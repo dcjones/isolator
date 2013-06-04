@@ -908,6 +908,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
 #endif
 
 
+#if 0
             // normalize by not-quite-midpoint
             pos_t pos = constants::tp_length_bins[bin] - 200;
             double rpos =  (double) pos / constants::tp_length_bins[bin];
@@ -918,6 +919,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
                 constants::tp_length_bins[constants::tp_num_length_bins - 1];
             double v = tp_dist[constants::tp_num_length_bins - 1][strand][rpos * constants::tp_num_bins];
             double z = v / u;
+#endif
 
 #if 0
             // normalizing by 3' end
@@ -959,11 +961,14 @@ void FragmentModel::estimate(TranscriptSet& ts,
                 tp_dist[bin][strand][constants::tp_num_bins-1];
 #endif
 
+
+#if 0
             Logger::info("%zu %d => %f", bin, strand, z);
 
             for (size_t j = 0; j < constants::tp_num_bins; ++j) {
                 tp_dist[bin][strand][j] *= z;
             }
+#endif
         }
     }
 
@@ -1038,7 +1043,7 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
     const char* task_name = "Preparing to train seqbias model";
     Logger::push_task(task_name);
 
-    PosTable mate1_pos_tab[3], mate2_pos_tab[3];
+    PosTable mate1_pos[3], mate2_pos[3];
 
     samfile_t* bam_f;
     bam_f = samopen(bam_fn, "rb", NULL);
@@ -1071,7 +1076,7 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
         if (b->core.flag & BAM_FUNMAP ||
             (b->core.flag & BAM_FPAIRED && !(b->core.flag & BAM_FPROPER_PAIR)) ||
             b->core.tid < 0) continue;
-        if (b->core.qual < constants::min_map_qual);
+        if (b->core.qual < constants::min_map_qual) continue;
 
         if (b->core.n_cigar != 1) continue;
 
@@ -1088,8 +1093,8 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
                 continue;
             }
 
-            pos_t pos = (*j)->strand == strand_pos ?
-                b->core.pos : bam_calend(&b->core, bam1_cigar(b)) - 1;
+            pos_t pos = bam1_strand(b) ?
+                bam_calend2(&b->core, bam1_cigar(b)) - 1 : b->core.pos;
 
             if (pos < (*j)->start || pos > (*j)->end) continue;
 
@@ -1107,11 +1112,15 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
             else if ((*j)->tlen - off < constants::seqbias_tp_end) bin = 2;
             else bin = 1;
 
+            uint32_t tid = b->core.tid;
+
             if (b->core.flag & BAM_FREAD2) {
-                mate2_pos_tab[bin].add(b, bam_f);
+                mate2_pos[bin].add(tid, pos, bam1_strand(b),
+                                   (*j)->start, (*j)->end, bam_f);
             }
             else {
-                mate1_pos_tab[bin].add(b, bam_f);
+                mate1_pos[bin].add(tid, pos, bam1_strand(b),
+                                   (*j)->start, (*j)->end, bam_f);
             }
         }
 
@@ -1125,25 +1134,22 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
     }
 
 #if 0
-    sb[0] = new sequencing_bias(fa_fn, mate1_pos_tab[0], mate2_pos_tab[0],
+    sb[0] = new sequencing_bias(fa_fn, mate1_pos[0], mate2_pos[0],
                                 constants::seqbias_num_reads,
                                 constants::seqbias_left_pos,
-                                constants::seqbias_right_pos,
-                                25.0);
+                                constants::seqbias_right_pos);
 #endif
 
-    sb[1] = new sequencing_bias(fa_fn, mate1_pos_tab[1], mate2_pos_tab[1],
+    sb[1] = new sequencing_bias(fa_fn, mate1_pos[1], mate2_pos[1],
                                 constants::seqbias_num_reads,
                                 constants::seqbias_left_pos,
-                                constants::seqbias_right_pos,
-                                25.0);
+                                constants::seqbias_right_pos);
 
 #if 0
-    sb[2] = new sequencing_bias(fa_fn, mate1_pos_tab[2], mate2_pos_tab[2],
+    sb[2] = new sequencing_bias(fa_fn, mate1_pos[2], mate2_pos[2],
                                 constants::seqbias_num_reads,
                                 constants::seqbias_left_pos,
-                                constants::seqbias_right_pos,
-                                25.0);
+                                constants::seqbias_right_pos);
 #endif
 
 #if 0

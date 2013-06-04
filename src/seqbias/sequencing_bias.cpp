@@ -118,7 +118,7 @@ sequencing_bias::sequencing_bias()
     , M1(NULL)
     , M2(NULL)
 {
-    gc1[0] = gc1[1] = gc2[0] = gc2[1] = NULL;
+    rng = gsl_rng_alloc(gsl_rng_mt19937);
 }
 
 
@@ -189,14 +189,12 @@ sequencing_bias::sequencing_bias(const char* ref_fn,
                                  PosTable& T1, PosTable& T2,
                                  size_t max_reads,
                                  pos_t L, pos_t R,
-                                 double bgsd,
                                  double complexity_penalty)
     : ref_f(NULL)
     , M1(NULL)
     , M2(NULL)
-    , bgsd(bgsd)
 {
-    gc1[0] = gc1[1] = gc2[0] = gc2[1] = NULL;
+    rng = gsl_rng_alloc(gsl_rng_mt19937);
     build(ref_fn, T1, T2, max_reads, L, R,
           complexity_penalty);
 }
@@ -262,11 +260,6 @@ void sequencing_bias::clear()
 
     delete M2;
     M2 = NULL;
-
-    delete [] gc1[0];
-    delete [] gc1[1];
-    delete [] gc2[0];
-    delete [] gc2[1];
 }
 
 
@@ -362,7 +355,7 @@ void sequencing_bias::buildn(motif** Mn,
     std::deque<twobitseq*> background_seqs;
 
     /* background sampling */
-    int bg_samples = 2; // make this many samples for each read
+    int bg_samples = 1; // make this many samples for each read
     int bg_sample_num; // keep track of the number of samples made
     pos_t bg_pos;
 
@@ -418,8 +411,19 @@ void sequencing_bias::buildn(motif** Mn,
         /* add a background sequence */
         /* adjust the current read position randomly, and sample */
         for (bg_sample_num = 0; bg_sample_num < bg_samples;) {
+#if 0
+            do {
+                bg_pos = i->pos + (pos_t)round_away(rand_gauss(250));
+            } while (!(i->start <= bg_pos && bg_pos <= i->end));
+#endif
+            bg_pos = i->start + gsl_rng_uniform_int(rng, i->end - i->start + 1);
 
+
+            //bg_pos = i->pos + (pos_t)round_away(rand_gauss(25));
+
+#if 0
             bg_pos = i->pos + (pos_t)round_away(rand_gauss(bgsd));
+#endif
 
 #if 0
             if (rand() < RAND_MAX / 2) {
@@ -448,33 +452,6 @@ void sequencing_bias::buildn(motif** Mn,
     }
 
 
-#if 0
-    // XXX:
-    if (Mn == &M1) {
-        FILE* f = fopen("foreground_seqs.txt", "w");
-        for (std::deque<twobitseq*>::iterator i = foreground_seqs.begin();
-                i != foreground_seqs.end(); ++i) {
-            std::string s = (*i)->to_string();
-            for (int j = 0; j < L+1+R; ++j) {
-                fprintf(f, "%d\t%c\n", j, s[j]);
-            }
-        }
-        fclose(f);
-
-        f = fopen("background_seqs.txt", "w");
-        for (std::deque<twobitseq*>::iterator i = background_seqs.begin();
-                i != background_seqs.end(); ++i) {
-            std::string s = (*i)->to_string();
-            for (int j = 0; j < L+1+R; ++j) {
-                fprintf(f, "%d\t%c\n", j, s[j]);
-            }
-        }
-        fclose(f);
-    }
-#endif
-
-
-
     size_t max_parents  = 4;
     size_t max_distance = 10;
 
@@ -491,29 +468,7 @@ void sequencing_bias::buildn(motif** Mn,
                     complexity_penalty,
                     task_name);
 
-    double** gc = Mn == &M1 ? gc1 : gc2;
     std::deque<twobitseq*>::iterator seqit;
-
-    gc[0] = new double[L + R + 2];
-    std::fill(gc[0], gc[0] + (L + R + 2), 1.0);
-    for (seqit = background_seqs.begin(); seqit != background_seqs.end(); seqit++) {
-        ++gc[0][(*seqit)->gc_count()];
-    }
-    for (pos_t i = 0; i < L + R + 2; ++i) {
-        gc[0][i] /= (double) background_seqs.size() + L + R + 2;
-    }
-
-
-    gc[1] = new double[L + R + 2];
-    std::fill(gc[1], gc[1] + (L + R + 2), 1.0);
-    for (seqit = foreground_seqs.begin(); seqit != foreground_seqs.end(); seqit++) {
-        ++gc[1][(*seqit)->gc_count()];
-    }
-    for (pos_t i = 0; i < L + R + 2; ++i) {
-        gc[1][i] /= (double) background_seqs.size() + L + R + 2;
-    }
-
-
     for (seqit = background_seqs.begin(); seqit != background_seqs.end(); seqit++) {
         delete *seqit;
     }
@@ -530,6 +485,7 @@ void sequencing_bias::buildn(motif** Mn,
 sequencing_bias::~sequencing_bias()
 {
     clear();
+    gsl_rng_free(rng);
 }
 
 

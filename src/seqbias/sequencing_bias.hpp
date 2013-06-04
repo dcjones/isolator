@@ -14,6 +14,7 @@
 #include "common.hpp"
 #include "motif.hpp"
 #include "samtools/faidx.h"
+#include <gsl/gsl_rng.h>
 
 /** A representation of sequencing bias for a particular dataset.
  */
@@ -45,7 +46,6 @@ class sequencing_bias
                         PosTable& T1, PosTable& T2,
                         size_t max_reads,
                         pos_t L, pos_t R,
-                        double bgsd = 25.0,
                         double complexity_penalty = 1.0);
 
 
@@ -124,13 +124,8 @@ class sequencing_bias
         motif* M1; // single-end motif, or double-end mate1 motif
         motif* M2; // double-end mate2 motif
 
-        /* foreground/background distribution over gc content */
-        double* gc1[2];
-        double* gc2[2];
-
-        /* Standard deviation of distribution from which background positions
-         * are sampled. */
-        double bgsd;
+        /* random number generator */
+        gsl_rng* rng;
 };
 
 

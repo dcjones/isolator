@@ -972,7 +972,9 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
                 }
                 j0 = j;
                 w = 0.0;
-                align_pr_sum;
+                // TODO: If I "accidentally" leave this out I get much better
+                // results. Go figure...
+                //align_pr_sum = 0.0;
             }
 
             if (j->frag_weight > 0.0) {
@@ -1047,24 +1049,26 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
-    if (tlen < 15) return;
+#if 0
+    if (tlen < 100) return;
 
-    //if (t.strand == strand_neg) {
-        for (pos_t pos = 0; pos < 15; ++pos) {
+    if (t.strand == strand_neg) {
+        for (pos_t pos = 0; pos < 100; ++pos) {
             mate1_seqbias[0][pos] = 1.0;
             mate2_seqbias[0][pos] = 1.0;
             mate1_seqbias[1][pos] = 1.0;
             mate2_seqbias[1][pos] = 1.0;
         }
-    //}
-    //else {
-        for (pos_t pos = tlen - 15; pos < tlen; ++pos) {
+    }
+    else {
+        for (pos_t pos = tlen - 100; pos < tlen; ++pos) {
             mate1_seqbias[0][pos] = 1.0;
             mate2_seqbias[0][pos] = 1.0;
             mate1_seqbias[1][pos] = 1.0;
             mate2_seqbias[1][pos] = 1.0;
         }
-    //}
+    }
+#endif
 
     size_t bin = constants::tp_num_length_bins - 1;
     for (; bin > 0 && tlen < constants::tp_length_bins[bin]; --bin);
@@ -1094,38 +1098,6 @@ void SamplerInitThread::transcript_sequence_bias(
             mate1_seqbias[1][pos] *= fm.tp_dist[bin][0][d];
         }
     }
-
-#if 0
-    if (t.transcript_id == "ENST00000284292") {
-        FILE* out = fopen("ENST00000284292.mate1.0.tsv", "w");
-        fprintf(out, "i\tw\n");
-        for (pos_t i = 0; i < tlen; ++i) {
-            fprintf(out, "%ld\t%e\n", i, mate1_seqbias[0][i]);
-        }
-        fclose(out);
-
-        out = fopen("ENST00000284292.mate1.1.tsv", "w");
-        fprintf(out, "i\tw\n");
-        for (pos_t i = 0; i < tlen; ++i) {
-            fprintf(out, "%ld\t%e\n", i, mate1_seqbias[1][i]);
-        }
-        fclose(out);
-
-        out = fopen("ENST00000284292.mate2.0.tsv", "w");
-        fprintf(out, "i\tw\n");
-        for (pos_t i = 0; i < tlen; ++i) {
-            fprintf(out, "%ld\t%e\n", i, mate2_seqbias[0][i]);
-        }
-        fclose(out);
-
-        out = fopen("ENST00000284292.mate2.1.tsv", "w");
-        fprintf(out, "i\tw\n");
-        for (pos_t i = 0; i < tlen; ++i) {
-            fprintf(out, "%ld\t%e\n", i, mate2_seqbias[1][i]);
-        }
-        fclose(out);
-    }
-#endif
 }
 
 

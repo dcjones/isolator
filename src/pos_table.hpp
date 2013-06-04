@@ -12,10 +12,13 @@
 /* A simple read position structure. */
 struct ReadPos
 {
-    ReadPos(SeqName seqname, uint32_t strand, int32_t pos, uint32_t count)
+    ReadPos(SeqName seqname, uint32_t strand, int32_t pos,
+            int32_t start, int32_t end, uint32_t count)
         : seqname(seqname)
         , strand(strand)
         , pos(pos)
+        , start(start)
+        , end(end)
         , count(count)
     {}
 
@@ -23,6 +26,8 @@ struct ReadPos
         : seqname("")
         , strand(strand_na)
         , pos(0)
+        , start(0)
+        , end(0)
         , count(0)
     {}
 
@@ -30,12 +35,16 @@ struct ReadPos
         : seqname(other.seqname)
         , strand(other.strand)
         , pos(other.pos)
+        , start(other.start)
+        , end(other.end)
         , count(other.count)
     {}
 
     SeqName  seqname;
     uint32_t strand;
     int32_t  pos;
+    int32_t start;
+    int32_t end;
     uint32_t count;
 };
 
@@ -53,7 +62,8 @@ class PosTable
         size_t size();
 
         /* Tally the start position of the given read. */
-        void add(bam1_t* b, samfile_t* bam_f);
+        void add(int32_t tid, pos_t pos, int strand,
+                 pos_t start, pos_t end, samfile_t* bam_f);
 
         /* Dump to a flat array. */
         void dump(std::vector<ReadPos>& positions, size_t max_size);
@@ -62,6 +72,7 @@ class PosTable
         struct PosTableVal
         {
             pos_t pos;
+            pos_t start, end;
             unsigned int count;
         };
 
