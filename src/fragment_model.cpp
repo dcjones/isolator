@@ -641,7 +641,7 @@ class FragmentModelThread
 
 FragmentModel::FragmentModel()
 {
-    sb[0] = sb[1] = sb[2] = NULL;
+    sb[0] = sb[1] = NULL;
     frag_len_dist = NULL;
     tp_dist[0] = tp_dist[1] = NULL;
 }
@@ -651,7 +651,6 @@ FragmentModel::~FragmentModel()
 {
     delete sb[0];
     delete sb[1];
-    delete sb[2];
     delete frag_len_dist;
     delete tp_dist[0];
     delete tp_dist[1];
@@ -852,7 +851,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
 void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const char* fa_fn)
 {
     if (fa_fn == NULL) {
-        sb[0] = sb[1] = sb[2] = NULL;
+        sb[0] = sb[1] = NULL;
         return;
     }
 
@@ -882,7 +881,7 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
     const char* task_name = "Preparing to train seqbias model";
     Logger::push_task(task_name);
 
-    PosTable mate1_pos[3], mate2_pos[3];
+    PosTable mate1_pos[2], mate2_pos[2];
 
     samfile_t* bam_f;
     bam_f = samopen(bam_fn, "rb", NULL);
@@ -947,11 +946,10 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
                 off = five_prime_dist + (*j)->end - pos;
             }
 
-            int bin;
-            if (off < constants::seqbias_fp_end) bin = 0;
-            else if ((*j)->tlen - off < constants::seqbias_tp_end) bin = 2;
-            else bin = 1;
+            if (off < constants::seqbias_fp_end) continue;
+            else if ((*j)->tlen - off < constants::seqbias_tp_end) continue;
 
+            int bin = bam1_strand(b) == (*j)->strand;
             uint32_t tid = b->core.tid;
 
             if (b->core.flag & BAM_FREAD2) {
@@ -973,42 +971,15 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
         delete *i;
     }
 
-#if 0
     sb[0] = new sequencing_bias(fa_fn, mate1_pos[0], mate2_pos[0],
                                 constants::seqbias_num_reads,
                                 constants::seqbias_left_pos,
                                 constants::seqbias_right_pos);
-#endif
 
     sb[1] = new sequencing_bias(fa_fn, mate1_pos[1], mate2_pos[1],
                                 constants::seqbias_num_reads,
                                 constants::seqbias_left_pos,
                                 constants::seqbias_right_pos);
-
-#if 0
-    sb[2] = new sequencing_bias(fa_fn, mate1_pos[2], mate2_pos[2],
-                                constants::seqbias_num_reads,
-                                constants::seqbias_left_pos,
-                                constants::seqbias_right_pos);
-#endif
-
-#if 0
-    for (int bin = 0; bin < 3; ++bin) {
-        sb[bin] = new sequencing_bias(fa_fn, mate1_pos_tab[bin], mate2_pos_tab[bin],
-                                 constants::seqbias_num_reads,
-                                 constants::seqbias_left_pos,
-                                 constants::seqbias_right_pos);
-
-        /* XXX: dumping seqbias models */
-        char fn[100];
-        sprintf(fn, "seqbias_%d.dot", bin);
-        FILE* out = fopen(fn, "w");
-        fputs(sb[bin]->model_graph().c_str(), out);
-        fclose(out);
-    }
-#endif
-
-
 }
 
 

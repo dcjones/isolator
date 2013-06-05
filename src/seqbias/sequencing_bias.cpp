@@ -411,28 +411,7 @@ void sequencing_bias::buildn(motif** Mn,
         /* add a background sequence */
         /* adjust the current read position randomly, and sample */
         for (bg_sample_num = 0; bg_sample_num < bg_samples;) {
-#if 0
-            do {
-                bg_pos = i->pos + (pos_t)round_away(rand_gauss(250));
-            } while (!(i->start <= bg_pos && bg_pos <= i->end));
-#endif
             bg_pos = i->start + gsl_rng_uniform_int(rng, i->end - i->start + 1);
-
-
-            //bg_pos = i->pos + (pos_t)round_away(rand_gauss(25));
-
-#if 0
-            bg_pos = i->pos + (pos_t)round_away(rand_gauss(bgsd));
-#endif
-
-#if 0
-            if (rand() < RAND_MAX / 2) {
-                bg_pos = i->pos + 50 + (pos_t)rand_gauss(100);
-            }
-            else {
-                bg_pos = i->pos - 50 + (pos_t)rand_gauss(100);
-            }
-#endif
 
             if (i->strand == strand_neg) {
                 if (bg_pos < R || bg_pos >= seqlen - L) continue;

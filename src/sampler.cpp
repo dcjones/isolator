@@ -1023,29 +1023,33 @@ void SamplerInitThread::transcript_sequence_bias(
     t.get_sequence(tseq1, *locus.seq, constants::seqbias_right_pos, constants::seqbias_left_pos);
     tseq1.revcomp();
 
-    for (pos_t pos = 0; pos < tlen; ++pos) {
-        int bin[2] = {1,1};
+    if (t.strand == strand_pos) {
+        for (pos_t pos = 0; pos < tlen; ++pos) {
+            mate1_seqbias[0][pos] = fm.sb[0]->get_mate1_bias(tseq0,
+                    pos + constants::seqbias_left_pos);
+            mate1_seqbias[1][pos] = fm.sb[1]->get_mate1_bias(tseq1,
+                    pos + constants::seqbias_left_pos);
+            mate2_seqbias[0][pos] = fm.sb[0]->get_mate2_bias(tseq0,
+                    pos + constants::seqbias_left_pos);
+            mate2_seqbias[1][pos] = fm.sb[1]->get_mate2_bias(tseq1,
+                    pos + constants::seqbias_left_pos);
+        }
+    }
+    else {
+        for (pos_t pos = 0; pos < tlen; ++pos) {
+            mate1_seqbias[0][pos] = fm.sb[1]->get_mate1_bias(tseq0,
+                    pos + constants::seqbias_left_pos);
+            mate1_seqbias[1][pos] = fm.sb[0]->get_mate1_bias(tseq1,
+                    pos + constants::seqbias_left_pos);
+            mate2_seqbias[0][pos] = fm.sb[1]->get_mate2_bias(tseq0,
+                    pos + constants::seqbias_left_pos);
+            mate2_seqbias[1][pos] = fm.sb[0]->get_mate2_bias(tseq1,
+                    pos + constants::seqbias_left_pos);
+        }
+    }
+
 #if 0
-        if (t.strand == strand_pos) {
-            if (pos < constants::seqbias_fp_end) bin[0] = 0;
-            else if (tlen - pos < constants::seqbias_tp_end) bin[0] = 2;
-            else bin[0] = 1;
-
-            if (pos < constants::seqbias_tp_end) bin[1] = 2;
-            else if (tlen - pos < constants::seqbias_fp_end) bin[1] = 0;
-            else bin[1] = 1;
-        }
-        else {
-            if (pos < constants::seqbias_tp_end) bin[0] = 2;
-            else if (tlen - pos < constants::seqbias_fp_end) bin[0] = 0;
-            else bin[0] = 1;
-
-            if (pos < constants::seqbias_fp_end) bin[1] = 0;
-            else if (tlen - pos < constants::seqbias_tp_end) bin[1] = 2;
-            else bin[1] = 1;
-        }
-#endif
-
+    for (pos_t pos = 0; pos < tlen; ++pos) {
         mate1_seqbias[0][pos] = fm.sb[bin[0]]->get_mate1_bias(tseq0,
                 pos + constants::seqbias_left_pos);
         mate1_seqbias[1][pos] = fm.sb[bin[1]]->get_mate1_bias(tseq1,
@@ -1055,15 +1059,16 @@ void SamplerInitThread::transcript_sequence_bias(
         mate2_seqbias[1][pos] = fm.sb[bin[1]]->get_mate2_bias(tseq1,
                 pos + constants::seqbias_left_pos);
     }
+#endif
 
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
 #if 0
-    if (tlen < 100) return;
+    if (tlen < 200) return;
 
     if (t.strand == strand_neg) {
-        for (pos_t pos = 0; pos < 100; ++pos) {
+        for (pos_t pos = 0; pos < 200; ++pos) {
             mate1_seqbias[0][pos] = 1.0;
             mate2_seqbias[0][pos] = 1.0;
             mate1_seqbias[1][pos] = 1.0;
@@ -1071,7 +1076,7 @@ void SamplerInitThread::transcript_sequence_bias(
         }
     }
     else {
-        for (pos_t pos = tlen - 100; pos < tlen; ++pos) {
+        for (pos_t pos = tlen - 200; pos < tlen; ++pos) {
             mate1_seqbias[0][pos] = 1.0;
             mate2_seqbias[0][pos] = 1.0;
             mate1_seqbias[1][pos] = 1.0;
@@ -1079,26 +1084,6 @@ void SamplerInitThread::transcript_sequence_bias(
         }
     }
 #endif
-
-
-    double norm[2] = {
-        fm.tp_dist[0]->pdf(500),
-        fm.tp_dist[1]->pdf(500) };
-
-    if (t.strand == strand_pos) {
-        for (pos_t pos = 0; pos < tlen; ++pos) {
-            pos_t off = std::min<pos_t>(tlen - pos - 1, constants::tp_len - 500);
-            mate1_seqbias[0][pos] *= fm.tp_dist[0]->pdf(off) / norm[0];
-            mate1_seqbias[1][pos] *= fm.tp_dist[1]->pdf(off) / norm[1];
-        }
-    }
-    else {
-        for (pos_t pos = 0; pos < tlen; ++pos) {
-            pos_t off = std::min<pos_t>(pos, constants::tp_len - 500);
-            mate1_seqbias[0][pos] *= fm.tp_dist[1]->pdf(off) / norm[1];
-            mate1_seqbias[1][pos] *= fm.tp_dist[0]->pdf(off) / norm[0];
-        }
-    }
 }
 
 
@@ -1135,14 +1120,30 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
 
         for (pos_t pos = 0; pos <= trans_len - frag_len; ++pos) {
             // Positive strand fragment weight
+            //ws[frag_len] +=
+                //sp0 *
+                //mate1_seqbias[0][pos] * mate2_seqbias[1][pos + frag_len - 1];
+
             ws[frag_len] +=
                 sp0 *
-                mate1_seqbias[0][pos] * mate2_seqbias[1][pos + frag_len - 1];
+                0.5 * (mate1_seqbias[0][pos] * mate2_seqbias[1][pos + frag_len - 1]);
+
+            //ws[frag_len] +=
+                //sp0 *
+                //std::max(mate1_seqbias[0][pos], mate2_seqbias[1][pos + frag_len - 1]);
 
             // Negative strand fragment weight
+            //ws[frag_len] +=
+                //sp1 *
+                //mate2_seqbias[0][pos] * mate1_seqbias[1][pos + frag_len - 1];
+
             ws[frag_len] +=
                 sp1 *
-                mate2_seqbias[0][pos] * mate1_seqbias[1][pos + frag_len - 1];
+                0.5 * (mate2_seqbias[0][pos] * mate1_seqbias[1][pos + frag_len - 1]);
+
+            //ws[frag_len] +=
+                //sp1 *
+                //std::max(mate2_seqbias[0][pos], mate1_seqbias[1][pos + frag_len - 1]);
         }
     }
 
@@ -1189,29 +1190,34 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     else if (frag_len > tlen) return 0.0;
 
     float w = 1.0;
-    if (a.mate1) {
-        pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?
-                                    a.mate1->start : a.mate1->end);
-        if (offset < 0 || offset >= tlen) return 0.0;
+    if (a.mate1 && a.mate2) {
+        pos_t offset1 = t.get_offset(a.mate1->strand == strand_pos ?
+                                     a.mate1->start : a.mate1->end);
+        if (offset1 < 0 || offset1 >= tlen) return 0.0;
 
-        //double cdf;
-        //if (a.mate1->strand == t.strand) {
-            //cdf = tp_bias[constants::transcript_3p_num_bins - 1][0]->cdf(tlen);
-        //}
-        //else {
-            //cdf = tp_bias[constants::transcript_3p_num_bins - 1][1]->cdf(tlen);
-        //}
+        pos_t offset2 = t.get_offset(a.mate2->strand == strand_pos ?
+                                     a.mate2->start : a.mate2->end);
+        if (offset2 < 0 || offset2 >= tlen) return 0.0;
 
-
-        w *= mate1_seqbias[a.mate1->strand][offset];
+        w *= 0.5 * (mate1_seqbias[a.mate1->strand][offset1] +
+                    mate2_seqbias[a.mate2->strand][offset2]);
     }
+    else {
+        if (a.mate1) {
+            pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?
+                                        a.mate1->start : a.mate1->end);
+            if (offset < 0 || offset >= tlen) return 0.0;
 
-    if (a.mate2) {
-        pos_t offset = t.get_offset(a.mate2->strand == strand_pos ?
-                                    a.mate2->start : a.mate2->end);
-        if (offset < 0 || offset >= tlen) return 0.0;
+            w *= mate1_seqbias[a.mate1->strand][offset];
+        }
 
-        w *= mate2_seqbias[a.mate2->strand][offset];
+        if (a.mate2) {
+            pos_t offset = t.get_offset(a.mate2->strand == strand_pos ?
+                                        a.mate2->start : a.mate2->end);
+            if (offset < 0 || offset >= tlen) return 0.0;
+
+            w *= mate2_seqbias[a.mate2->strand][offset];
+        }
     }
 
     // strand-specificity

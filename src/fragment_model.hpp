@@ -118,7 +118,7 @@ class FragmentModel
         float strand_specificity;
 
         /* A model of sequence bias. */
-        sequencing_bias* sb[3];
+        sequencing_bias* sb[2];
 
         /* Distribution over fragment lengths. */
         EmpDist* frag_len_dist;
