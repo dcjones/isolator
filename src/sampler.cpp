@@ -1064,26 +1064,20 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
-#if 0
-    if (tlen < 200) return;
+    if (tlen < 20) return;
 
-    if (t.strand == strand_neg) {
-        for (pos_t pos = 0; pos < 200; ++pos) {
-            mate1_seqbias[0][pos] = 1.0;
-            mate2_seqbias[0][pos] = 1.0;
-            mate1_seqbias[1][pos] = 1.0;
-            mate2_seqbias[1][pos] = 1.0;
-        }
+    for (pos_t pos = 0; pos < 20; ++pos) {
+        mate1_seqbias[0][pos] = 1.0;
+        mate2_seqbias[0][pos] = 1.0;
+        mate1_seqbias[1][pos] = 1.0;
+        mate2_seqbias[1][pos] = 1.0;
     }
-    else {
-        for (pos_t pos = tlen - 200; pos < tlen; ++pos) {
-            mate1_seqbias[0][pos] = 1.0;
-            mate2_seqbias[0][pos] = 1.0;
-            mate1_seqbias[1][pos] = 1.0;
-            mate2_seqbias[1][pos] = 1.0;
-        }
+    for (pos_t pos = tlen - 20; pos < tlen; ++pos) {
+        mate1_seqbias[0][pos] = 1.0;
+        mate2_seqbias[0][pos] = 1.0;
+        mate1_seqbias[1][pos] = 1.0;
+        mate2_seqbias[1][pos] = 1.0;
     }
-#endif
 }
 
 
@@ -1120,30 +1114,12 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
 
         for (pos_t pos = 0; pos <= trans_len - frag_len; ++pos) {
             // Positive strand fragment weight
-            //ws[frag_len] +=
-                //sp0 *
-                //mate1_seqbias[0][pos] * mate2_seqbias[1][pos + frag_len - 1];
-
             ws[frag_len] +=
-                sp0 *
-                0.5 * (mate1_seqbias[0][pos] * mate2_seqbias[1][pos + frag_len - 1]);
-
-            //ws[frag_len] +=
-                //sp0 *
-                //std::max(mate1_seqbias[0][pos], mate2_seqbias[1][pos + frag_len - 1]);
+                sp0 * (mate1_seqbias[0][pos] * mate2_seqbias[1][pos + frag_len - 1]);
 
             // Negative strand fragment weight
-            //ws[frag_len] +=
-                //sp1 *
-                //mate2_seqbias[0][pos] * mate1_seqbias[1][pos + frag_len - 1];
-
             ws[frag_len] +=
-                sp1 *
-                0.5 * (mate2_seqbias[0][pos] * mate1_seqbias[1][pos + frag_len - 1]);
-
-            //ws[frag_len] +=
-                //sp1 *
-                //std::max(mate2_seqbias[0][pos], mate1_seqbias[1][pos + frag_len - 1]);
+                sp1 * (mate2_seqbias[0][pos] * mate1_seqbias[1][pos + frag_len - 1]);
         }
     }
 
@@ -1153,17 +1129,6 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         float frag_len_pr = frag_len_p(frag_len);
         tw += frag_len_pr * ws[frag_len];
     }
-
-#if 0
-    if (t.transcript_id == "ENST00000233143") {
-        FILE* out = fopen("ENST00000233143.tlen.tsv", "w");
-        fprintf(out, "frag_len\tp\n");
-        for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
-            fprintf(out, "%ld\t%e\n", frag_len, frag_len_p(frag_len));
-        }
-        fclose(out);
-    }
-#endif
 
     if (!finite(tw) || tw <= constants::min_transcript_weight) {
         tw = 0.0;
@@ -1199,8 +1164,8 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
                                      a.mate2->start : a.mate2->end);
         if (offset2 < 0 || offset2 >= tlen) return 0.0;
 
-        w *= 0.5 * (mate1_seqbias[a.mate1->strand][offset1] +
-                    mate2_seqbias[a.mate2->strand][offset2]);
+        w *= (mate1_seqbias[a.mate1->strand][offset1] *
+              mate2_seqbias[a.mate2->strand][offset2]);
     }
     else {
         if (a.mate1) {
