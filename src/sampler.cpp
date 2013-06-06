@@ -1,6 +1,7 @@
 
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
+#include <gsl/gsl_statistics.h>
 #include <gsl/gsl_randist.h>
 #include <gsl/gsl_rng.h>
 
@@ -705,11 +706,13 @@ class SamplerInitThread
                 TSVec<FragIdxCount>& frag_counts,
                 TSVec<MultireadFrag>& multiread_frags,
                 float* transcript_weights,
+                float* transcript_gc,
                 Queue<SamplerInitInterval*>& q)
             : weight_matrix(weight_matrix)
             , frag_counts(frag_counts)
             , multiread_frags(multiread_frags)
             , transcript_weights(transcript_weights)
+            , transcript_gc(transcript_gc)
             , fm(fm)
             , read_indexer(read_indexer)
             , q(q)
@@ -801,6 +804,7 @@ class SamplerInitThread
         TSVec<FragIdxCount>& frag_counts;
         TSVec<MultireadFrag>& multiread_frags;
         float* transcript_weights;
+        float* transcript_gc;
 
         FragmentModel& fm;
         Indexer& read_indexer;
@@ -1023,6 +1027,8 @@ void SamplerInitThread::transcript_sequence_bias(
     t.get_sequence(tseq1, *locus.seq, constants::seqbias_right_pos, constants::seqbias_left_pos);
     tseq1.revcomp();
 
+    transcript_gc[t.id] = tseq0.gc_count() / (double) tlen;
+
     if (t.strand == strand_pos) {
         for (pos_t pos = 0; pos < tlen; ++pos) {
             mate1_seqbias[0][pos] = fm.sb[0]->get_mate1_bias(tseq0,
@@ -1047,19 +1053,6 @@ void SamplerInitThread::transcript_sequence_bias(
                     pos + constants::seqbias_left_pos);
         }
     }
-
-#if 0
-    for (pos_t pos = 0; pos < tlen; ++pos) {
-        mate1_seqbias[0][pos] = fm.sb[bin[0]]->get_mate1_bias(tseq0,
-                pos + constants::seqbias_left_pos);
-        mate1_seqbias[1][pos] = fm.sb[bin[1]]->get_mate1_bias(tseq1,
-                pos + constants::seqbias_left_pos);
-        mate2_seqbias[0][pos] = fm.sb[bin[0]]->get_mate2_bias(tseq0,
-                pos + constants::seqbias_left_pos);
-        mate2_seqbias[1][pos] = fm.sb[bin[1]]->get_mate2_bias(tseq1,
-                pos + constants::seqbias_left_pos);
-    }
-#endif
 
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
@@ -1260,6 +1253,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
 
     weight_matrix = new WeightMatrix(ts.size());
     transcript_weights = new float [ts.size()];
+    transcript_gc = new float [ts.size()];
     TSVec<FragIdxCount> nz_frag_counts;
     TSVec<MultireadFrag> multiread_frags;
 
@@ -1272,6 +1266,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
                     nz_frag_counts,
                     multiread_frags,
                     transcript_weights,
+                    transcript_gc,
                     q));
         threads.back()->start();
     }
@@ -1501,6 +1496,7 @@ Sampler::~Sampler()
     delete [] component_frag;
     delete weight_matrix;
     delete [] transcript_weights;
+    delete [] transcript_gc;
 }
 
 
@@ -2289,6 +2285,8 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
     Logger::pop_task(task_name);
 
+    gc_correction(maxpost_tmix, num_samples);
+
     out.begin_transaction();
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         out.insert_sampler_result(
@@ -2325,5 +2323,85 @@ void Sampler::init_frag_probs()
               weight_matrix->rowlens[i]);
     }
 }
+
+
+void Sampler::gc_correction(float* maxpost, size_t num_samples)
+{
+    typedef std::pair<double, unsigned int> GCId;
+    std::vector<GCId> gcid;
+    gcid.reserve(ts.size());
+
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        if (maxpost[t->id] > constants::round_down_eps) {
+            gcid.push_back(std::make_pair(transcript_gc[t->id], t->id));
+        }
+    }
+    std::sort(gcid.begin(), gcid.end());
+
+    size_t m = gcid.size() / constants::gc_num_bins;
+    std::vector<double> bin_xs(m);
+    std::vector<double> meds(constants::gc_num_bins);
+    std::vector<double> gc_quants(constants::gc_num_bins - 1);
+
+    for (size_t i = 0; i < constants::gc_num_bins; ++i) {
+        for (size_t j = 0; j < m; ++j) {
+            bin_xs[j] = maxpost[gcid[i*m + j].second];
+        }
+        if (i < constants::gc_num_bins - 1) gc_quants[i] = gcid[(i+1) * m].first;
+        std::sort(bin_xs.begin(), bin_xs.end());
+        meds[i] = gsl_stats_median_from_sorted_data(&bin_xs.at(0), 1, m);
+    }
+
+    // XXX: debugging
+    for (size_t i = 0; i < constants::gc_num_bins; ++i) {
+       Logger::info("GC bin %zu: %e", i, meds[i]);
+    }
+
+    for (size_t i = 0; i < constants::gc_num_bins - 1; ++i) {
+       Logger::info("GC quants %zu: %f", i, gc_quants[i]);
+    }
+
+    // adjustment factors
+    std::vector<double> bin_adj(constants::gc_num_bins);
+    for (size_t i = 0; i < constants::gc_num_bins - 1; ++i) {
+        bin_adj[i] = meds[constants::gc_num_bins - 1] / meds[i];
+    }
+    bin_adj[constants::gc_num_bins - 1] = 1.0;
+
+    // make adjustments to samples and maxpost_tmix
+    gcid.resize(ts.size());
+    size_t i = 0;
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t, ++i) {
+        gcid[i].first = transcript_gc[t->id];
+        gcid[i].second = t->id;
+    }
+    std::sort(gcid.begin(), gcid.end());
+
+    size_t bin = 0;
+    for (std::vector<GCId>::iterator i = gcid.begin(); i != gcid.end(); ++i) {
+        if (bin < constants::gc_num_bins - 1 && i->first > gc_quants[bin]) {
+            ++bin;
+        }
+        double adj = bin_adj[bin];
+
+        maxpost[i->second] *= adj;
+        for (size_t j = 0; j < num_samples; ++j) {
+            samples[i->second][j] *= adj;
+        }
+    }
+
+    // renormalize everything
+    double z = 0.0;
+    for (size_t i = 0; i < ts.size(); ++i) z += maxpost[i];
+    for (size_t i = 0; i < ts.size(); ++i) maxpost[i] /= z;
+
+    for (size_t i = 0; i < num_samples; ++i) {
+        z = 0.0;
+        for (size_t j = 0; j < ts.size(); ++j) z += samples[j][i];
+        for (size_t j = 0; j < ts.size(); ++j) samples[j][i] /= z;
+    }
+}
+
+
 
 

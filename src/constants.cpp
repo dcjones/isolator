@@ -11,6 +11,7 @@ size_t               constants::seqbias_left_pos             = 15;
 size_t               constants::seqbias_right_pos            = 15;
 pos_t                constants::seqbias_tp_end               = 0;
 pos_t                constants::seqbias_fp_end               = 0;
+size_t               constants::gc_num_bins                  = 10;
 constants::libtype_t constants::libtype                      = constants::LIBTYPE_FR;
 unsigned int         constants::max_alignments               = 100;
 pos_t                constants::max_frag_len                 = 1000;

@@ -28,6 +28,9 @@ class Sampler
          * tmix. */
         void init_frag_probs();
 
+        /* Perform post-hoc adjustment for transcript GC-content. */
+        void gc_correction(float* xs, size_t num_samples);
+
         TranscriptSet& ts;
         FragmentModel& fm;
 
@@ -39,6 +42,9 @@ class Sampler
 
         WeightMatrix* weight_matrix;
         float* transcript_weights;
+
+        /* GC content of each transcript. */
+        float* transcript_gc;
 
         /* transcript_component[i] gives the component number of transcript i */
         unsigned int* transcript_component;

@@ -52,6 +52,9 @@ namespace constants
     extern pos_t seqbias_tp_end;
     extern pos_t seqbias_fp_end;
 
+    /* Number of GC-content bins to use in correction. */
+    extern size_t gc_num_bins;
+
     /* Library type; how the mates in paired-end data sets were generated. */
     enum libtype_t {
         LIBTYPE_FR,  //  ======>--------<======
