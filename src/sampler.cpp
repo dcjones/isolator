@@ -625,6 +625,11 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
         }
 
         if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
+        if (b->core.mtid != -1 && b->core.tid != b->core.mtid) continue;
+
+        // XXX
+        if (b->core.mtid == -1) continue;
+
         if (b->core.qual < constants::min_map_qual) continue;
 
         if (b->core.tid < last_tid ||
@@ -986,14 +991,12 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
                 }
                 j0 = j;
                 w = 0.0;
-                // TODO: If I "accidentally" leave this out I get much better
-                // results. Go figure...
-                //align_pr_sum = 0.0;
+                align_pr_sum = 0.0;
             }
 
             if (j->frag_weight > 0.0) {
-                w += j->align_pr * j->frag_weight;
-                align_pr_sum += j->align_pr;
+                w += j->frag_weight;
+                align_pr_sum += 1.0;
             }
         }
         if (w > 0.0) {
@@ -1139,10 +1142,15 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     if (frag_len < 0) return 0.0;
     else if (frag_len == 0) {
         pos_t max_frag_len;
-        if (a.mate1) max_frag_len = std::max(a.mate1->end - t.min_start + 1,
-                                             t.max_end - a.mate1->start + 1);
-        else         max_frag_len = std::max(a.mate2->end - t.min_start + 1,
-                                             t.max_end - a.mate2->start + 1);
+        const Alignment* mate = a.mate1 ? a.mate1 : a.mate2;
+
+        if (mate->strand == strand_pos) {
+            max_frag_len = t.max_end - mate->start + 1;
+        }
+        else {
+            max_frag_len = mate->end - t.min_start + 1;
+        }
+
         frag_len = std::min(max_frag_len, (pos_t) round(fm.frag_len_med()));
     }
     else if (frag_len > tlen) return 0.0;
@@ -1194,7 +1202,14 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     }
     if (frag_len_pr * w < constants::min_frag_weight) return 0.0;
 
+#if 0
+    if (t.transcript_id == "ENST00000564197") {
+        Logger::info("here");
+    }
+#endif
+
     return frag_len_pr * w / ws[frag_len];
+    //return (frag_len_pr / frag_len_c(tlen)) * (w / tw);
 }
 
 
@@ -2012,6 +2027,18 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
     }
 
 #if 0
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        if (t->transcript_id == "ENST00000564197") {
+            Logger::info("ENST00000564197 has %ld frags",
+                    weight_matrix->rowlens[t->id]);
+            for (size_t i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
+                Logger::info("%e", weight_matrix->rows[t->id][i]);
+            }
+        }
+    }
+#endif
+
+#if 0
     for (unsigned int i = 0; i < num_components; ++i) {
         float w = 0.0;
         for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
@@ -2285,7 +2312,9 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
     Logger::pop_task(task_name);
 
-    gc_correction(maxpost_tmix, num_samples);
+    if (fm.sb[0]) {
+        gc_correction(maxpost_tmix, num_samples);
+    }
 
     out.begin_transaction();
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
@@ -2332,7 +2361,7 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     gcid.reserve(ts.size());
 
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (maxpost[t->id] > constants::round_down_eps) {
+        if (maxpost[t->id] > 1e-6) {
             gcid.push_back(std::make_pair(transcript_gc[t->id], t->id));
         }
     }
@@ -2349,7 +2378,9 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
         }
         if (i < constants::gc_num_bins - 1) gc_quants[i] = gcid[(i+1) * m].first;
         std::sort(bin_xs.begin(), bin_xs.end());
-        meds[i] = gsl_stats_median_from_sorted_data(&bin_xs.at(0), 1, m);
+        //meds[i] = gsl_stats_median_from_sorted_data(&bin_xs.at(0), 1, m);
+        meds[i] = gsl_stats_quantile_from_sorted_data(
+                &bin_xs.at(0), 1, m, 0.90);
     }
 
     // XXX: debugging
