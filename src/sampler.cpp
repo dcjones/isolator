@@ -2361,7 +2361,8 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     gcid.reserve(ts.size());
 
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (maxpost[t->id] > 1e-6) {
+        if (maxpost[t->id] > 0 && t->biotype == "protein_coding" &&
+            t->exonic_length() > 300) {
             gcid.push_back(std::make_pair(transcript_gc[t->id], t->id));
         }
     }
@@ -2374,13 +2375,15 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
 
     for (size_t i = 0; i < constants::gc_num_bins; ++i) {
         for (size_t j = 0; j < m; ++j) {
-            bin_xs[j] = maxpost[gcid[i*m + j].second];
+            //bin_xs[j] = maxpost[gcid[i*m + j].second];
+            // XXX
+            bin_xs[j] = log(maxpost[gcid[i*m + j].second]);
         }
         if (i < constants::gc_num_bins - 1) gc_quants[i] = gcid[(i+1) * m].first;
         std::sort(bin_xs.begin(), bin_xs.end());
         //meds[i] = gsl_stats_median_from_sorted_data(&bin_xs.at(0), 1, m);
         meds[i] = gsl_stats_quantile_from_sorted_data(
-                &bin_xs.at(0), 1, m, 0.90);
+                &bin_xs.at(0), 1, m, 0.75);
     }
 
     // XXX: debugging
@@ -2396,6 +2399,7 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     std::vector<double> bin_adj(constants::gc_num_bins);
     for (size_t i = 0; i < constants::gc_num_bins - 1; ++i) {
         bin_adj[i] = meds[constants::gc_num_bins - 1] / meds[i];
+        Logger::info("bin_adj[%d] = %f", (int) i, bin_adj[i]);
     }
     bin_adj[constants::gc_num_bins - 1] = 1.0;
 
@@ -2415,9 +2419,13 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
         }
         double adj = bin_adj[bin];
 
-        maxpost[i->second] *= adj;
+
+        //maxpost[i->second] *= adj;
+        maxpost[i->second] = pow(maxpost[i->second], adj);
         for (size_t j = 0; j < num_samples; ++j) {
-            samples[i->second][j] *= adj;
+            // XXX
+            //samples[i->second][j] *= adj;
+            samples[i->second][j]  = pow(samples[i->second][j], adj);
         }
     }
 
