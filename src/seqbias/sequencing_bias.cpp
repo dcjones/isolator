@@ -16,8 +16,12 @@
 #include <ctime>
 #include <fstream>
 #include <algorithm>
+#include <gsl/gsl_randist.h>
 
 using namespace std;
+
+const unsigned int sequencing_bias::gc_bins = 100;
+const unsigned int sequencing_bias::distal_background_sd = 2000;
 
 
 static char complement(char c)
@@ -118,6 +122,7 @@ sequencing_bias::sequencing_bias()
     , M1(NULL)
     , M2(NULL)
 {
+    GC1[0] = GC1[1] = GC2[0] = GC2[1] = NULL;
     rng = gsl_rng_alloc(gsl_rng_mt19937);
 }
 
@@ -260,6 +265,11 @@ void sequencing_bias::clear()
 
     delete M2;
     M2 = NULL;
+
+    delete GC1[0];
+    delete GC1[1];
+    delete GC2[0];
+    delete GC2[1];
 }
 
 
@@ -351,8 +361,11 @@ void sequencing_bias::buildn(motif** Mn,
         Logger::abort("Can't open fasta file '%s'.", ref_fn);
     }
 
-    std::deque<twobitseq*> foreground_seqs;
-    std::deque<twobitseq*> background_seqs;
+    /* Proximal background positions are used to train "motif bias" while distal
+     * sequnences are used for GC bias. */
+    std::deque<twobitseq*> foreground_seqs,
+                           prox_background_seqs,
+                           dist_background_seqs;
 
     /* background sampling */
     int bg_samples = 1; // make this many samples for each read
@@ -407,9 +420,7 @@ void sequencing_bias::buildn(motif** Mn,
 
         foreground_seqs.push_back(new twobitseq(local_seq));
 
-
-        /* add a background sequence */
-        /* adjust the current read position randomly, and sample */
+        // choose proximal background sequences
         for (bg_sample_num = 0; bg_sample_num < bg_samples;) {
             bg_pos = i->start + gsl_rng_uniform_int(rng, i->end - i->start + 1);
 
@@ -425,12 +436,22 @@ void sequencing_bias::buildn(motif** Mn,
 
             if (strchr(local_seq, 'n') != NULL) continue;
 
-            background_seqs.push_back(new twobitseq(local_seq));
+            prox_background_seqs.push_back(new twobitseq(local_seq));
             bg_sample_num++;
+        }
+
+        // choose distal background sequence
+        for (bg_sample_num = 0; bg_sample_num < bg_samples;) {
+            bg_pos = i->pos + (pos_t) gsl_ran_gaussian(rng, distal_background_sd);
+            memcpy(local_seq, seq + (bg_pos-L), (L+1+R)*sizeof(char));
+            dist_background_seqs.push_back(new twobitseq(local_seq));
         }
     }
 
+    // train gc bias
+    train_gc_bias(Mn == &M1 ? GC1 : GC2, foreground_seqs, dist_background_seqs);
 
+    // train motif bias
     size_t max_parents  = 4;
     size_t max_distance = 10;
 
@@ -439,7 +460,7 @@ void sequencing_bias::buildn(motif** Mn,
      * a model. */
     if (foreground_seqs.size() < 10000) complexity_penalty = 0.25;
 
-    *Mn = new motif(background_seqs,
+    *Mn = new motif(prox_background_seqs,
                     foreground_seqs,
                     L + 1 + R,
                     max_parents,
@@ -448,7 +469,11 @@ void sequencing_bias::buildn(motif** Mn,
                     task_name);
 
     std::deque<twobitseq*>::iterator seqit;
-    for (seqit = background_seqs.begin(); seqit != background_seqs.end(); seqit++) {
+    for (seqit = prox_background_seqs.begin(); seqit != prox_background_seqs.end(); seqit++) {
+        delete *seqit;
+    }
+
+    for (seqit = dist_background_seqs.begin(); seqit != dist_background_seqs.end(); seqit++) {
         delete *seqit;
     }
 
@@ -458,6 +483,35 @@ void sequencing_bias::buildn(motif** Mn,
 
     free(seq);
     delete [] local_seq;
+}
+
+void sequencing_bias::train_gc_bias(EmpDist* GC[2],
+                                    const std::deque<twobitseq*> foreground,
+                                    const std::deque<twobitseq*> background)
+{
+    double bin_size = 1.0 / gc_bins;
+    std::vector<unsigned int> binned_gc(gc_bins), binned_gc_count(gc_bins);
+    std::deque<twobitseq*>::const_iterator seq;
+
+    for (unsigned int i = 0; i < gc_bins; ++i) {
+        binned_gc[i] = i;
+    }
+
+    std::fill(binned_gc_count.begin(), binned_gc_count.end(), 0);
+    for (seq = foreground.begin(); seq != foreground.end(); ++seq) {
+        unsigned int bin = std::min<unsigned int>(
+            gc_bins - 1, ((*seq)->gc_count() / (double) (*seq)->size()) / bin_size);
+        binned_gc_count[bin] += 1;
+    }
+    GC[1] = new EmpDist(&binned_gc.at(0), &binned_gc_count.at(0), 0.5);
+
+    std::fill(binned_gc_count.begin(), binned_gc_count.end(), 0);
+    for (seq = background.begin(); seq != background.end(); ++seq) {
+        unsigned int bin = std::min<unsigned int>(
+            gc_bins - 1, ((*seq)->gc_count() / (double) (*seq)->size()) / bin_size);
+        binned_gc_count[bin] += 1;
+    }
+    GC[0] = new EmpDist(&binned_gc.at(0), &binned_gc_count.at(0), 0.5);
 }
 
 
@@ -546,12 +600,9 @@ double* sequencing_bias::get_maten_bias(const motif* Mn,
     for (i = 0; i < seqlen; i++) {
         bs[i] = Mn->eval(seq, i);
     }
-
-
     free(seqstr);
     return bs;
 }
-
 
 
 double sequencing_bias::get_maten_bias(const motif* Mn,
@@ -559,23 +610,22 @@ double sequencing_bias::get_maten_bias(const motif* Mn,
 {
     if (Mn == NULL || pos < L || (pos_t) seq.size() - pos <= R) return 1.0;
 
-#if 0
-    size_t gc_cnt = seq.gc_count(pos, pos + L + R);
-    double gc_adj;
+    // gc bias
+    unsigned int gc = seq.gc_count(pos - L, pos + R);
+    unsigned int bin = std::min<unsigned int>(
+        gc_bins - 1,
+        gc_bins * (gc / (double) (L + 1 + R)));
+    double p = 1.0;
     if (Mn == M1) {
-        //gc_adj = gc1[1][gc_cnt] = gc1[0][gc_cnt];
-        gc_adj = gc1[0][gc_cnt] / gc1[1][gc_cnt];
+        p *= GC1[1]->pdf(bin) / GC1[0]->pdf(bin);
     }
     else {
-        //gc_adj = gc2[1][gc_cnt] / gc2[0][gc_cnt];
-        gc_adj = gc2[0][gc_cnt] / gc2[1][gc_cnt];
+        p *= GC2[1]->pdf(bin) / GC2[0]->pdf(bin);
     }
-#endif
 
-    return Mn->eval(seq, pos - L);
+    // motif bias
+    return p * Mn->eval(seq, pos - L);
 }
-
-
 
 
 string sequencing_bias::model_graph() const

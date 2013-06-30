@@ -2312,9 +2312,11 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
     Logger::pop_task(task_name);
 
+#if 0
     if (fm.sb[0]) {
         gc_correction(maxpost_tmix, num_samples);
     }
+#endif
 
     out.begin_transaction();
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {

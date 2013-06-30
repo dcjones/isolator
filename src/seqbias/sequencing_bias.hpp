@@ -11,6 +11,7 @@
 #include <string>
 
 #include "../pos_table.hpp"
+#include "../emp_dist.hpp"
 #include "common.hpp"
 #include "motif.hpp"
 #include "samtools/faidx.h"
@@ -112,6 +113,9 @@ class sequencing_bias
                 const motif* Mn,
                 const twobitseq& seq, pos_t pos) const;
 
+        void train_gc_bias(EmpDist* GC[2],
+                           const std::deque<twobitseq*> foreground,
+                           const std::deque<twobitseq*> background);
 
         /* left and right sequence context */
         pos_t L, R;
@@ -124,8 +128,22 @@ class sequencing_bias
         motif* M1; // single-end motif, or double-end mate1 motif
         motif* M2; // double-end mate2 motif
 
+        /* Distribution over GC content of sequences surrounding the
+          foreground and background positions. */
+        EmpDist* GC1[2];
+        EmpDist* GC2[2];
+
         /* random number generator */
         gsl_rng* rng;
+
+        /* A couple constants used for training. */
+
+        /* Number of bins to use for the model of GC bias */
+        static const unsigned int gc_bins;
+
+        /* Standard deviation of the normal distribution from which distal background
+         * sequences are sampled. */
+        static const unsigned int distal_background_sd;
 };
 
 
