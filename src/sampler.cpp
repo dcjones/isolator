@@ -4,6 +4,7 @@
 #include <gsl/gsl_statistics.h>
 #include <gsl/gsl_randist.h>
 #include <gsl/gsl_rng.h>
+#include <gsl/gsl_multifit.h>
 
 #include "constants.hpp"
 #include "hat-trie/hat-trie.h"
@@ -2356,6 +2357,70 @@ void Sampler::init_frag_probs()
 
 void Sampler::gc_correction(float* maxpost, size_t num_samples)
 {
+    size_t n = 0;
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        if (maxpost[t->id] > 0.0 &&
+            t->biotype == "protein_coding" &&
+            t->source == "protein_coding") ++n;
+    }
+
+    gsl_vector* cs = gsl_vector_alloc(3);
+    gsl_vector* xs = gsl_vector_alloc(n);
+    gsl_matrix* gcs = gsl_matrix_alloc(n, 3);
+    gsl_matrix* cov = gsl_matrix_alloc(3, 3);
+
+    size_t i = 0;
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        if (!(maxpost[t->id] > 0.0 &&
+            t->biotype == "protein_coding" &&
+            t->source == "protein_coding")) continue;
+
+        gsl_matrix_set(gcs, i, 0, 1.0);
+        gsl_matrix_set(gcs, i, 1, transcript_gc[t->id]);
+        gsl_matrix_set(gcs, i, 2, transcript_gc[t->id] * transcript_gc[t->id]);
+        gsl_vector_set(xs, i, log(maxpost[t->id]));
+        ++i;
+    }
+
+    double chisq;
+    gsl_multifit_linear_workspace* work = gsl_multifit_linear_alloc(n, 3);
+    gsl_multifit_linear(gcs, xs, cs, cov, &chisq, work);
+    gsl_multifit_linear_free(work);
+
+    gsl_vector_free(cs);
+    gsl_vector_free(xs);
+    gsl_matrix_free(gcs);
+    gsl_matrix_free(cov);
+
+    double c0 = gsl_vector_get(cs, 0),
+           c1 = gsl_vector_get(cs, 1),
+           c2 = gsl_vector_get(cs, 2);
+
+    // normalize fit's to this point in the curve
+    double ref = c0 + 0.5 * c1 + 0.5 * 0.5 * c2;
+
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        double gc = transcript_gc[t->id];
+        double p = (c0 + gc * c1 * gc * c2) / ref;
+
+        maxpost[t->id] = pow(maxpost[t->id], p);
+        for (size_t j = 0; j < num_samples; ++j) {
+            samples[t->id][j]  = pow(samples[t->id][j], p);
+        }
+    }
+    // renormalize everything
+    double z = 0.0;
+    for (size_t i = 0; i < ts.size(); ++i) z += maxpost[i];
+    for (size_t i = 0; i < ts.size(); ++i) maxpost[i] /= z;
+
+    for (size_t i = 0; i < num_samples; ++i) {
+        z = 0.0;
+        for (size_t j = 0; j < ts.size(); ++j) z += samples[j][i];
+        for (size_t j = 0; j < ts.size(); ++j) samples[j][i] /= z;
+    }
+
+
+#if 0
     typedef std::pair<double, unsigned int> GCId;
     std::vector<GCId> gcid;
     gcid.reserve(ts.size());
@@ -2366,6 +2431,7 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
             gcid.push_back(std::make_pair(transcript_gc[t->id], t->id));
         }
     }
+
     std::sort(gcid.begin(), gcid.end());
 
     size_t m = gcid.size() / constants::gc_num_bins;
@@ -2439,6 +2505,7 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
         for (size_t j = 0; j < ts.size(); ++j) z += samples[j][i];
         for (size_t j = 0; j < ts.size(); ++j) samples[j][i] /= z;
     }
+#endif
 }
 
 
