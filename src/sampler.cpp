@@ -2357,23 +2357,29 @@ void Sampler::init_frag_probs()
 
 void Sampler::gc_correction(float* maxpost, size_t num_samples)
 {
-    typedef std::pair<double, double> ExprGC;
-    std::vector<ExprGC> exprgc;
+    std::map<GeneID, double> gene_expr;
+    std::map<GeneID, double> gene_gc;
+
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (maxpost[t->id] > 1e-7) {
-            exprgc.push_back(std::make_pair(
-                        maxpost[t->id],
-                        transcript_gc[t->id]));
+        if (maxpost[t->id] < 1e-7) continue;
+        std::map<GeneID, double>::iterator i = gene_expr.find(t->gene_id);
+        if (i == gene_expr.end()) {
+            gene_expr.insert(std::make_pair(t->gene_id, maxpost[t->id]));
+            gene_gc.insert(std::make_pair(t->gene_id,
+                            maxpost[t->id] * transcript_gc[t->id]));
+        }
+        else {
+            gene_expr[t->gene_id] += maxpost[t->id];
+            gene_gc[t->gene_id] += maxpost[t->id] * transcript_gc[t->id];
         }
     }
-    std::sort(exprgc.begin(), exprgc.end());
 
-    // Now, throw out the top 10% and bottom 10%
-    double upper_cutoff = 1.0, lower_cutoff = 0.0;
-    size_t start = lower_cutoff * exprgc.size(),
-           end   = upper_cutoff * exprgc.size();
-    size_t n = end - start;
+    for (std::map<GeneID, double>::iterator i = gene_gc.begin();
+            i != gene_gc.end(); ++i) {
+        i->second /= gene_expr[i->first];
+    }
 
+    size_t n = gene_gc.size();
     const int degree = 3;
 
     gsl_vector* cs = gsl_vector_alloc(degree);
@@ -2381,12 +2387,13 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     gsl_matrix* gcs = gsl_matrix_alloc(n, degree);
     gsl_matrix* cov = gsl_matrix_alloc(degree, degree);
 
-    for (size_t i = start; i < end; ++i) {
+    size_t i = 0;
+    for (std::map<GeneID, double>::iterator g = gene_gc.begin();
+            g != gene_gc.end(); ++g, ++i) {
         for (int j = 0; j < degree; ++j) {
-            gsl_matrix_set(gcs, i - start, j, pow(exprgc[i].second, j));
+            gsl_matrix_set(gcs, i, j, pow(g->second, j));
         }
-        gsl_vector_set(xs, i - start, log(exprgc[i].first));
-        //gsl_vector_set(xs, i - start, exprgc[i].first);
+        gsl_vector_set(xs, i, log(gene_expr[g->first]));
     }
 
     double chisq;
@@ -2415,7 +2422,7 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
 
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         double gc = transcript_gc[t->id];
-        gc = std::min(0.65, std::max(0.35, gc));
+        //gc = std::min(0.65, std::max(0.35, gc));
         double x = 1.0;
         double p = 0.0;
         for (int j = 0; j < degree; ++j) {
