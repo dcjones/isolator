@@ -50,6 +50,8 @@ Transcript::Transcript(const Transcript& other)
     , max_end(other.max_end)
     , start_codon(other.start_codon)
     , stop_codon(other.stop_codon)
+    , biotype(other.biotype)
+    , source(other.source)
     , id(other.id)
 {
 }
@@ -266,6 +268,9 @@ void TranscriptSet::read_gtf(FILE* f)
             continue;
         }
 
+        str_t* t_biotype = reinterpret_cast<str_t*>(
+                str_map_get(row->attributes, "gene_biotype", 12));
+
         Transcript& t = ts[t_id->s];
 
         if (t.empty()) {
@@ -273,6 +278,8 @@ void TranscriptSet::read_gtf(FILE* f)
             t.gene_id = g_id->s;
             t.transcript_id = t_id->s;
             t.strand = (strand_t) row->strand;
+            t.source = row->source->s;
+            if (t_biotype) t.biotype = t_biotype->s;
         }
 
         pos_t pos = (t.strand == strand_pos ? row->start : row->end) - 1;

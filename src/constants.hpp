@@ -17,6 +17,10 @@ namespace constants
     /* Number of threads to use. */
     extern unsigned int num_threads;
 
+    /* Minimum allowable map quality. Alignments lower that this are thrown out.
+     * */
+    extern unsigned int min_map_qual;
+
     /* During the parameter estimation phase, a work queue of genomic intervals
      * is used to accumulate statistic in parallel. This parameter controls the
      * maximum number of items in that queue. If too large, memory becomes an
@@ -42,6 +46,14 @@ namespace constants
     /* The number of positions to the right of the read start to model with
      * seqbias. */
     extern size_t seqbias_right_pos;
+
+    /* Seperate seqbias models are trained for the 3' end 5' ends of
+     * transcripts. These numbers define the extent of the ends. */
+    extern pos_t seqbias_tp_end;
+    extern pos_t seqbias_fp_end;
+
+    /* Number of GC-content bins to use in correction. */
+    extern size_t gc_num_bins;
 
     /* Library type; how the mates in paired-end data sets were generated. */
     enum libtype_t {
@@ -102,25 +114,18 @@ namespace constants
     extern pos_t transcript_5p_extension;
     extern pos_t transcript_3p_extension;
 
-    /* Length of emperical distribution over distance from 3' end. */
-    extern pos_t transcript_3p_dist_len;
+    /* Transcript 3' bias is conditioned on transcript length, binned into the
+     * following bins. Each number is an upper bound for a bin. */
+    extern size_t tp_num_length_bins;
+    extern pos_t tp_length_bins[4];
 
-    /* Record values past the end of the actual distribution length for
-     * smoothing to work out correctly. */
-    extern pos_t transcript_3p_dist_pad;
+    /* Number of position bins. */
+    extern size_t tp_num_bins;
 
-    /* Transcript 3p bias is conditioned on transcript length, binned into the
-     * following bins. Each number represents an upper bound for a bin.
-     */
-    extern pos_t transcript_3p_bins[4];
-    extern size_t transcript_3p_num_bins;
+    /* */
+    extern pos_t tp_pad;
 
-    /* Smoothing used on the emperical distribution  over distance from 3' end.
-     * */
-    extern float transcript_3p_dist_w;
-
-    /* Scale probabilities from the 3p dist to avoid underflow. */
-    extern float transcript_3p_dist_scale;
+    extern pos_t tp_len;
 
     /* It's possible for a transcript to get assigned exceedingly low weight,
      * given the fragment length distribution. Then when a single read lands
@@ -154,8 +159,8 @@ namespace constants
     /* Number of initial burn-in samples to generate and throw away. */
     extern unsigned int sampler_burnin_samples;
 
-    /* Number of hillclimbing iterations to run after sampling finishes. */
-    extern unsigned sampler_hillclimb_samples;
+    /* Number of hillclimbing iterations. */
+    extern unsigned int sampler_hillclimb_samples;
 }
 
 #endif

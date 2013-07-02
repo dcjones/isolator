@@ -14,6 +14,7 @@
 #include "common.hpp"
 #include "motif.hpp"
 #include "samtools/faidx.h"
+#include <gsl/gsl_rng.h>
 
 /** A representation of sequencing bias for a particular dataset.
  */
@@ -51,7 +52,7 @@ class sequencing_bias
         /** destructor */
         ~sequencing_bias();
 
-        /** Compute the bias across the given region. 
+        /** Compute the bias across the given region.
          *
          * The vector returned must be freed with 'delete []'.
          */
@@ -123,9 +124,8 @@ class sequencing_bias
         motif* M1; // single-end motif, or double-end mate1 motif
         motif* M2; // double-end mate2 motif
 
-        /* foreground/background distribution over gc content */
-        double* gc1[2];
-        double* gc2[2];
+        /* random number generator */
+        gsl_rng* rng;
 };
 
 

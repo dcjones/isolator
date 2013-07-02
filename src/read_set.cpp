@@ -9,6 +9,7 @@ Alignment::Alignment()
     , cigar_len(0)
     , cigar(NULL)
     , strand(strand_na)
+    , mapq(255)
 {
 }
 
@@ -18,6 +19,7 @@ Alignment::Alignment(const Alignment& a)
     start     = a.start;
     end       = a.end;
     strand    = a.strand;
+    mapq      = a.mapq;
     cigar_len = a.cigar_len;
     cigar = new uint32_t[cigar_len];
     memcpy(cigar, a.cigar, cigar_len * sizeof(uint32_t));
@@ -27,8 +29,9 @@ Alignment::Alignment(const Alignment& a)
 Alignment::Alignment(const bam1_t* b)
 {
     start     = (pos_t)b->core.pos;
-    end       = bam_calend(&b->core, bam1_cigar(b)) - 1;
+    end       = bam_calend2(&b->core, bam1_cigar(b)) - 1;
     strand    = bam1_strand(b);
+    mapq      = b->core.qual;
     cigar_len = b->core.n_cigar;
     cigar     = new uint32_t [b->core.n_cigar];
     memcpy(cigar, bam1_cigar(b), cigar_len * sizeof(uint32_t));
@@ -45,8 +48,9 @@ bool Alignment::operator == (const bam1_t* b) const
 {
     if (this->start != (pos_t) b->core.pos) return false;
     if (this->strand != bam1_strand(b)) return false;
+    if (this->mapq != b->core.qual) return false;
     if (this->cigar_len != b->core.n_cigar) return false;
-    if (this->end != (pos_t) (bam_calend(&b->core, bam1_cigar(b)) - 1)) return false;
+    if (this->end != (pos_t) (bam_calend2(&b->core, bam1_cigar(b)) - 1)) return false;
     return memcmp(cigar, bam1_cigar(b), cigar_len * sizeof(uint32_t)) == 0;
 }
 
@@ -62,10 +66,22 @@ bool Alignment::operator < (const Alignment& other) const
     if      (start  != other.start)  return start < other.start;
     else if (end    != other.end)    return end < other.end;
     else if (strand != other.strand) return strand < other.strand;
+    else if (mapq   != other.mapq)   return mapq < other.mapq;
     else if (cigar_len != other.cigar_len) return cigar_len < other.cigar_len;
     else {
-        return memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t));
+        return memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t)) < 0;
     }
+}
+
+
+bool Alignment::operator == (const Alignment& other) const
+{
+    return start     == other.start &&
+           end       == other.end &&
+           strand    == other.strand &&
+           mapq      == other.mapq &&
+           cigar_len == other.cigar_len &&
+           memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t)) == 0;
 }
 
 
@@ -151,21 +167,43 @@ bool AlignedRead::operator < (const AlignedRead& other) const
     if      (start != other.start) return start < other.start;
     else if (end   != other.end)   return end   < other.end;
 
+    std::set<Alignment*, AlignmentPtrCmp> S, T;
+    std::set<Alignment*, AlignmentPtrCmp>::iterator i, j;
 
-    std::set<Alignment*> S, T;
+    if (this->mate1.size() > 0) {
+        S.insert(this->mate1.begin(), this->mate1.end());
+        T.insert(other.mate1.begin(), other.mate1.end());
 
-    S.insert(this->mate1.begin(), this->mate1.end());
-    T.insert(other.mate1.begin(), other.mate1.end());
+        if (S.size() != T.size()) return S.size() < T.size();
 
-    if (S != T) return S < T;
+        i = S.begin();
+        j = T.begin();
+        while (i != S.end()) {
+            if (**i < **j) return true;
+            ++i;
+            ++j;
+        }
 
-    S.clear();
-    T.clear();
+        S.clear();
+        T.clear();
+    }
 
-    S.insert(this->mate2.begin(), this->mate2.end());
-    T.insert(other.mate2.begin(), other.mate2.end());
+    if (this->mate2.size() > 0) {
+        S.insert(this->mate2.begin(), this->mate2.end());
+        T.insert(other.mate2.begin(), other.mate2.end());
 
-    return S < T;
+        if (S.size() != T.size()) return S.size() < T.size();
+
+        i = S.begin();
+        j = T.begin();
+        while (i != S.end()) {
+            if (**i < **j) return true;
+            ++i;
+            ++j;
+        }
+    }
+
+    return false;
 }
 
 
@@ -178,28 +216,24 @@ AlignmentPair::AlignmentPair()
 
 bool AlignmentPair::operator < (const AlignmentPair& other) const
 {
-    if (mate1 == NULL || other.mate1 == NULL) {
-        return mate1 < other.mate1;
-    }
+    if (mate1 == other.mate1 ||
+        (mate1 != NULL && other.mate1 != NULL && *mate1 == *other.mate1)) {
 
-    if (mate1 != other.mate1) {
-        return *mate1 < *other.mate1;
+        if (mate2 == NULL)            return other.mate2 != NULL;
+        else if (other.mate2 == NULL) return false;
+        else                          return *mate2 < *other.mate2;
     }
-
-    if (mate2 == NULL || other.mate2 == NULL) {
-        return mate2 < other.mate2;
+    else {
+        if (mate1 == NULL)            return other.mate1 != NULL;
+        else if (other.mate1 == NULL) return false;
+        else                          return *mate1 < *other.mate1;
     }
-
-    return *mate2 < *other.mate2;
 }
 
 
 bool AlignmentPair::valid_frag() const
 {
-    /* Reads with only mate1 are considered valid single-end reads, for our
-     * purposes */
-    if (mate1 == NULL) return false;
-    if (mate1 != NULL && mate2 == NULL) return true;
+    if (mate1 == NULL || mate2 == NULL) return true;
 
     switch (constants::libtype) {
         case constants::LIBTYPE_FR:
@@ -225,8 +259,7 @@ bool AlignmentPair::valid_frag() const
 /* A couple functions to assist with AlignmentPair::frag_len */
 static bool exon_compatible_cigar_op(uint8_t op)
 {
-    // TODO: what should be done in the case of indels ?
-    return op == BAM_CMATCH;
+    return op == BAM_CMATCH || op == BAM_CSOFT_CLIP || op == BAM_CINS || op == BAM_CDEL;
 }
 
 
@@ -271,19 +304,12 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
         a2 = NULL;
     }
 
+    if (a1 && a1->start < t.min_start) return -1;
+    if (a2 && a2->end > t.max_end) return -1;
+
     TranscriptIntronExonIterator e1(t);
     CigarIterator c1(*a1);
     pos_t intron_len = 0;
-
-    /* Allow soft-clipping at the beginning of the transcript to account for
-     * reads mapping into poly-A tails.. */
-    if (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
-        if (c1->end + 1 == e1->first.start &&
-            intergenic_compatible_cigar_op(c1->op) &&
-            t.strand == strand_neg) {
-            ++c1;
-        }
-    }
 
     while (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
         // case 1: e entirely preceedes c
@@ -301,7 +327,9 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
             }
             else {
                 if (!intron_compatible_cigar_op(c1->op)) return -1;
-                intron_len += c1->end - c1->start + 1;
+                if (c1->op != BAM_CSOFT_CLIP) {
+                    intron_len += c1->end - c1->start + 1;
+                }
             }
 
             ++c1;
@@ -313,14 +341,6 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
         }
     }
 
-#if 0
-    /* alignment overhangs the transcript. */
-    if (c1 != CigarIterator()) {
-        if (!intergenic_compatible_cigar_op(c1->op)) return -1;
-        ++c1;
-        if (c1 != CigarIterator()) return -1;
-    }
-#endif
     if (c1 != CigarIterator()) {
         return -1;
     }
@@ -342,6 +362,7 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
             }
 
             if (e1 == e2) e2_sup_e1 = true;
+
             ++e2;
         }
 
@@ -366,21 +387,7 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
         }
     }
 
-    /* Allow soft-clipping at transcript ends. */
-    if (c2 != CigarIterator()) {
-        if (c2->start == t.max_end + 1 &&
-            intergenic_compatible_cigar_op(c2->op) &&
-            t.strand == strand_pos) {
-            ++c2;
-        }
-        else {
-            return -1;
-        }
-
-        if (c2 != CigarIterator()) {
-            return -1;
-        }
-    }
+    if (c2 != CigarIterator()) return -1;
 
     pos_t fraglen = a2->end - a1->start + 1 - intron_len;
     assert(fraglen > 0);
@@ -445,29 +452,41 @@ void AlignedReadIterator::increment()
 {
     if (finished()) return;
     do {
-        if (r->paired && j < r->mate2.size()) {
+        if (r->mate1.size() == 0) {
             do {
                 ++j;
             } while (j < r->mate2.size() && r->mate2[j] == r->mate2[j - 1]);
         }
-
-        if (!r->paired || j >= r->mate2.size()) {
+        else if (r->mate2.size() == 0) {
             do {
                 ++i;
-            } while(i < r->mate1.size() && r->mate1[i] == r->mate1[i - 1]);
+            } while (i < r->mate1.size() && r->mate1[i] == r->mate1[i - 1]);
+        }
+        else {
+            do {
+                ++j;
+            } while (j < r->mate2.size() && r->mate2[j] == r->mate2[j - 1]);
 
-            j = 0;
+            if (j >= r->mate2.size()) {
+                j = 0;
+                do {
+                    ++i;
+                } while (i < r->mate1.size() && r->mate1[i] == r->mate1[i - 1]);
+            }
         }
 
         p.mate1 = i < r->mate1.size() ? r->mate1[i] : NULL;
-        p.mate2 = (j < r->mate2.size() && r->paired) ? r->mate2[j] : NULL;
+        p.mate2 = j < r->mate2.size() ? r->mate2[j] : NULL;
     } while (!finished() && !p.valid_frag());
 }
 
 
 bool AlignedReadIterator::finished() const
 {
-    return r == NULL || i >= r->mate1.size() || (r->paired && j >= r->mate2.size());
+    return r == NULL ||
+        (r->mate1.size() == 0 && j >= r->mate2.size()) ||
+        (r->mate2.size() == 0 && i >= r->mate1.size()) ||
+        (r->mate1.size() > 0 && r->mate2.size() > 0 && i >= r->mate1.size());
 }
 
 
@@ -524,7 +543,7 @@ void ReadSet::add_alignment(const bam1_t* b)
     if (b->core.flag & BAM_FREAD2) r->mate2.push_back(a);
     else                           r->mate1.push_back(a);
 
-    if (r->start == -1 || r->start < a->start) r->start = a->start;
+    if (r->start == -1 || r->start > a->start) r->start = a->start;
     if (r->end   == -1 || r->end   < a->end)   r->end   = a->end;
 }
 

@@ -8,6 +8,7 @@
 #include "common.hpp"
 #include "hat-trie/hat-trie.h"
 #include "samtools/sam.h"
+#include "samtools/samtools_extra.h"
 #include "transcripts.hpp"
 
 /* A representation of an aligned sequence. */
@@ -21,6 +22,7 @@ struct Alignment
     bool operator == (const bam1_t* b) const;
     bool operator != (const bam1_t* b) const;
 
+    bool operator == (const Alignment& other) const;
     bool operator < (const Alignment& other) const;
 
     pos_t start;
@@ -28,6 +30,16 @@ struct Alignment
     uint16_t  cigar_len;
     uint32_t* cigar;
     uint8_t   strand;
+    uint8_t   mapq;
+};
+
+
+struct AlignmentPtrCmp
+{
+    bool operator () (const Alignment* a, const Alignment* b) const
+    {
+        return *a < *b;
+    }
 };
 
 

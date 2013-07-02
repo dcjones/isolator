@@ -242,7 +242,7 @@ void pos_table_destroy(struct pos_table* T)
 void pos_table_inc(struct pos_table* T, bam1_t* read)
 {
     int32_t pos;
-    if (bam1_strand(read)) pos = bam_calend(&read->core, bam1_cigar(read)) - 1;
+    if (bam1_strand(read)) pos = bam_calend2(&read->core, bam1_cigar(read)) - 1;
     else                    pos = read->core.pos;
 
     pos_table_inc_pos(T, read->core.tid, pos, bam1_strand(read));
@@ -261,7 +261,7 @@ void pos_table_inc_pos(struct pos_table* T, int32_t tid, int32_t pos, uint32_t s
 uint32_t table_count(struct pos_table* T, bam1_t* read)
 {
     int32_t pos;
-    if (bam1_strand(read)) pos = bam_calend(&read->core, bam1_cigar(read)) - 1;
+    if (bam1_strand(read)) pos = bam_calend2(&read->core, bam1_cigar(read)) - 1;
     else                    pos = read->core.pos;
 
     return pos_table_count_pos(T, read->core.tid, pos, bam1_strand(read));
