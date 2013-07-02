@@ -730,14 +730,6 @@ class SamplerInitThread
             else {
                 frag_len_dist = NULL;
             }
-
-            if (fm.tp_dist[0]) {
-                tp_dist[0] = fm.tp_dist[0];
-                tp_dist[1] = fm.tp_dist[1];
-            }
-            else {
-                tp_dist[0] = tp_dist[1] = NULL;
-            }
         }
 
         ~SamplerInitThread()
@@ -820,8 +812,6 @@ class SamplerInitThread
         /* Copy the fragment length distribution to avoid contention between
          * threads. */
         EmpDist* frag_len_dist;
-
-        EmpDist* tp_dist[2];
 
         /* Temprorary space for computing sequence bias, indexed by strand. */
         std::vector<float> mate1_seqbias[2];
@@ -1033,18 +1023,11 @@ void SamplerInitThread::transcript_sequence_bias(
 
     transcript_gc[t.id] = tseq0.gc_count() / (double) tlen;
 
-
-    // Find the right bin.
-    size_t bin = constants::transcript_3p_num_bins - 1;
-    while (bin > 0) {
-        if (tlen > constants::transcript_3p_bins[bin - 1]) {
-            break;
-        }
-        --bin;
-    }
-
-    if (tlen <= constants::transcript_3p_dist_pad) return;
-
+    // TODO: This stuff could probably be cleaned up.
+    // Right now I'm training seperate models for mate1 and mate2,
+    // as well as seperate models for orientation relative to the transcript.
+    // Really, I think I could get away with just orientation relative to the transcript.
+    // That will same a lot of seqbias training time.
     if (t.strand == strand_pos) {
         for (pos_t pos = 0; pos < tlen; ++pos) {
             mate1_seqbias[0][pos] = fm.sb[0]->get_mate1_bias(tseq0,
@@ -1058,7 +1041,6 @@ void SamplerInitThread::transcript_sequence_bias(
         }
     }
     else {
-        pos_t p;
         for (pos_t pos = 0; pos < tlen; ++pos) {
             mate1_seqbias[0][pos] = fm.sb[1]->get_mate1_bias(tseq0,
                     pos + constants::seqbias_left_pos);
@@ -1074,6 +1056,8 @@ void SamplerInitThread::transcript_sequence_bias(
     std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
     std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
 
+    // Flatten bias predictions at the ends of the transcript, since we would otherwise
+    // be basing the prediction off sequence that lies outside the transcript.
     if (tlen < 20) return;
 
     for (pos_t pos = 0; pos < 20; ++pos) {

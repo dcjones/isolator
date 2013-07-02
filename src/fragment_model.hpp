@@ -122,10 +122,6 @@ class FragmentModel
 
         /* Distribution over fragment lengths. */
         EmpDist* frag_len_dist;
-
-        /* Three-prime/five-prime distribution indexed by length bin and strand.
-         * */
-        EmpDist* tp_dist[2];
 };
 
 

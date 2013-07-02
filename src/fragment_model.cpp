@@ -429,9 +429,6 @@ class FragmentModelThread
             , sb(sb)
             , t(NULL)
         {
-            tp_dist_weights[0].resize(constants::tp_len, 0.0);
-            tp_dist_weights[1].resize(constants::tp_len, 0.0);
-
             strand_bias[0] = strand_bias[1] = 0;
         }
 
@@ -457,18 +454,6 @@ class FragmentModelThread
                     interval->rs.make_unique_read_counts(read_counts);
                     measure_fragment_lengths(read_counts);
                     measure_strand_bias(interval->strand, read_counts);
-                    read_counts.clear();
-                }
-                else if (interval->type == FragmentModelInterval::THREE_PRIME_EXONIC) {
-                    interval->rs.make_unique_read_counts(read_counts);
-                    measure_transcript_position(interval->start,
-                                                interval->end,
-                                                interval->strand,
-                                                interval->three_prime_dist,
-                                                interval->tlen,
-                                                interval->seq0,
-                                                interval->seq1,
-                                                read_counts);
                     read_counts.clear();
                 }
 
@@ -548,92 +533,6 @@ class FragmentModelThread
             }
         }
 
-        void measure_transcript_position(
-                pos_t start, pos_t end, strand_t strand,
-                pos_t exon_three_prime_dist, pos_t tlen,
-                const boost::shared_ptr<twobitseq> seq0,
-                const boost::shared_ptr<twobitseq> seq1,
-                const ReadSet::UniqueReadCounts& counts)
-        {
-            pos_t elen = end - start + 1;
-
-            if ((size_t) elen > mate1_seqbias[0].size()) {
-                mate1_seqbias[0].resize(elen);
-                mate1_seqbias[1].resize(elen);
-            }
-
-            std::fill(mate1_seqbias[0].begin(), mate1_seqbias[0].begin() + elen, 1.0);
-            std::fill(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + elen, 1.0);
-
-            if (sb && seq0 && seq1) {
-                for (pos_t pos = start; pos <= end; ++pos) {
-                    int bin = 1;
-#if 0
-                    pos_t off;
-                    if (strand == strand_pos) {
-                        off = exon_three_prime_dist + pos - start;
-                    }
-                    else {
-                        off = exon_three_prime_dist + end - pos;
-                    }
-
-                    if (strand == strand_pos) {
-                        if (off < constants::seqbias_fp_end) bin = 0;
-                        else if (tlen - off < constants::seqbias_tp_end) bin = 2;
-                        else bin = 1;
-                    }
-                    else {
-                        if (off < constants::seqbias_tp_end) bin = 0;
-                        else if (tlen - off < constants::seqbias_fp_end) bin = 2;
-                        else bin = 1;
-                    }
-#endif
-
-                    mate1_seqbias[0][pos - start] = sb[bin]->get_mate1_bias(*seq0, pos);
-                    mate1_seqbias[1][pos - start] = sb[bin]->get_mate1_bias(
-                            *seq1, seq1->size() - pos - 1);
-                }
-            }
-
-            ReadSet::UniqueReadCounts::const_iterator i;
-            std::set<Alignment*, AlignmentPtrCmp> mate1s;
-            for (i = counts.begin(); i != counts.end(); ++i) {
-                for (std::vector<Alignment*>::iterator j = i->first->mate1.begin();
-                        j != i->first->mate1.end(); ++j) {
-                    mate1s.insert(*j);
-                }
-            }
-
-            for (std::set<Alignment*, AlignmentPtrCmp>::iterator j =
-                mate1s.begin(); j != mate1s.end(); ++j) {
-
-                pos_t pos = (*j)->strand == strand_pos ?
-                    (*j)->start : (*j)->end;
-                if (pos < start || pos > end) continue;
-
-                double w = mate1_seqbias[(*j)->strand][pos - start];
-                pos_t tpos;
-                if (strand == strand_pos) {
-                    tpos = exon_three_prime_dist - pos - start;
-                }
-                else {
-                    tpos = exon_three_prime_dist + pos - start;
-                }
-
-                // XXX: how can this happen?
-                if (tpos < 0) continue;
-
-                if (tpos >= constants::tp_len) continue;
-
-                if (strand == (*j)->strand) {
-                    tp_dist_weights[0][tpos] += 1.0 / w;
-                }
-                else {
-                    tp_dist_weights[1][tpos] += 1.0 / w;
-                }
-            }
-        }
-
         Queue<FragmentModelInterval*>& q;
         sequencing_bias** sb;
         boost::thread* t;
@@ -644,7 +543,6 @@ FragmentModel::FragmentModel()
 {
     sb[0] = sb[1] = NULL;
     frag_len_dist = NULL;
-    tp_dist[0] = tp_dist[1] = NULL;
 }
 
 
@@ -653,8 +551,6 @@ FragmentModel::~FragmentModel()
     delete sb[0];
     delete sb[1];
     delete frag_len_dist;
-    delete tp_dist[0];
-    delete tp_dist[1];
 }
 
 
@@ -676,30 +572,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
                     *interval,
                     FragmentModelInterval::EXONIC));
     }
-
-
-    std::set<FragmentModelInterval*, FragmentModelIntervalPtrCmp> tp_intervals;
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        pos_t tlen = t->exonic_length();
-        if (tlen < constants::tp_len + 200) continue;
-
-        pos_t d = 0;
-        for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
-            pos_t elen = e->end - e->start + 1;
-            FragmentModelInterval* interval = new FragmentModelInterval(
-                        t->seqname,
-                        e->start,
-                        e->end,
-                        t->strand,
-                        t->strand == strand_pos ?
-                            tlen - d - 1 : d,
-                        tlen,
-                        FragmentModelInterval::THREE_PRIME_EXONIC);
-            intervals.push_back(interval);
-            d += elen;
-        }
-    }
-
 
     std::vector<FragmentModelThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -798,42 +670,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
     }
     else {
         Logger::info("Too few paired-end reads to estimate fragment length distribution.");
-    }
-
-
-    // Collect 3' distance distribution stats
-
-    std::vector<unsigned int> tp_vals(constants::tp_len);
-    for (pos_t pos = 0; pos < constants::tp_len; ++pos) tp_vals[pos] = pos;
-
-    std::vector<unsigned int> tp_lens(constants::tp_len);
-    std::vector<double> tp_weights(constants::tp_len);
-
-    for (int strand = 0; strand <= 1; ++strand) {
-        std::fill(tp_weights.begin(), tp_weights.end(), 0.0);
-        for (size_t i = 0; i < constants::num_threads; ++i) {
-            for (pos_t pos = 0; pos < constants::tp_len; ++pos) {
-                tp_weights[pos] += threads[i]->tp_dist_weights[strand][pos];
-            }
-        }
-
-        for (pos_t pos = 0; pos < constants::tp_len; ++pos) {
-            tp_lens[pos] = tp_weights[pos];
-        }
-
-        tp_dist[strand] = new EmpDist(&tp_vals.at(0), &tp_lens.at(0),
-                                      constants::tp_len, 0.99);
-    }
-
-    for (int strand = 0; strand < 2; ++strand) {
-        FILE* out;
-        if (strand == 0) out = fopen("tp_bias_0.tsv", "w");
-        else             out = fopen("tp_bias_1.tsv", "w");
-        fprintf(out, "d\tp\n");
-            for (pos_t j = 0; j < constants::tp_len; ++j) {
-                fprintf(out, "%ld\t%e\n", j, tp_dist[strand]->pdf(j));
-            }
-        fclose(out);
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
