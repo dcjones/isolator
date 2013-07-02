@@ -2357,56 +2357,83 @@ void Sampler::init_frag_probs()
 
 void Sampler::gc_correction(float* maxpost, size_t num_samples)
 {
-    size_t n = 0;
+    typedef std::pair<double, double> ExprGC;
+    std::vector<ExprGC> exprgc;
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (maxpost[t->id] > 0.0 &&
-            t->biotype == "protein_coding" &&
-            t->source == "protein_coding") ++n;
+        if (maxpost[t->id] > 1e-7) {
+            exprgc.push_back(std::make_pair(
+                        maxpost[t->id],
+                        transcript_gc[t->id]));
+        }
     }
+    std::sort(exprgc.begin(), exprgc.end());
 
-    gsl_vector* cs = gsl_vector_alloc(3);
+    // Now, throw out the top 10% and bottom 10%
+    double upper_cutoff = 1.0, lower_cutoff = 0.0;
+    size_t start = lower_cutoff * exprgc.size(),
+           end   = upper_cutoff * exprgc.size();
+    size_t n = end - start;
+
+    const int degree = 3;
+
+    gsl_vector* cs = gsl_vector_alloc(degree);
     gsl_vector* xs = gsl_vector_alloc(n);
-    gsl_matrix* gcs = gsl_matrix_alloc(n, 3);
-    gsl_matrix* cov = gsl_matrix_alloc(3, 3);
+    gsl_matrix* gcs = gsl_matrix_alloc(n, degree);
+    gsl_matrix* cov = gsl_matrix_alloc(degree, degree);
 
-    size_t i = 0;
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (!(maxpost[t->id] > 0.0 &&
-            t->biotype == "protein_coding" &&
-            t->source == "protein_coding")) continue;
-
-        gsl_matrix_set(gcs, i, 0, 1.0);
-        gsl_matrix_set(gcs, i, 1, transcript_gc[t->id]);
-        gsl_matrix_set(gcs, i, 2, transcript_gc[t->id] * transcript_gc[t->id]);
-        gsl_vector_set(xs, i, log(maxpost[t->id]));
-        ++i;
+    for (size_t i = start; i < end; ++i) {
+        for (int j = 0; j < degree; ++j) {
+            gsl_matrix_set(gcs, i - start, j, pow(exprgc[i].second, j));
+        }
+        gsl_vector_set(xs, i - start, log(exprgc[i].first));
+        //gsl_vector_set(xs, i - start, exprgc[i].first);
     }
 
     double chisq;
-    gsl_multifit_linear_workspace* work = gsl_multifit_linear_alloc(n, 3);
+    gsl_multifit_linear_workspace* work = gsl_multifit_linear_alloc(n, degree);
     gsl_multifit_linear(gcs, xs, cs, cov, &chisq, work);
     gsl_multifit_linear_free(work);
 
-    gsl_vector_free(cs);
-    gsl_vector_free(xs);
-    gsl_matrix_free(gcs);
-    gsl_matrix_free(cov);
+    double* csd = cs->data;
+    //double c0 = gsl_vector_get(cs, 0),
+           //c1 = gsl_vector_get(cs, 1),
+           //c2 = gsl_vector_get(cs, 2);
+           //c3 = gsl_vector_get(cs, 3);
 
-    double c0 = gsl_vector_get(cs, 0),
-           c1 = gsl_vector_get(cs, 1),
-           c2 = gsl_vector_get(cs, 2);
+
+    for (int j = 0; j < degree; ++j) {
+        Logger::info("c%d = %f", j, csd[j]);
+    }
 
     // normalize fit's to this point in the curve
-    double ref = c0 + 0.5 * c1 + 0.5 * 0.5 * c2;
+    double ref = 0.0;
+    double x = 1.0;
+    for (int j = 0; j < degree; ++j) {
+        ref += csd[j] * x;
+        x *= 0.5;
+    }
 
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         double gc = transcript_gc[t->id];
-        double p = (c0 + gc * c1 * gc * c2) / ref;
+        gc = std::min(0.65, std::max(0.35, gc));
+        double x = 1.0;
+        double p = 0.0;
+        for (int j = 0; j < degree; ++j) {
+            p += csd[j] * x;
+            x *= gc;
+        }
+        p = ref / p;
 
         maxpost[t->id] = pow(maxpost[t->id], p);
         for (size_t j = 0; j < num_samples; ++j) {
             samples[t->id][j]  = pow(samples[t->id][j], p);
         }
+#if 0
+        maxpost[t->id] = p * maxpost[t->id];
+        for (size_t j = 0; j < num_samples; ++j) {
+            samples[t->id][j]  = p * samples[t->id][j];
+        }
+#endif
     }
     // renormalize everything
     double z = 0.0;
@@ -2418,6 +2445,11 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
         for (size_t j = 0; j < ts.size(); ++j) z += samples[j][i];
         for (size_t j = 0; j < ts.size(); ++j) samples[j][i] /= z;
     }
+
+    gsl_vector_free(cs);
+    gsl_vector_free(xs);
+    gsl_matrix_free(gcs);
+    gsl_matrix_free(cov);
 
 
 #if 0
