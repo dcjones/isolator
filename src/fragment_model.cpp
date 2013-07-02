@@ -182,8 +182,8 @@ class FragmentModelInterval
         enum IntervalType
         {
             INTERGENIC,
+            CONSENSUS_EXONIC,
             EXONIC,
-            THREE_PRIME_EXONIC
         } type;
 
         FragmentModelInterval(const Interval& interval,
@@ -193,8 +193,6 @@ class FragmentModelInterval
             , start(interval.start)
             , end(interval.end)
             , strand(interval.strand)
-            , three_prime_dist(-1)
-            , tlen(-1)
             , tid(-1)
         {
         }
@@ -203,16 +201,12 @@ class FragmentModelInterval
                               pos_t start,
                               pos_t end,
                               strand_t strand,
-                              pos_t three_prime_dist,
-                              pos_t tlen,
                               IntervalType type)
             : type(type)
             , seqname(seqname)
             , start(start)
             , end(end)
             , strand(strand)
-            , three_prime_dist(three_prime_dist)
-            , tlen(tlen)
             , tid(-1)
         {
         }
@@ -240,12 +234,6 @@ class FragmentModelInterval
         pos_t start, end;
         strand_t strand;
 
-        // Exon's distance from the 3' end of the transcript.
-        pos_t three_prime_dist;
-
-        // Transcript length
-        pos_t tlen;
-
         // Sequence associated with the intervals seqname.
         boost::shared_ptr<twobitseq> seq0;
         boost::shared_ptr<twobitseq> seq1;
@@ -269,8 +257,10 @@ struct FragmentModelIntervalPtrCmp
 void sam_scan(std::vector<FragmentModelInterval*>& intervals,
               AlnCountTrie& T,
               Queue<FragmentModelInterval*>& q,
+              std::vector<FragmentModelInterval*>& seqbias_intervals,
+              PosTable& seqbias_sense_pos,
+              PosTable& seqbias_antisense_pos,
               const char* bam_fn,
-              const char* fa_fn,
               const char* task_name)
 {
     /* Measure file size to monitor progress. */
@@ -284,14 +274,6 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
             fclose(f);
         }
         Logger::push_task(task_name, input_size / input_block_size);
-    }
-
-    faidx_t* fa_f = NULL;
-    if (fa_fn) {
-        fa_f = fai_load(fa_fn);
-        if (fa_f == NULL) {
-            Logger::abort("Can't open FASTA file %s.", fa_fn);
-        }
     }
 
     samfile_t* bam_f;
@@ -314,12 +296,23 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
         if (k == kh_end(tbl)) (*i)->tid = -1;
         else (*i)->tid = kh_value(tbl, k);
     }
+    std::sort(intervals.begin(), intervals.end(), FragmentModelIntervalPtrCmp());
 
-    sort(intervals.begin(), intervals.end(), FragmentModelIntervalPtrCmp());
+    for (i = seqbias_intervals.begin(); i != seqbias_intervals.end(); ++i) {
+        k = kh_get(s, tbl, (*i)->seqname.get().c_str());
+        if (k == kh_end(tbl)) (*i)->tid = -1;
+        else (*i)->tid = kh_value(tbl, k);
+    }
+    std::sort(intervals.begin(), intervals.end(), FragmentModelIntervalPtrCmp());
+
+
 
     /* First interval which the current read may be contained in. */
     size_t j, j0 = 0;
     size_t n = intervals.size();
+
+    /* First seqbias interval in which the current read may be contained. */
+    std::vector<FragmentModelInterval*>::iterator sbi = seqbias_intervals.begin();
 
     size_t last_file_pos = 0, file_pos;
     size_t read_num = 0;
@@ -345,33 +338,9 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
             Logger::abort(
-                    "Excuse me, but I must insist that your SAM/BAM file be sorted. "
+                    "The input SAM/BAM file must be sorted. "
                     "Please run: 'samtools sort'.");
         }
-
-        if (fa_f && b->core.tid != last_tid) {
-            int seqlen;
-            char* seqstr = faidx_fetch_seq(
-                    fa_f, bam_f->header->target_name[b->core.tid],
-                    0, INT_MAX, &seqlen);
-
-            if (seqstr == NULL) {
-                Logger::abort("Couldn't read sequence %s",
-                        bam_f->header->target_name[b->core.tid]);
-            }
-
-            boost::shared_ptr<twobitseq> seq0(new twobitseq(seqstr));
-            boost::shared_ptr<twobitseq> seq1(new twobitseq(*seq0));
-            seq1->revcomp();
-            free(seqstr);
-
-            for (j = j0; j < n && intervals[j]->tid <= b->core.tid; ++j) {
-                if (intervals[j]->tid < b->core.tid) continue;
-                intervals[j]->seq0 = seq0;
-                intervals[j]->seq1 = seq1;
-            }
-        }
-
 
         last_tid = b->core.tid;
         last_pos = b->core.pos;
@@ -384,7 +353,36 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
             T.inc_mate1(bam1_qname(b));
         }
 
-        /* Add reads to intervals in which they are contained. */
+        // TODO: Here's the plan. It's not pretty. We are going to have a
+        // special interval list for seqbias that is seperately processed.
+        // First we need to be able to build a list of union exons.
+
+        // Process seqbias intervals
+        while (sbi != seqbias_intervals.end() && (*sbi)->tid < b->core.tid) ++sbi;
+        while (sbi != seqbias_intervals.end() && (*sbi)->tid == b->core.tid &&
+               (*sbi)->end < b->core.pos) ++sbi;
+
+        // Check the next two intervals, as it might overlap one interval on
+        // both strands.
+        for (std::vector<FragmentModelInterval*>::iterator sbj = sbi;
+             sbj != seqbias_intervals.end() && sbj != sbi + 2; ++sbj) {
+            if ((*sbj)->tid == b->core.tid &&
+                (*sbj)->start <= b->core.pos && b->core.pos <= (*sbj)->end) {
+                strand_t b_strand = bam1_strand(b) ? strand_neg : strand_pos;
+                pos_t pos = b_strand ?
+                    (pos_t) bam_calend(&b->core, bam1_cigar(b)) - 1 : b->core.pos;
+                if ((*sbj)->strand == b_strand) {
+                    seqbias_sense_pos.add(b->core.tid, pos, bam1_strand(b),
+                                          (*sbj)->start, (*sbj)->end, bam_f);
+                }
+                else {
+                    seqbias_antisense_pos.add(b->core.tid, pos, bam1_strand(b),
+                                              (*sbj)->start, (*sbj)->end, bam_f);
+                }
+            }
+        }
+
+        // Add reads to intervals in which they are contained.
         for (j = j0; j < n; ++j) {
             if (b->core.tid < intervals[j]->tid) break;
             if (b->core.tid > intervals[j]->tid) {
@@ -412,7 +410,6 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
 
     bam_destroy1(b);
     samclose(bam_f);
-    if (fa_f) fai_destroy(fa_f);
 
     if (task_name) Logger::pop_task(task_name);
 }
@@ -450,7 +447,7 @@ class FragmentModelThread
                 if (interval->type == FragmentModelInterval::INTERGENIC) {
                     /* TODO: measure additive noise */
                 }
-                else if (interval->type == FragmentModelInterval::EXONIC) {
+                else if (interval->type == FragmentModelInterval::CONSENSUS_EXONIC) {
                     interval->rs.make_unique_read_counts(read_counts);
                     measure_fragment_lengths(read_counts);
                     measure_strand_bias(interval->strand, read_counts);
@@ -558,19 +555,30 @@ void FragmentModel::estimate(TranscriptSet& ts,
         const char* bam_fn,
         const char* fa_fn)
 {
-    train_seqbias(ts, bam_fn, fa_fn);
-
     Queue<FragmentModelInterval*> q(constants::max_estimate_queue_size);
 
     std::vector<FragmentModelInterval*> intervals;
 
+    // consensus exonic intervals for training fragment length distribution
     std::vector<Interval> exonic;
     ts.get_consensus_exonic(exonic);
     std::vector<Interval>::iterator interval;
     for (interval = exonic.begin(); interval != exonic.end(); ++interval) {
         intervals.push_back(new FragmentModelInterval(
                     *interval,
-                    FragmentModelInterval::EXONIC));
+                    FragmentModelInterval::CONSENSUS_EXONIC));
+    }
+
+    // exonic intervals for training seqbias
+    std::vector<FragmentModelInterval*> seqbias_intervals;
+    if (fa_fn) {
+        exonic.clear();
+        ts.get_exonic(exonic);
+        for (interval = exonic.begin(); interval != exonic.end(); ++interval) {
+            seqbias_intervals.push_back(new FragmentModelInterval(
+                *interval,
+                FragmentModelInterval::EXONIC));
+        }
     }
 
     std::vector<FragmentModelThread*> threads;
@@ -580,10 +588,28 @@ void FragmentModel::estimate(TranscriptSet& ts,
     }
 
     AlnCountTrie* alncnt = new AlnCountTrie();
+    PosTable seqbias_sense_pos, seqbias_antisense_pos;
 
-    sam_scan(intervals, *alncnt, q, bam_fn, fa_fn, "Indexing reads");
+    sam_scan(intervals, *alncnt, q,
+             seqbias_intervals, seqbias_sense_pos, seqbias_antisense_pos,
+             bam_fn, "Indexing reads");
 
-    /* Index multireads. */
+    // Train seqbias
+    if (fa_fn) {
+        sb[0] = new sequencing_bias(fa_fn, seqbias_sense_pos,
+                                    constants::seqbias_num_reads,
+                                    constants::seqbias_left_pos,
+                                    constants::seqbias_right_pos,
+                                    "Training sense sequence bias");
+        sb[1] = new sequencing_bias(fa_fn, seqbias_antisense_pos,
+                                    constants::seqbias_num_reads,
+                                    constants::seqbias_left_pos,
+                                    constants::seqbias_right_pos,
+                                    "Training antisense sequence bias");
+    }
+    else sb[0] = sb[1] = NULL;
+
+    // Index multireads
     unsigned long total_reads = alncnt->size();
     for (AlnCountTrieIterator i(*alncnt); i != AlnCountTrieIterator(); ++i) {
         if (i->second.first > constants::max_alignments ||
@@ -675,8 +701,12 @@ void FragmentModel::estimate(TranscriptSet& ts,
     for (size_t i = 0; i < constants::num_threads; ++i) {
         delete threads[i];
     }
+
+    // TODO: delete seqbias_intervals
 }
 
+
+#if 0
 
 /* Train seqbias model, setting this->sb to something non-null.
  *
@@ -696,6 +726,7 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
     FragmentModelIntervalVec intervals;
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         pos_t tlen = t->exonic_length();
+        // TODO: no weird constants please
         if (tlen < 300) continue;
         pos_t d = 0;
         for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
@@ -818,6 +849,9 @@ void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const c
                                 constants::seqbias_left_pos,
                                 constants::seqbias_right_pos);
 }
+
+
+#endif
 
 
 

@@ -142,6 +142,9 @@ class TranscriptSet
         /* Number of transcripts held in the set. */
         size_t size() const;
 
+        /* Fill a vector with the union of all exonic regions, with strand considered. */
+        void get_exonic(std::vector<Interval>&);
+
         /* Fill a vector with all genomic regions which for every trancsript are
          * either entirely exonic or non-overlapping. */
         void get_consensus_exonic(std::vector<Interval>&);

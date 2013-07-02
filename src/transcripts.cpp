@@ -445,6 +445,39 @@ void TranscriptSet::get_consensus_exonic(std::vector<Interval>& intervals)
 }
 
 
+void TranscriptSet::get_exonic(std::vector<Interval>& intervals)
+{
+    for (strand_t strand = strand_pos; strand != strand_neg; strand = strand_neg) {
+        // construct a sorted vector of all exons on the current strand
+        std::vector<Interval> exons;
+        for (std::set<Transcript>::iterator t = transcripts.begin();
+            t != transcripts.end(); ++t) {
+            if (t->strand != strand) continue;
+            for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
+                exons.push_back(Interval(t->seqname.get().c_str(),
+                                         e->start,
+                                         e->end,
+                                         strand));
+            }
+        }
+        std::sort(exons.begin(), exons.end());
+
+        // find the union
+        std::vector<Interval>::iterator i, j;
+        for (i = exons.begin(); i != exons.end(); ++i) {
+            pos_t start = i->start, end = i->end;
+            for (j = i; j != exons.end(); ++j) {
+                if (j->start > end) break;
+                end = std::max<pos_t>(end, j->end);
+            }
+
+            intervals.push_back(Interval(i->seqname.get().c_str(),
+                                         start, end, strand));
+        }
+    }
+}
+
+
 void TranscriptSet::get_intergenic(std::vector<Interval>& intervals)
 {
     std::set<Transcript>::iterator i;

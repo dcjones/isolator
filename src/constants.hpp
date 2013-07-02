@@ -32,6 +32,9 @@ namespace constants
      * length distribution. */
     extern pos_t min_estimate_exon_length;
 
+    /* Don't collect training reads from exons shorter than this. */
+    extern pos_t seqbias_min_exon_length;
+
     /* Read this many reads from the BAM file before training seqbias. It will
      * then choose seqbias_num_reads at random from these to train on. */
     extern size_t seqbias_num_collected_reads;
@@ -51,9 +54,6 @@ namespace constants
      * transcripts. These numbers define the extent of the ends. */
     extern pos_t seqbias_tp_end;
     extern pos_t seqbias_fp_end;
-
-    /* Number of GC-content bins to use in correction. */
-    extern size_t gc_num_bins;
 
     /* Library type; how the mates in paired-end data sets were generated. */
     enum libtype_t {
@@ -113,19 +113,6 @@ namespace constants
      * sites, we extent the 5p and 3p ends of each transcript. */
     extern pos_t transcript_5p_extension;
     extern pos_t transcript_3p_extension;
-
-    /* Transcript 3' bias is conditioned on transcript length, binned into the
-     * following bins. Each number is an upper bound for a bin. */
-    extern size_t tp_num_length_bins;
-    extern pos_t tp_length_bins[4];
-
-    /* Number of position bins. */
-    extern size_t tp_num_bins;
-
-    /* */
-    extern pos_t tp_pad;
-
-    extern pos_t tp_len;
 
     /* It's possible for a transcript to get assigned exceedingly low weight,
      * given the fragment length distribution. Then when a single read lands

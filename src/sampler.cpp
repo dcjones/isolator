@@ -781,14 +781,14 @@ class SamplerInitThread
 
         /* Compute sequence bias for both mates on both strand.
          *
-         * Results are stored in mate1_seqbias, mate2_seqbias. */
+         * Results are stored in seqbias. */
         void transcript_sequence_bias(const SamplerInitInterval& locus,
                                       const Transcript& t);
 
         /* Compute the sum of the weights of all fragmens in the transcript.
          *
          * This assumes that transcript_sequence_bias has already been called,
-         * and the mate1_seqbias/mate2_seqbias arrays set for t. */
+         * and the seqbias arrays set for t. */
         float transcript_weight(const Transcript& t);
 
         /* Compute (a number proportional to) the probability of observing the
@@ -813,12 +813,11 @@ class SamplerInitThread
          * threads. */
         EmpDist* frag_len_dist;
 
-        /* Temprorary space for computing sequence bias, indexed by strand. */
-        std::vector<float> mate1_seqbias[2];
-        std::vector<float> mate2_seqbias[2];
+        /* Temprorary space for computing sequence bias, indexed by
+           sense (0) / antisense (1) */
+        std::vector<float> seqbias[2];
 
-        /* Exonic length of the transcript whos bias is stored in
-         * mate1/mate2_seqbias. */
+        /* Exonic length of the transcript whos bias is stored in seqbias. */
         pos_t tlen;
         float tw;
 
@@ -1003,74 +1002,55 @@ void SamplerInitThread::transcript_sequence_bias(
                 const Transcript& t)
 {
     tlen = t.exonic_length();
-    if ((size_t) tlen > mate1_seqbias[0].size()) {
-        mate1_seqbias[0].resize(tlen);
-        mate1_seqbias[1].resize(tlen);
-        mate2_seqbias[0].resize(tlen);
-        mate2_seqbias[1].resize(tlen);
+    if ((size_t) tlen > seqbias[0].size()) {
+        seqbias[0].resize(tlen);
+        seqbias[1].resize(tlen);
     }
 
-    std::fill(mate1_seqbias[0].begin(), mate1_seqbias[0].begin() + tlen, 1.0);
-    std::fill(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen, 1.0);
-    std::fill(mate2_seqbias[0].begin(), mate2_seqbias[0].begin() + tlen, 1.0);
-    std::fill(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen, 1.0);
+    std::fill(seqbias[0].begin(), seqbias[0].begin() + tlen, 1.0);
+    std::fill(seqbias[1].begin(), seqbias[1].begin() + tlen, 1.0);
 
-    if (fm.sb[1] == NULL || locus.seq == NULL) return;
+    if (fm.sb[1] == NULL || locus.seq == NULL){
+        transcript_gc[t.id] = 0.5;
+        return;
+    }
 
-    t.get_sequence(tseq0, *locus.seq, constants::seqbias_left_pos, constants::seqbias_right_pos);
-    t.get_sequence(tseq1, *locus.seq, constants::seqbias_right_pos, constants::seqbias_left_pos);
+    // convencience
+    pos_t L = constants::seqbias_left_pos, R = constants::seqbias_right_pos;
+
+    t.get_sequence(tseq0, *locus.seq, L, R);
+    t.get_sequence(tseq1, *locus.seq, R, L);
     tseq1.revcomp();
 
     transcript_gc[t.id] = tseq0.gc_count() / (double) tlen;
 
-    // TODO: This stuff could probably be cleaned up.
-    // Right now I'm training seperate models for mate1 and mate2,
-    // as well as seperate models for orientation relative to the transcript.
-    // Really, I think I could get away with just orientation relative to the transcript.
-    // That will same a lot of seqbias training time.
     if (t.strand == strand_pos) {
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            mate1_seqbias[0][pos] = fm.sb[0]->get_mate1_bias(tseq0,
-                    pos + constants::seqbias_left_pos);
-            mate1_seqbias[1][pos] = fm.sb[1]->get_mate1_bias(tseq1,
-                    pos + constants::seqbias_left_pos);
-            mate2_seqbias[0][pos] = fm.sb[0]->get_mate2_bias(tseq0,
-                    pos + constants::seqbias_left_pos);
-            mate2_seqbias[1][pos] = fm.sb[1]->get_mate2_bias(tseq1,
-                    pos + constants::seqbias_left_pos);
+            seqbias[0][pos] = fm.sb[0]->get_bias(tseq0, pos + L);
+            seqbias[1][pos] = fm.sb[1]->get_bias(tseq1, pos + L);
         }
+        std::reverse(seqbias[1].begin(), seqbias[1].begin() + tlen);
     }
     else {
         for (pos_t pos = 0; pos < tlen; ++pos) {
-            mate1_seqbias[0][pos] = fm.sb[1]->get_mate1_bias(tseq0,
-                    pos + constants::seqbias_left_pos);
-            mate1_seqbias[1][pos] = fm.sb[0]->get_mate1_bias(tseq1,
-                    pos + constants::seqbias_left_pos);
-            mate2_seqbias[0][pos] = fm.sb[1]->get_mate2_bias(tseq0,
-                    pos + constants::seqbias_left_pos);
-            mate2_seqbias[1][pos] = fm.sb[0]->get_mate2_bias(tseq1,
-                    pos + constants::seqbias_left_pos);
+            seqbias[0][pos] = fm.sb[0]->get_bias(tseq1, pos + L);
+            seqbias[1][pos] = fm.sb[1]->get_bias(tseq0, pos + L);
+            std::reverse(seqbias[0].begin(), seqbias[0].begin() + tlen);
         }
     }
 
-    std::reverse(mate1_seqbias[1].begin(), mate1_seqbias[1].begin() + tlen);
-    std::reverse(mate2_seqbias[1].begin(), mate2_seqbias[1].begin() + tlen);
-
+    // TODO: magic number
     // Flatten bias predictions at the ends of the transcript, since we would otherwise
     // be basing the prediction off sequence that lies outside the transcript.
     if (tlen < 20) return;
 
     for (pos_t pos = 0; pos < 20; ++pos) {
-        mate1_seqbias[0][pos] = 1.0;
-        mate2_seqbias[0][pos] = 1.0;
-        mate1_seqbias[1][pos] = 1.0;
-        mate2_seqbias[1][pos] = 1.0;
+        seqbias[0][pos] = 1.0;
+        seqbias[1][pos] = 1.0;
     }
     for (pos_t pos = tlen - 20; pos < tlen; ++pos) {
-        mate1_seqbias[0][pos] = 1.0;
-        mate2_seqbias[0][pos] = 1.0;
-        mate1_seqbias[1][pos] = 1.0;
-        mate2_seqbias[1][pos] = 1.0;
+        seqbias[0][pos] = 1.0;
+        seqbias[1][pos] = 1.0;
     }
 }
 
@@ -1099,21 +1079,14 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
          * presumably exist somewhere. */
 
         ws[frag_len] = 0.0;
-
-        float sp0 = t.strand == strand_pos ? fm.strand_specificity :
-                                            1.0 - fm.strand_specificity;
-
-        float sp1 = t.strand == strand_neg ? fm.strand_specificity :
-                                            1.0 - fm.strand_specificity;
-
         for (pos_t pos = 0; pos <= trans_len - frag_len; ++pos) {
-            // Positive strand fragment weight
+            // Sense fragment weight
             ws[frag_len] +=
-                sp0 * (mate1_seqbias[0][pos] * mate2_seqbias[1][pos + frag_len - 1]);
+                fm.strand_specificity * seqbias[0][pos] * seqbias[1][pos + frag_len - 1];
 
-            // Negative strand fragment weight
+            // Anti-sense fragment weight
             ws[frag_len] +=
-                sp1 * (mate2_seqbias[0][pos] * mate1_seqbias[1][pos + frag_len - 1]);
+                (1.0 - fm.strand_specificity) * seqbias[1][pos] * seqbias[0][pos + frag_len - 1];
         }
     }
 
@@ -1158,29 +1131,26 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
         pos_t offset1 = t.get_offset(a.mate1->strand == strand_pos ?
                                      a.mate1->start : a.mate1->end);
         if (offset1 < 0 || offset1 >= tlen) return 0.0;
+        w *= seqbias[a.mate1->strand == t.strand ? 0 : 1][offset1];
 
         pos_t offset2 = t.get_offset(a.mate2->strand == strand_pos ?
                                      a.mate2->start : a.mate2->end);
         if (offset2 < 0 || offset2 >= tlen) return 0.0;
-
-        w *= (mate1_seqbias[a.mate1->strand][offset1] *
-              mate2_seqbias[a.mate2->strand][offset2]);
+        w *= seqbias[a.mate2->strand == t.strand ? 0 : 1][offset2];
     }
     else {
         if (a.mate1) {
             pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?
                                         a.mate1->start : a.mate1->end);
             if (offset < 0 || offset >= tlen) return 0.0;
-
-            w *= mate1_seqbias[a.mate1->strand][offset];
+            w *= seqbias[a.mate1->strand == t.strand ? 0 : 1][offset];
         }
 
         if (a.mate2) {
             pos_t offset = t.get_offset(a.mate2->strand == strand_pos ?
                                         a.mate2->start : a.mate2->end);
             if (offset < 0 || offset >= tlen) return 0.0;
-
-            w *= mate2_seqbias[a.mate2->strand][offset];
+            w *= seqbias[a.mate2->strand == t.strand ? 0 : 1][offset];
         }
     }
 
