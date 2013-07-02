@@ -2000,7 +2000,7 @@ class MultireadSamplerThread
 };
 
 
-void Sampler::run(unsigned int num_samples, SampleDB& out)
+void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correction)
 {
     /* Initial mixtures */
     for (unsigned int i = 0; i < num_components; ++i) {
@@ -2023,39 +2023,6 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
             }
         }
     }
-
-#if 0
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (t->transcript_id == "ENST00000564197") {
-            Logger::info("ENST00000564197 has %ld frags",
-                    weight_matrix->rowlens[t->id]);
-            for (size_t i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
-                Logger::info("%e", weight_matrix->rows[t->id][i]);
-            }
-        }
-    }
-#endif
-
-#if 0
-    for (unsigned int i = 0; i < num_components; ++i) {
-        float w = 0.0;
-        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
-            w += transcript_weights[component_transcripts[i][j]];
-        }
-
-        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
-            tmix[component_transcripts[i][j]] =
-                transcript_weights[component_transcripts[i][j]] / w;
-        }
-    }
-#endif
-
-#if 0
-    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-        tmix[i] = 1.0 / (float) component_num_transcripts[transcript_component[i]];
-    }
-#endif
-
 
     std::fill(cmix, cmix + num_components, 1.0 / (float) num_components);
     init_frag_probs();
@@ -2169,59 +2136,6 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
             cmix[c] /= z;
         }
 
-
-#if 0
-        // DEBUGING XXX
-        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-            if (t->transcript_id == "ENST00000536769") {
-                unsigned int c = transcript_component[t->id];
-                Logger::info("ENSG00000150991 has %f fragments, %ld unique",
-                             frag_count_sums[c],
-                             component_frag[c+1] - component_frag[c]);
-            }
-
-            //if (t->transcript_id == "ENST00000233143") {
-                //Logger::info("ENST00000233143 has %f frags",
-                        //frag_count_sums[transcript_component[t->id]]);
-            //}
-
-            //if (t->transcript_id == "ENST00000253408") {
-                //Logger::info("ENST00000253408: %e", tmix[t->id]);
-            //}
-        }
-#endif
-
-#if 0
-        if (sample_num == 0) {
-            for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-                if (t->transcript_id == "ENST00000282470") {
-                    //Logger::info("ENST00000282470 has %ld fragments.",
-                                 //weight_matrix->rowlens[t->id]);
-                    Logger::info("ENST00000282470: %e", tmix[t->id]);
-
-                    //FILE* out = fopen("ENST00000282470.frag_prob.txt", "w");
-                    //for (unsigned int i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
-                        //fprintf(out, "%e\n", weight_matrix->rows[t->id][i]);
-                    //}
-                    //fclose(out);
-                }
-
-                if (t->transcript_id == "ENST00000503414") {
-                    //Logger::info("ENST00000503414 has %ld fragments.",
-                                 //weight_matrix->rowlens[t->id]);
-                    Logger::info("ENST00000503414: %e", tmix[t->id]);
-
-                    //FILE* out = fopen("ENST00000503414.frag_prob.txt", "w");
-                    //for (unsigned int i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
-                        //fprintf(out, "%e\n", weight_matrix->rows[t->id][i]);
-                    //}
-                    //fclose(out);
-                }
-            }
-        }
-#endif
-
-
         /* Record a new sample */
         if(burnin_samples == 0 && sample_num < num_samples) {
             double total_weight = 0.0, new_total_weight = 0.0;
@@ -2315,7 +2229,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
     Logger::pop_task(task_name);
 
-    if (fm.sb[0]) {
+    if (fm.sb[0] && run_gc_correction) {
         gc_correction(maxpost_tmix, num_samples);
     }
 

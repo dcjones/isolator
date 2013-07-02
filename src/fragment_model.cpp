@@ -683,7 +683,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
  * Args:
  *   bam_fn: Filename of sorted bam file.
  *   fa_fn: Filename of fasta file. May be null.
- *   
+ *
  */
 void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const char* fa_fn)
 {

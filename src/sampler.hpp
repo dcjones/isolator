@@ -21,7 +21,7 @@ class Sampler
                 TranscriptSet& ts, FragmentModel& fm);
         ~Sampler();
 
-        void run(unsigned int num_samples, SampleDB& out);
+        void run(unsigned int num_samples, SampleDB& out, bool run_gc_correction);
 
     private:
         /* Compute all the entries in frag_probs, given the current value of

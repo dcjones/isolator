@@ -49,6 +49,7 @@ void print_quantify_help(FILE* fout)
             "-g, --genomic-seq=FILE    Correct for sequence bias, given the a the sequence\n"
             "                          against which the reads are aligned, in FAST format.\n"
             "-p, --threads=N           number of threads to use.\n"
+            "    --no-gc-correction    disable post-hoc GC-content adjustments.\n"
             "-T, --trans-ids=FILE      A file listing transcript id's of transcripts that\n"
             "                          will be quantified (by default, every transcript).\n"
             "-G, --gene-ids=FILE       A file listing gene id's of transcripts that\n"
@@ -62,14 +63,15 @@ int quantify(int argc, char* argv[])
 {
     static struct option long_options[] =
     {
-        {"help",        no_argument,       NULL, 'h'},
-        {"verbose",     no_argument,       NULL, 'v'},
-        {"out",         required_argument, NULL, 'o'},
-        {"threads",     required_argument, NULL, 'p'},
-        {"trans-ids",   required_argument, NULL, 'T'},
-        {"gene-ids",    required_argument, NULL, 'G'},
-        {"genomic-seq", required_argument, NULL, 'g'},
-        {"num-samples", required_argument, NULL, 'N'},
+        {"help",             no_argument,       NULL, 'h'},
+        {"verbose",          no_argument,       NULL, 'v'},
+        {"out",              required_argument, NULL, 'o'},
+        {"threads",          required_argument, NULL, 'p'},
+        {"no-gc-correction", no_argument,       NULL, 0},
+        {"trans-ids",        required_argument, NULL, 'T'},
+        {"gene-ids",         required_argument, NULL, 'G'},
+        {"genomic-seq",      required_argument, NULL, 'g'},
+        {"num-samples",      required_argument, NULL, 'N'},
         {0, 0, 0, 0}
     };
 
@@ -78,12 +80,13 @@ int quantify(int argc, char* argv[])
     constants::num_threads = boost::thread::hardware_concurrency();
     unsigned int num_samples = 200;
     Logger::level logger_level = Logger::INFO;
+    bool run_gc_correction = true;
 
     int opt;
-    int opt_idx;
+    int optidx;
 
     while (true) {
-        opt = getopt_long(argc, argv, "hvo:p:g:N:", long_options, &opt_idx);
+        opt = getopt_long(argc, argv, "hvo:p:g:N:", long_options, &optidx);
 
         if (opt == -1) break;
 
@@ -110,6 +113,12 @@ int quantify(int argc, char* argv[])
 
             case 'N':
                 num_samples = strtoul(optarg, NULL, 10);
+                break;
+
+            case 0:
+                if (strcmp(long_options[optidx].name, "no-gc-correction") == 0) {
+                    run_gc_correction = false;
+                }
                 break;
 
             case '?':
@@ -184,7 +193,7 @@ int quantify(int argc, char* argv[])
     /* Initialize the sampler. */
     Sampler sampler(bam_fn, fa_fn, ts, *fm);
     delete fm; /* free a little memory */
-    sampler.run(num_samples, db);
+    sampler.run(num_samples, db, run_gc_correction);
 
     gettimeofday(&t1, NULL);
     long tdiff = (t1.tv_usec + 1000000 * t1.tv_sec) -
