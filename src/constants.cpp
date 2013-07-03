@@ -35,4 +35,4 @@ float                constants::maxpost_abs_error            = 1e-12;
 float                constants::maxpost_abs_peps             = 1.0;
 unsigned int         constants::max_newton_iter              = 12;
 unsigned int         constants::sampler_burnin_samples       = 200;
-unsigned int         constants::sampler_hillclimb_samples    = 100;
+unsigned int         constants::sampler_hillclimb_samples    = 0;

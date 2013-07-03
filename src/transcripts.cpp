@@ -483,12 +483,11 @@ void TranscriptSet::get_intergenic(std::vector<Interval>& intervals)
     std::set<Transcript>::iterator i;
 
     SeqName seqname;
-    pos_t start = 0, end = 0;
+    pos_t end = 0;
 
     for (i = transcripts.begin(); i != transcripts.end(); ++i) {
         if  (i->seqname != seqname) {
             seqname = i->seqname;
-            start = 0;
             end = i->max_end;
         }
         else {
@@ -502,7 +501,6 @@ void TranscriptSet::get_intergenic(std::vector<Interval>& intervals)
                                      end + 1, i->min_start - 1, strand_na));
                 }
 
-                start = i->min_start;
                 end = i->max_end;
             }
         }

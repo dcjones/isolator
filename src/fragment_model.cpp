@@ -588,26 +588,37 @@ void FragmentModel::estimate(TranscriptSet& ts,
     }
 
     AlnCountTrie* alncnt = new AlnCountTrie();
-    PosTable seqbias_sense_pos, seqbias_antisense_pos;
+    PosTable* seqbias_sense_pos = new PosTable();
+    PosTable* seqbias_antisense_pos = new PosTable();
 
     sam_scan(intervals, *alncnt, q,
-             seqbias_intervals, seqbias_sense_pos, seqbias_antisense_pos,
+             seqbias_intervals, *seqbias_sense_pos, *seqbias_antisense_pos,
              bam_fn, "Indexing reads");
 
-    // Train seqbias
+    // delete seqbias intervals
+    for (std::vector<FragmentModelInterval*>::iterator i = seqbias_intervals.begin();
+            i != seqbias_intervals.end(); ++i) {
+        delete *i;
+    }
+    seqbias_intervals.clear();
+
+    // train seqbias
     if (fa_fn) {
-        sb[0] = new sequencing_bias(fa_fn, seqbias_sense_pos,
+        sb[0] = new sequencing_bias(fa_fn, *seqbias_sense_pos,
                                     constants::seqbias_num_reads,
                                     constants::seqbias_left_pos,
                                     constants::seqbias_right_pos,
                                     "Training sense sequence bias");
-        sb[1] = new sequencing_bias(fa_fn, seqbias_antisense_pos,
+        sb[1] = new sequencing_bias(fa_fn, *seqbias_antisense_pos,
                                     constants::seqbias_num_reads,
                                     constants::seqbias_left_pos,
                                     constants::seqbias_right_pos,
                                     "Training antisense sequence bias");
     }
     else sb[0] = sb[1] = NULL;
+
+    delete seqbias_sense_pos;
+    delete seqbias_antisense_pos;
 
     // Index multireads
     unsigned long total_reads = alncnt->size();
@@ -701,158 +712,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     for (size_t i = 0; i < constants::num_threads; ++i) {
         delete threads[i];
     }
-
-    // TODO: delete seqbias_intervals
 }
-
-
-#if 0
-
-/* Train seqbias model, setting this->sb to something non-null.
- *
- * Args:
- *   bam_fn: Filename of sorted bam file.
- *   fa_fn: Filename of fasta file. May be null.
- *
- */
-void FragmentModel::train_seqbias(TranscriptSet& ts, const char* bam_fn, const char* fa_fn)
-{
-    if (fa_fn == NULL) {
-        sb[0] = sb[1] = NULL;
-        return;
-    }
-
-    typedef std::vector<FragmentModelInterval*> FragmentModelIntervalVec;
-    FragmentModelIntervalVec intervals;
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        pos_t tlen = t->exonic_length();
-        // TODO: no weird constants please
-        if (tlen < 300) continue;
-        pos_t d = 0;
-        for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
-            pos_t elen = e->end - e->start + 1;
-            FragmentModelInterval* interval = new FragmentModelInterval(
-                        t->seqname,
-                        e->start,
-                        e->end,
-                        t->strand,
-                        t->strand == strand_pos ?
-                            tlen - d - 1 : d,
-                        tlen,
-                        FragmentModelInterval::THREE_PRIME_EXONIC);
-
-            intervals.push_back(interval);
-            d += elen;
-        }
-    }
-
-    const char* task_name = "Preparing to train seqbias model";
-    Logger::push_task(task_name);
-
-    PosTable mate1_pos[2], mate2_pos[2];
-
-    samfile_t* bam_f;
-    bam_f = samopen(bam_fn, "rb", NULL);
-    if (bam_f == NULL) {
-        bam_f = samopen(bam_fn, "r", NULL);
-    }
-    if (bam_f == NULL) {
-        Logger::abort("Can't open SAM/BAM file %s.\n", bam_fn);
-    }
-
-    /* Sort the intervals in the same order as the BAM file. */
-    bam_init_header_hash(bam_f->header);
-    khash_t(s)* tbl = reinterpret_cast<khash_t(s)*>(bam_f->header->hash);
-
-    FragmentModelIntervalVec::iterator i;
-    khiter_t k;
-    for (i = intervals.begin(); i != intervals.end(); ++i) {
-        k = kh_get(s, tbl, (*i)->seqname.get().c_str());
-        if (k == kh_end(tbl)) (*i)->tid = -1;
-        else (*i)->tid = kh_value(tbl, k);
-    }
-
-    sort(intervals.begin(), intervals.end(), FragmentModelIntervalPtrCmp());
-
-    FragmentModelIntervalVec::iterator j, j0 = intervals.begin();
-
-    bam1_t* b = bam_init1();
-    size_t read_num = 0;
-    while (samread(bam_f, b) >= 0) {
-        if (b->core.flag & BAM_FUNMAP ||
-            (b->core.flag & BAM_FPAIRED && !(b->core.flag & BAM_FPROPER_PAIR)) ||
-            b->core.tid < 0) continue;
-        if (b->core.qual < constants::min_map_qual) continue;
-
-        if (b->core.n_cigar != 1) continue;
-
-        for (j = j0; j != intervals.end(); ++j) {
-            if (b->core.tid < (*j)->tid) break;
-            if (b->core.tid > (*j)->tid) {
-                ++j0;
-                continue;
-            }
-
-            if (b->core.pos < (*j)->start) break;
-            if (b->core.pos > (*j)->end) {
-                if (j == j0) ++j0;
-                continue;
-            }
-
-            pos_t pos = bam1_strand(b) ?
-                bam_calend2(&b->core, bam1_cigar(b)) - 1 : b->core.pos;
-
-            if (pos < (*j)->start || pos > (*j)->end) continue;
-
-            // Add alignment somewhere
-            pos_t five_prime_dist = (*j)->tlen - (*j)->three_prime_dist;
-            pos_t off;
-            if ((*j)->strand == strand_pos) {
-                off = five_prime_dist + pos - (*j)->start;
-            }
-            else {
-                off = five_prime_dist + (*j)->end - pos;
-            }
-
-            if (off < constants::seqbias_fp_end) continue;
-            else if ((*j)->tlen - off < constants::seqbias_tp_end) continue;
-
-            int bin = bam1_strand(b) == (*j)->strand;
-            uint32_t tid = b->core.tid;
-
-            if (b->core.flag & BAM_FREAD2) {
-                mate2_pos[bin].add(tid, pos, bam1_strand(b),
-                                   (*j)->start, (*j)->end, bam_f);
-            }
-            else {
-                mate1_pos[bin].add(tid, pos, bam1_strand(b),
-                                   (*j)->start, (*j)->end, bam_f);
-            }
-        }
-
-        ++read_num;
-    }
-
-    Logger::pop_task(task_name);
-
-    for (i = intervals.begin(); i != intervals.end(); ++i) {
-        delete *i;
-    }
-
-    sb[0] = new sequencing_bias(fa_fn, mate1_pos[0], mate2_pos[0],
-                                constants::seqbias_num_reads,
-                                constants::seqbias_left_pos,
-                                constants::seqbias_right_pos);
-
-    sb[1] = new sequencing_bias(fa_fn, mate1_pos[1], mate2_pos[1],
-                                constants::seqbias_num_reads,
-                                constants::seqbias_left_pos,
-                                constants::seqbias_right_pos);
-}
-
-
-#endif
-
 
 
 float FragmentModel::frag_len_p(pos_t frag_len)

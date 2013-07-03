@@ -2199,8 +2199,23 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
 
     Logger::pop_task(task_name);
 
+    // compute the posterior mean, for use with gc correction
     if (fm.sb[0] && run_gc_correction) {
-        gc_correction(maxpost_tmix, num_samples);
+        float* postmean = new float[weight_matrix->nrow];
+        float z = 0.0;
+        for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+            for (unsigned int j = 0; j < num_samples; ++j){
+                postmean[i] += samples[i][j];
+            }
+            postmean[i] /= (double) weight_matrix->nrow;
+            z += postmean[i];
+        }
+
+        for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+            postmean[i] /= z;
+        }
+
+        gc_correction(postmean, num_samples);
     }
 
     out.begin_transaction();
