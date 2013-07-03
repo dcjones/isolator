@@ -2402,11 +2402,6 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     gsl_multifit_linear_free(work);
 
     double* csd = cs->data;
-    //double c0 = gsl_vector_get(cs, 0),
-           //c1 = gsl_vector_get(cs, 1),
-           //c2 = gsl_vector_get(cs, 2);
-           //c3 = gsl_vector_get(cs, 3);
-
 
     for (int j = 0; j < degree; ++j) {
         Logger::info("c%d = %f", j, csd[j]);
@@ -2435,12 +2430,6 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
         for (size_t j = 0; j < num_samples; ++j) {
             samples[t->id][j]  = pow(samples[t->id][j], p);
         }
-#if 0
-        maxpost[t->id] = p * maxpost[t->id];
-        for (size_t j = 0; j < num_samples; ++j) {
-            samples[t->id][j]  = p * samples[t->id][j];
-        }
-#endif
     }
     // renormalize everything
     double z = 0.0;
@@ -2457,94 +2446,6 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     gsl_vector_free(xs);
     gsl_matrix_free(gcs);
     gsl_matrix_free(cov);
-
-
-#if 0
-    typedef std::pair<double, unsigned int> GCId;
-    std::vector<GCId> gcid;
-    gcid.reserve(ts.size());
-
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (maxpost[t->id] > 0 && t->biotype == "protein_coding" &&
-            t->exonic_length() > 300) {
-            gcid.push_back(std::make_pair(transcript_gc[t->id], t->id));
-        }
-    }
-
-    std::sort(gcid.begin(), gcid.end());
-
-    size_t m = gcid.size() / constants::gc_num_bins;
-    std::vector<double> bin_xs(m);
-    std::vector<double> meds(constants::gc_num_bins);
-    std::vector<double> gc_quants(constants::gc_num_bins - 1);
-
-    for (size_t i = 0; i < constants::gc_num_bins; ++i) {
-        for (size_t j = 0; j < m; ++j) {
-            //bin_xs[j] = maxpost[gcid[i*m + j].second];
-            // XXX
-            bin_xs[j] = log(maxpost[gcid[i*m + j].second]);
-        }
-        if (i < constants::gc_num_bins - 1) gc_quants[i] = gcid[(i+1) * m].first;
-        std::sort(bin_xs.begin(), bin_xs.end());
-        //meds[i] = gsl_stats_median_from_sorted_data(&bin_xs.at(0), 1, m);
-        meds[i] = gsl_stats_quantile_from_sorted_data(
-                &bin_xs.at(0), 1, m, 0.75);
-    }
-
-    // XXX: debugging
-    for (size_t i = 0; i < constants::gc_num_bins; ++i) {
-       Logger::info("GC bin %zu: %e", i, meds[i]);
-    }
-
-    for (size_t i = 0; i < constants::gc_num_bins - 1; ++i) {
-       Logger::info("GC quants %zu: %f", i, gc_quants[i]);
-    }
-
-    // adjustment factors
-    std::vector<double> bin_adj(constants::gc_num_bins);
-    for (size_t i = 0; i < constants::gc_num_bins - 1; ++i) {
-        bin_adj[i] = meds[constants::gc_num_bins - 1] / meds[i];
-        Logger::info("bin_adj[%d] = %f", (int) i, bin_adj[i]);
-    }
-    bin_adj[constants::gc_num_bins - 1] = 1.0;
-
-    // make adjustments to samples and maxpost_tmix
-    gcid.resize(ts.size());
-    size_t i = 0;
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t, ++i) {
-        gcid[i].first = transcript_gc[t->id];
-        gcid[i].second = t->id;
-    }
-    std::sort(gcid.begin(), gcid.end());
-
-    size_t bin = 0;
-    for (std::vector<GCId>::iterator i = gcid.begin(); i != gcid.end(); ++i) {
-        if (bin < constants::gc_num_bins - 1 && i->first > gc_quants[bin]) {
-            ++bin;
-        }
-        double adj = bin_adj[bin];
-
-
-        //maxpost[i->second] *= adj;
-        maxpost[i->second] = pow(maxpost[i->second], adj);
-        for (size_t j = 0; j < num_samples; ++j) {
-            // XXX
-            //samples[i->second][j] *= adj;
-            samples[i->second][j]  = pow(samples[i->second][j], adj);
-        }
-    }
-
-    // renormalize everything
-    double z = 0.0;
-    for (size_t i = 0; i < ts.size(); ++i) z += maxpost[i];
-    for (size_t i = 0; i < ts.size(); ++i) maxpost[i] /= z;
-
-    for (size_t i = 0; i < num_samples; ++i) {
-        z = 0.0;
-        for (size_t j = 0; j < ts.size(); ++j) z += samples[j][i];
-        for (size_t j = 0; j < ts.size(); ++j) samples[j][i] /= z;
-    }
-#endif
 }
 
 
