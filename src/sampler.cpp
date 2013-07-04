@@ -628,9 +628,6 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
         if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
         if (b->core.mtid != -1 && b->core.tid != b->core.mtid) continue;
 
-        // XXX
-        if (b->core.mtid == -1) continue;
-
         if (b->core.qual < constants::min_map_qual) continue;
 
         if (b->core.tid < last_tid ||
@@ -1170,14 +1167,7 @@ float SamplerInitThread::fragment_weight(const Transcript& t,
     }
     if (frag_len_pr * w < constants::min_frag_weight) return 0.0;
 
-#if 0
-    if (t.transcript_id == "ENST00000564197") {
-        Logger::info("here");
-    }
-#endif
-
     return frag_len_pr * w / ws[frag_len];
-    //return (frag_len_pr / frag_len_c(tlen)) * (w / tw);
 }
 
 
