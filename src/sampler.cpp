@@ -10,7 +10,6 @@
 #include "hat-trie/hat-trie.h"
 #include "linalg.hpp"
 #include "loess/loess.h"
-#include "loess/lowess.h"
 #include "logger.hpp"
 #include "queue.hpp"
 #include "read_set.hpp"
@@ -2276,9 +2275,12 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
 
     std::vector<double> xs(n), ys(n);
     size_t i = 0;
+    double max_gc = 0.0, min_gc = 1.0;
     for (std::map<GeneID, double>::iterator g = gene_gc.begin();
             g != gene_gc.end(); ++g, ++i) {
         xs[i] = g->second;
+        max_gc = std::max<double>(max_gc, g->second);
+        min_gc = std::max<double>(min_gc, g->second);
         ys[i] = log(gene_expr[g->first]);
     }
 
@@ -2299,7 +2301,10 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
 
     // normalize samples
     std::vector<double> tgc(ts.size());
-    std::copy(transcript_gc, transcript_gc + ts.size(), tgc.begin());
+    for (size_t i = 0; i < tgc.size(); ++i) {
+        tgc[i] = std::max<double>(min_gc,
+                 std::min<double>(max_gc, transcript_gc[i]));
+    }
     predict(&tgc.at(0), ts.size(), &lo, &pre, FALSE);
 
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
