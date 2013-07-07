@@ -9,6 +9,7 @@
 #include "constants.hpp"
 #include "hat-trie/hat-trie.h"
 #include "linalg.hpp"
+#include "loess/loess.h"
 #include "logger.hpp"
 #include "queue.hpp"
 #include "read_set.hpp"
@@ -2271,74 +2272,43 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     }
 
     size_t n = gene_gc.size();
-    const int degree = 3;
 
-    gsl_vector* cs = gsl_vector_alloc(degree);
-    gsl_vector* xs = gsl_vector_alloc(n);
-    gsl_matrix* gcs = gsl_matrix_alloc(n, degree);
-    gsl_matrix* cov = gsl_matrix_alloc(degree, degree);
-
+    std::vector<double> xs(n), ys(n);
     size_t i = 0;
     for (std::map<GeneID, double>::iterator g = gene_gc.begin();
             g != gene_gc.end(); ++g, ++i) {
-        for (int j = 0; j < degree; ++j) {
-            gsl_matrix_set(gcs, i, j, pow(g->second, j));
-        }
-        gsl_vector_set(xs, i, log(gene_expr[g->first]));
+        xs[i] = g->second;
+        ys[i] = log(gene_expr[g->first]);
     }
 
-    double chisq;
-    gsl_multifit_linear_workspace* work = gsl_multifit_linear_alloc(n, degree);
-    gsl_multifit_linear(gcs, xs, cs, cov, &chisq, work);
-    gsl_multifit_linear_free(work);
+    loess_struct lo;
+    loess_setup(&xs.at(0), &ys.at(0), n, n, &lo);
+    lo.model.span = constants::gc_loess_smoothing;
+    loess(&lo);
 
-    double* csd = cs->data;
-
-    for (int j = 0; j < degree; ++j) {
-        Logger::info("c%d = %f", j, csd[j]);
-    }
+    // XXX: Debug
+    loess_summary(&lo);
 
     // normalize fit's to this point in the curve
-    double ref = 0.0;
-    double x = 1.0;
-    for (int j = 0; j < degree; ++j) {
-        ref += csd[j] * x;
-        x *= 0.5;
-    }
+    pred_struct pre;
+    double ref_gc;
+    predict(&ref_gc, 1, &lo, &pre, FALSE);
+    double ref = pre.fit[0];
+    pred_free_mem(&pre);
+
+    // normalize samples
+    std::vector<double> tgc(ts.size());
+    std::copy(transcript_gc, transcript_gc + ts.size(), tgc.begin());
+    predict(&tgc.at(0), ts.size(), &lo, &pre, FALSE);
 
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        double gc = transcript_gc[t->id];
-        //gc = std::min(0.65, std::max(0.35, gc));
-        double x = 1.0;
-        double p = 0.0;
-        for (int j = 0; j < degree; ++j) {
-            p += csd[j] * x;
-            x *= gc;
-        }
-        p = ref / p;
-
-        maxpost[t->id] = pow(maxpost[t->id], p);
+        double p = ref / pre.fit[t->id];
         for (size_t j = 0; j < num_samples; ++j) {
             samples[t->id][j]  = pow(samples[t->id][j], p);
         }
     }
-    // renormalize everything
-    double z = 0.0;
-    for (size_t i = 0; i < ts.size(); ++i) z += maxpost[i];
-    for (size_t i = 0; i < ts.size(); ++i) maxpost[i] /= z;
 
-    for (size_t i = 0; i < num_samples; ++i) {
-        z = 0.0;
-        for (size_t j = 0; j < ts.size(); ++j) z += samples[j][i];
-        for (size_t j = 0; j < ts.size(); ++j) samples[j][i] /= z;
-    }
-
-    gsl_vector_free(cs);
-    gsl_vector_free(xs);
-    gsl_matrix_free(gcs);
-    gsl_matrix_free(cov);
+    pred_free_mem(&pre);
+    loess_free_mem(&lo);
 }
-
-
-
 

@@ -55,6 +55,9 @@ namespace constants
     extern pos_t seqbias_tp_end;
     extern pos_t seqbias_fp_end;
 
+    /* Loess smoothing for GC correction. */
+    extern double gc_loess_smoothing;
+
     /* Library type; how the mates in paired-end data sets were generated. */
     enum libtype_t {
         LIBTYPE_FR,  //  ======>--------<======

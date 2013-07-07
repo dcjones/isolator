@@ -65,11 +65,13 @@ static double round_away(double a)
 #endif
 
 
+#if 0
 /* simple uniform random numbers */
 static double rand_uniform(double a, double b)
 {
     return a + b * (double)rand() / (double)RAND_MAX;
 }
+#endif
 
 #if 0
 /* random gaussians (copied from GSL, to avoid dependency) */

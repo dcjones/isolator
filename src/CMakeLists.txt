@@ -1,6 +1,9 @@
 
+add_subdirectory(cblas)
+add_subdirectory(f2c)
 add_subdirectory(gtf)
 add_subdirectory(hat-trie)
+add_subdirectory(loess)
 add_subdirectory(samtools)
 add_subdirectory(seqbias)
 add_subdirectory(sqlite3)
@@ -27,8 +30,11 @@ include_directories(${isolator_SOURCE_DIR}/src
                     ${ZLIB_INCLUDE_DIRS})
 
 target_link_libraries(isolator
+                      cblas
+                      f2c
                       gtf
                       hat-trie
+                      loess
                       samtools
                       seqbias
                       sqlite3

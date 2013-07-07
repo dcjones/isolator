@@ -16,3 +16,6 @@ add_library(samtools
 
 add_definitions(-D_USE_KNETFILE)
 
+# Not my code. Supress compiler warnings.
+set_target_properties(samtools PROPERTIES COMPILE_FLAGS "-w")
+

@@ -269,12 +269,6 @@ static bool intron_compatible_cigar_op(uint8_t op)
 }
 
 
-static bool intergenic_compatible_cigar_op(uint8_t op)
-{
-    return op == BAM_CSOFT_CLIP;
-}
-
-
 pos_t AlignmentPair::frag_len(const Transcript& t) const
 {
     /* Reorder mates for convenience. */

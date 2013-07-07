@@ -5,10 +5,10 @@
 
 #define NUM_PRIMES 28
 static const uint32_t primes[NUM_PRIMES] = {
-           53U,         97U,        193U,        389U,    
-          769U,       1543U,       3079U,       6151U,  
-        12289U,      24593U,      49157U,      98317U,  
-       196613U,     393241U,     786433U,    1572869U, 
+           53U,         97U,        193U,        389U,
+          769U,       1543U,       3079U,       6151U,
+        12289U,      24593U,      49157U,      98317U,
+       196613U,     393241U,     786433U,    1572869U,
       3145739U,    6291469U,   12582917U,   25165843U,
      50331653U,  100663319U,  201326611U,  402653189U,
     805306457U, 1610612741U, 3221225473U, 4294967291U };
@@ -243,7 +243,7 @@ void pos_table_inc(struct pos_table* T, bam1_t* read)
 {
     int32_t pos;
     if (bam1_strand(read)) pos = bam_calend2(&read->core, bam1_cigar(read)) - 1;
-    else                    pos = read->core.pos;
+    else                   pos = read->core.pos;
 
     pos_table_inc_pos(T, read->core.tid, pos, bam1_strand(read));
 }
@@ -290,7 +290,7 @@ void read_counts_create(struct read_counts* C, const struct pos_table* T)
 
     C->mss[0] = malloc(C->n * sizeof(size_t));
     C->mss[1] = malloc(C->n * sizeof(size_t));
-    
+
     C->xss[0] = malloc(C->n * sizeof(struct pos_table_val*));
     C->xss[1] = malloc(C->n * sizeof(struct pos_table_val*));
 
