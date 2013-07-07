@@ -10,6 +10,7 @@
 #include "hat-trie/hat-trie.h"
 #include "linalg.hpp"
 #include "loess/loess.h"
+#include "loess/lowess.h"
 #include "logger.hpp"
 #include "queue.hpp"
 #include "read_set.hpp"
@@ -1033,8 +1034,8 @@ void SamplerInitThread::transcript_sequence_bias(
         for (pos_t pos = 0; pos < tlen; ++pos) {
             seqbias[0][pos] = fm.sb[0]->get_bias(tseq1, pos + L);
             seqbias[1][pos] = fm.sb[1]->get_bias(tseq0, pos + L);
-            std::reverse(seqbias[0].begin(), seqbias[0].begin() + tlen);
         }
+        std::reverse(seqbias[0].begin(), seqbias[0].begin() + tlen);
     }
 
     // TODO: magic number
@@ -2282,7 +2283,7 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     }
 
     loess_struct lo;
-    loess_setup(&xs.at(0), &ys.at(0), n, n, &lo);
+    loess_setup(&xs.at(0), &ys.at(0), n, 1, &lo);
     lo.model.span = constants::gc_loess_smoothing;
     loess(&lo);
 

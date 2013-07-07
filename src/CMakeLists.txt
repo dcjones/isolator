@@ -30,11 +30,11 @@ include_directories(${isolator_SOURCE_DIR}/src
                     ${ZLIB_INCLUDE_DIRS})
 
 target_link_libraries(isolator
+                      loess
                       cblas
                       f2c
                       gtf
                       hat-trie
-                      loess
                       samtools
                       seqbias
                       sqlite3
