@@ -2280,13 +2280,20 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
             g != gene_gc.end(); ++g, ++i) {
         xs[i] = g->second;
         max_gc = std::max<double>(max_gc, g->second);
-        min_gc = std::max<double>(min_gc, g->second);
+        min_gc = std::min<double>(min_gc, g->second);
         ys[i] = log(gene_expr[g->first]);
     }
+
+    Logger::info("min_gc = %f", min_gc);
+    Logger::info("max_gc = %f", max_gc);
 
     loess_struct lo;
     loess_setup(&xs.at(0), &ys.at(0), n, 1, &lo);
     lo.model.span = constants::gc_loess_smoothing;
+
+    Logger::info("training loess");
+    Logger::info("");
+    Logger::info("");
     loess(&lo);
 
     // XXX: Debug
@@ -2294,7 +2301,7 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
 
     // normalize fit's to this point in the curve
     pred_struct pre;
-    double ref_gc;
+    double ref_gc = 0.5;
     predict(&ref_gc, 1, &lo, &pre, FALSE);
     double ref = pre.fit[0];
     pred_free_mem(&pre);
@@ -2311,6 +2318,17 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
         double p = ref / pre.fit[t->id];
         for (size_t j = 0; j < num_samples; ++j) {
             samples[t->id][j]  = pow(samples[t->id][j], p);
+        }
+    }
+
+    // renormalize
+    for (size_t j = 0; j < num_samples; ++j) {
+        double z = 0.0;
+        for (size_t i = 0; i < ts.size(); ++i) {
+            z += samples[i][j];
+        }
+        for (size_t i = 0; i < ts.size(); ++i) {
+            samples[i][j] /= z;
         }
     }
 
