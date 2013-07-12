@@ -72,6 +72,7 @@ class Sampler
         {
             unsigned int component;
             unsigned int frag;
+            float align_pr;
         };
 
         /* A flat array of all the multiread alignments */

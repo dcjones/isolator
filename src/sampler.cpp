@@ -48,7 +48,29 @@ T* realloc_or_die(T* xs, size_t n)
 }
 
 
-typedef std::pair<unsigned int, unsigned int> MultireadFrag;
+struct MultireadFrag
+{
+    MultireadFrag(unsigned int multiread_num,
+                  unsigned int frag_idx,
+                  float align_pr)
+        : multiread_num(multiread_num)
+        , frag_idx(frag_idx)
+        , align_pr(align_pr)
+    {
+    }
+
+    unsigned int multiread_num;
+    unsigned int frag_idx;
+    float align_pr;
+
+    bool operator < (const MultireadFrag& other) const
+    {
+        if (multiread_num != other.multiread_num) {
+            return multiread_num < other.multiread_num;
+        }
+        else return frag_idx < other.frag_idx;
+    }
+};
 
 
 /* A (fragment indx, count) pair. */
@@ -432,10 +454,12 @@ class Indexer
 struct MultireadEntry
 {
     MultireadEntry(unsigned int multiread_num,
+                   unsigned int alignment_num,
                    unsigned int transcript_idx,
                    float frag_weight,
                    float align_pr)
         : multiread_num(multiread_num)
+        , alignment_num(alignment_num)
         , transcript_idx(transcript_idx)
         , frag_weight(frag_weight)
         , align_pr(align_pr)
@@ -447,10 +471,14 @@ struct MultireadEntry
         if (multiread_num != other.multiread_num) {
             return multiread_num < other.multiread_num;
         }
+        else if (alignment_num != other.alignment_num) {
+            return alignment_num < other.alignment_num;
+        }
         else return transcript_idx < other.transcript_idx;
     }
 
     unsigned int multiread_num;
+    unsigned int alignment_num;
     unsigned int transcript_idx;
     float frag_weight;
     float align_pr;
@@ -628,8 +656,6 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
 
         if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
         if (b->core.mtid != -1 && b->core.tid != b->core.mtid) continue;
-
-        if (b->core.qual < constants::min_map_qual) continue;
 
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
@@ -920,7 +946,9 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 
         for (MultireadSet::iterator r = multiread_set.begin();
              r != multiread_set.end(); ++r) {
-            for (AlignedReadIterator a(*r->second); a != AlignedReadIterator(); ++a) {
+            unsigned int alignment_num = 0;
+            for (AlignedReadIterator a(*r->second); a != AlignedReadIterator();
+                    ++a, ++alignment_num) {
                 float w = fragment_weight(*t, *a);
                 if (w > 0.0) {
                     double align_pr = 1.0;
@@ -933,24 +961,13 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
                     }
 
                     multiread_entries.push_back(
-                            MultireadEntry(r->first, t->id, w, align_pr));
+                            MultireadEntry(r->first, alignment_num, t->id, w, align_pr));
                 }
             }
         }
 
         for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
             float w = fragment_weight(*t, f->first);
-
-#if 0
-            if (t->transcript_id == "ENST00000535460" &&
-                f->first.mate1 && f->first.mate2 &&
-                (f->first.mate1->cigar_len >= 3 || f->first.mate2->cigar_len >= 3) &&
-                f->first.mate1->start > 125396670 &&
-                f->first.mate1->start < 125396700) {
-                Logger::info("here");
-            }
-#endif
-
             if (w > 0.0) {
                 weight_matrix.push(t->id, f->second.first, w);
             }
@@ -959,23 +976,26 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 
     /* Process multiread entries into weight matrix entries */
     std::sort(multiread_entries.begin(), multiread_entries.end());
-    for (std::vector<MultireadEntry>::iterator k, i = multiread_entries.begin();
+    for (std::vector<MultireadEntry>::iterator k, j, i = multiread_entries.begin();
             i != multiread_entries.end(); i = k) {
         k = i + 1;
-        std::vector<MultireadEntry>::iterator j;
         while (k != multiread_entries.end() &&
-                i->multiread_num == k->multiread_num) {
+               i->multiread_num == k->multiread_num &&
+               i->alignment_num == k->alignment_num) {
             ++k;
         }
 
         float sum_weight = 0.0;
+        float sum_align_pr = 0.0;
         for (j = i; j != k; ++j) {
             sum_weight += j->frag_weight;
+            sum_align_pr += j->align_pr;
         }
-        if (sum_weight == 0.0) continue;
+        if (sum_weight == 0.0 || sum_align_pr == 0.0) continue;
 
         unsigned int frag_idx = read_indexer.get();
-        multiread_frags.push_back(std::make_pair(i->multiread_num, frag_idx));
+        multiread_frags.push_back(MultireadFrag(
+                    i->multiread_num, frag_idx, sum_align_pr));
 
         /* Sum weight of alignments on the same transcript. */
         float w = 0.0;
@@ -1291,7 +1311,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     /* Update multiread fragment indexes */
     for (TSVec<MultireadFrag>::iterator i = multiread_frags.begin();
             i != multiread_frags.end(); ++i) {
-        i->second = idxmap[i->second];
+        i->frag_idx = idxmap[i->frag_idx];
     }
 
     delete [] idxmap;
@@ -1412,7 +1432,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     /* Update multiread fragment indexes. */
     for (TSVec<MultireadFrag>::iterator i = multiread_frags.begin();
             i != multiread_frags.end(); ++i) {
-        i->second = idxmap[i->second];
+        i->frag_idx = idxmap[i->frag_idx];
     }
     std::sort(multiread_frags.begin(), multiread_frags.end());
 
@@ -1421,11 +1441,10 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     for (unsigned int i = 0; i < multiread_frags.size(); ) {
         unsigned int j;
         for (j = i; j < multiread_frags.size(); ++j) {
-            if (multiread_frags[i].first != multiread_frags[j].first) break;
+            if (multiread_frags[i].multiread_num != multiread_frags[j].multiread_num) break;
         }
 
-        // XXX
-        if (j - i >= 1) {
+        if (j - i > 1) {
             ++num_multireads;
             num_alignments += j - i;
         }
@@ -1442,20 +1461,21 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     for (unsigned int i = 0; i < multiread_frags.size(); ) {
         unsigned int j;
         for (j = i; j < multiread_frags.size(); ++j) {
-            if (multiread_frags[i].first != multiread_frags[j].first) break;
+            if (multiread_frags[i].multiread_num != multiread_frags[j].multiread_num) break;
         }
 
-        // XXX
-        if (j - i >= 1) {
+        if (j - i > 1) {
             multiread_alignments[multiread_num] =
                 &multiread_alignment_pool[alignment_num];
             multiread_num_alignments[multiread_num] = j - i;
 
             for (; i < j; ++i) {
-                unsigned int c = ds[multiread_frags[i].second];
+                unsigned int c = ds[multiread_frags[i].frag_idx];
                 multiread_alignment_pool[alignment_num].component = c;
                 multiread_alignment_pool[alignment_num].frag =
-                    multiread_frags[i].second;
+                    multiread_frags[i].frag_idx;
+                multiread_alignment_pool[alignment_num].align_pr =
+                    multiread_frags[i].align_pr;
                 ++alignment_num;
             }
             ++multiread_num;
@@ -1803,8 +1823,6 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
 }
 
 
-static unsigned int interesting_tid;
-
 void MCMCThread::run_inter_transcript(unsigned int u, unsigned int v)
 {
     unsigned int c = S.transcript_component[u];
@@ -1861,10 +1879,7 @@ void MCMCThread::run_component(unsigned int u)
 {
     float prec = S.frag_count_sums[u] +
                  S.component_num_transcripts[u] * constants::tmix_prior_prec;
-    S.cmix[u] = prec;
-#if 0
     S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
-#endif
 }
 
 
@@ -1927,20 +1942,10 @@ class MultireadSamplerThread
                     for (unsigned int i = 0; i < k; ++i) {
                         unsigned int c = S.multiread_alignments[block.u][i].component;
                         unsigned int f = S.multiread_alignments[block.u][i].frag;
+                        float align_pr = S.multiread_alignments[block.u][i].align_pr;
                         S.frag_counts[c][f - S.component_frag[c]] = 0;
-                        sumprob += S.frag_probs[c][f - S.component_frag[c]] * S.cmix[c];
-                        sumprob += 1.0;
+                        sumprob += align_pr * S.cmix[c] * S.frag_probs[c][f - S.component_frag[c]];
                     }
-
-                    continue;
-
-#if 0
-                    // XXX Assign uniformly
-                    unsigned int i = gsl_rng_uniform_int(rng, k);
-                    unsigned int c = S.multiread_alignments[block.u][i].component;
-                    unsigned int f = S.multiread_alignments[block.u][i].frag;
-                    S.frag_counts[c][f - S.component_frag[c]] = 1;
-#endif
 
                     if (hillclimb) {
                         for (unsigned int i = 0; i < k; ++i) {
@@ -1956,11 +1961,13 @@ class MultireadSamplerThread
                         for (i = 0; i < k; ++i) {
                             unsigned int c = S.multiread_alignments[block.u][i].component;
                             unsigned int f = S.multiread_alignments[block.u][i].frag;
-                            if (r <= S.cmix[c] * S.frag_probs[c][f - S.component_frag[c]]) {
+                            float align_pr = S.multiread_alignments[block.u][i].align_pr;
+                            float p = align_pr * S.cmix[c] * S.frag_probs[c][f - S.component_frag[c]];
+                            if (r <= p) {
                                 break;
                             }
                             else {
-                                r -= S.cmix[c] * S.frag_probs[c][f - S.component_frag[c]];
+                                r -= p;
                             }
                         }
                         i = std::min(i, k - 1);
@@ -2064,64 +2071,6 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
     const char* task_name = "Sampling";
     Logger::push_task(task_name, num_samples + burnin_samples +
                                  constants::sampler_hillclimb_samples);
-
-        // XXX: Debugging
-        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-            if (t->transcript_id == "ENST00000535460" ||
-                t->transcript_id == "ENST00000339647") {
-                FILE* out = fopen(t->transcript_id.get().c_str(), "w");
-                for (size_t i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
-                    fprintf(out, "%e\n", weight_matrix->rows[t->id][i]);
-                }
-                fclose(out);
-            }
-        }
-
-
-        // XXX: Debugging
-        unsigned int interesting_frag = 0;
-        //unsigned int interesting_tid = 0;
-        unsigned int interesting_component = 0;
-        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-            if (t->transcript_id == "ENST00000535460") {
-                interesting_tid = t->id;
-                unsigned int c = transcript_component[t->id];
-                interesting_component = c;
-                unsigned int unique = 0;
-
-                for (unsigned int j = 0; j < weight_matrix->rowlens[t->id]; ++j) {
-                    // Count the number of fragments supported only by this
-                    // transcript.
-                    for (unsigned int i = 0; i < component_num_transcripts[c]; ++i) {
-                        unsigned int tid = component_transcripts[c][i];
-                        if (tid == t->id) continue;
-                        for (unsigned int k = 0; k < weight_matrix->rowlens[tid]; ++k)  {
-                            if (weight_matrix->idxs[tid][k] == weight_matrix->idxs[t->id][j]) {
-                                goto continue_outer_thing;
-                            }
-                        }
-                    }
-                    ++unique;
-                    interesting_frag = weight_matrix->idxs[t->id][j];
-                    Logger::info("interesting fragment weight: %e",
-                                 weight_matrix->rows[t->id][j]);
-continue_outer_thing:
-                    continue;
-                }
-
-
-                Logger::info("ENST00000535460 has %ld unique frags",
-                             unique);
-
-#if 0
-                Logger::info("ENST00000535460 %ld frags",
-                        (long) weight_matrix->rowlens[t->id]);
-                Logger::info("ENST00000535460 has %0.2f%% GC",
-                             100.0 * transcript_gc[t->id]);
-#endif
-                break;
-            }
-        }
 
 
     for (unsigned int sample_num = 0;

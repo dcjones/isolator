@@ -22,7 +22,7 @@ struct loess_struct {
         long    normalize;
         long    parametric[8];
         long    drop_square[8];
-        char    *family;
+        const char    *family;
     } model;
     struct {
         char    *surface;

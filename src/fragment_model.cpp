@@ -333,7 +333,6 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
         }
 
         if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
-        if (b->core.qual < constants::min_map_qual) continue;
 
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
