@@ -3,13 +3,61 @@
 #define ISOLATOR_SAMPLER_HPP
 
 #include "fragment_model.hpp"
+#include "queue.hpp"
 #include "sample_db.hpp"
 #include "sparse_mat.hpp"
 #include "transcripts.hpp"
+#include <vector>
 
 class WeightMatrix;
-class MCMCThread;
+class AbundanceSamplerThread;
 class MultireadSamplerThread;
+
+
+// Unit of work used in the abundance sampler.
+struct ComponentBlock
+{
+    ComponentBlock()
+        : u(INT_MAX)
+        , v(INT_MAX)
+    {
+    }
+
+    ComponentBlock(unsigned int u, unsigned int v)
+        : u(u) , v(v)
+    {
+    }
+
+    bool is_end_of_queue() const
+    {
+        return u == INT_MAX;
+    }
+
+    unsigned int u, v;
+};
+
+
+// Unit of work used in the multiread sampler.
+struct MultireadBlock
+{
+    MultireadBlock()
+        : u(INT_MAX)
+        , v(INT_MAX)
+    {
+    }
+
+    MultireadBlock(unsigned int u, unsigned int v)
+        : u(u), v(v)
+    {
+    }
+
+    bool is_end_of_queue() const
+    {
+        return u == INT_MAX;
+    }
+
+    unsigned int u, v;
+};
 
 
 /* This is the sampler, Isolator's warp-core, so to speak.
@@ -24,15 +72,32 @@ class Sampler
         void run(unsigned int num_samples, SampleDB& out, bool run_gc_correction);
 
     private:
+        // Run a single multiread sampler round.
+        void sample_multireads();
+
+        // Run a single tmix/cmix round.
+        void sample_abundance();
+
         /* Compute all the entries in frag_probs, given the current value of
          * tmix. */
         void init_frag_probs();
+
+        // Zero the count of each multiread alignment
+        void init_multireads();
 
         /* Perform post-hoc adjustment for transcript GC-content. */
         void gc_correction(float* xs, size_t num_samples);
 
         TranscriptSet& ts;
         FragmentModel& fm;
+
+        // Multiread sampling
+        std::vector<MultireadSamplerThread*> multiread_threads;
+        Queue<MultireadBlock> multiread_queue;
+
+        // Abundance sampling
+        std::vector<AbundanceSamplerThread*> abundance_threads;
+        Queue<ComponentBlock> component_queue;
 
         /* Transcript mixture coefficients. */
         double* tmix;
@@ -101,7 +166,7 @@ class Sampler
         float** samples;
 
         friend class InferenceThread;
-        friend class MCMCThread;
+        friend class AbundanceSamplerThread;
         friend class MultireadSamplerThread;
 };
 

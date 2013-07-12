@@ -1067,31 +1067,6 @@ void SamplerInitThread::transcript_sequence_bias(
         }
         std::reverse(seqbias[0].begin(), seqbias[0].begin() + tlen);
     }
-
-
-#if 0
-    for (pos_t pos = 0; pos < tlen; ++pos) {
-        seqbias[0][pos] = std::max<float>(1e-2, std::min<float>(1e2, seqbias[0][pos]));
-        seqbias[1][pos] = std::max<float>(1e-2, std::min<float>(1e2, seqbias[1][pos]));
-    }
-#endif
-
-
-    // TODO: magic number
-    // Flatten bias predictions at the ends of the transcript, since we would otherwise
-    // be basing the prediction off sequence that lies outside the transcript.
-#if 0
-    if (tlen < 20) return;
-
-    for (pos_t pos = 0; pos < 20; ++pos) {
-        seqbias[0][pos] = 1.0;
-        seqbias[1][pos] = 1.0;
-    }
-    for (pos_t pos = tlen - 20; pos < tlen; ++pos) {
-        seqbias[0][pos] = 1.0;
-        seqbias[1][pos] = 1.0;
-    }
-#endif
 }
 
 
@@ -1245,6 +1220,419 @@ struct ComponentCmp
     }
 
     unsigned int* ds;
+};
+
+
+
+/* The interface that MaxPostThread and MCMCThread implement. */
+class AbundanceSamplerThread
+{
+    public:
+        AbundanceSamplerThread(Sampler& S,
+                        Queue<ComponentBlock>& q)
+            : S(S)
+            , q(q)
+            , hillclimb(false)
+            , thread(NULL)
+        {
+            rng = gsl_rng_alloc(gsl_rng_mt19937);
+            unsigned long seed = reinterpret_cast<unsigned long>(this) *
+                                 (unsigned long) time(NULL);
+            gsl_rng_set(rng, seed);
+        }
+
+        ~AbundanceSamplerThread()
+        {
+            gsl_rng_free(rng);
+            if (thread) delete thread;
+        }
+
+        // Sample relative expression of two transcripts u and v.
+        void run_inter_transcript(unsigned int u, unsigned int v);
+
+        // Sample expression of component u
+        void run_component(unsigned int u);
+
+        // Sample transcript mixtures within component c
+        void run_intra_component(unsigned int c);
+
+        void run()
+        {
+            ComponentBlock block;
+            while (true) {
+                block = q.pop();
+                if (block.is_end_of_queue()) break;
+
+                for (unsigned int c = block.u; c < block.v; ++c) {
+                    run_intra_component(c);
+                    run_component(c);
+                }
+            }
+        }
+
+        void start()
+        {
+            if (thread != NULL) return;
+            thread = new boost::thread(boost::bind(&AbundanceSamplerThread::run, this));
+        }
+
+        void join()
+        {
+            thread->join();
+            delete thread;
+            thread = NULL;
+        }
+
+
+    private:
+        float recompute_component_probability(unsigned int u, unsigned int v,
+                                              float tmixu, float tmixv,
+                                              unsigned int f0, unsigned int f1,
+                                              float pf01, float p0, float *d);
+
+        float transcript_slice_sample_search(float slice_height,
+                                             unsigned int u, unsigned int v,
+                                             float z0, float p0, bool left);
+
+        gsl_rng* rng;
+        Sampler& S;
+        Queue<ComponentBlock>& q;
+        bool hillclimb;
+        boost::thread* thread;
+};
+
+
+float AbundanceSamplerThread::recompute_component_probability(
+                                                  unsigned int u, unsigned int v,
+                                                  float tmixu, float tmixv,
+                                                  unsigned int f0, unsigned int f1,
+                                                  float pf01, float p0, float* d)
+{
+    unsigned int c = S.transcript_component[u];
+    assert(c == S.transcript_component[v]);
+
+    acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0, (f1 - f0) * sizeof(float));
+
+    asxpy(S.frag_probs_prop[c],
+          S.weight_matrix->rows[u],
+          tmixu - S.tmix[u],
+          S.weight_matrix->idxs[u],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[u]);
+
+    asxpy(S.frag_probs_prop[c],
+          S.weight_matrix->rows[v],
+          tmixv - S.tmix[v],
+          S.weight_matrix->idxs[v],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[v]);
+
+    *d = 0.0;
+    *d += asxtydsz(S.frag_counts[c], S.weight_matrix->rows[u], S.frag_probs_prop[c],
+                   S.weight_matrix->idxs[u], S.component_frag[c],
+                   S.weight_matrix->rowlens[u]);
+
+    *d -= asxtydsz(S.frag_counts[c], S.weight_matrix->rows[v], S.frag_probs_prop[c],
+                   S.weight_matrix->idxs[v], S.component_frag[c],
+                   S.weight_matrix->rowlens[v]);
+
+
+    *d *= tmixu + tmixv;
+    *d /= M_LN2;
+
+    return p0 - pf01 + dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0);
+}
+
+
+/* An experimental implementation using newton's method. */
+float AbundanceSamplerThread::transcript_slice_sample_search(
+                                                 float slice_height,
+                                                 unsigned int u, unsigned int v,
+                                                 float z0, float p0, bool left)
+{
+    static const float peps = 1e-2f;
+    static const float zeps = 1e-6f;
+    static const float deps = 1e-8f;
+
+    if (fabs(p0 - slice_height) <= peps) return z0;
+
+    /* Find the range of fragment indexes that are affected by updating the u/v
+     * mixture, so we can recompute as little as possible. */
+    unsigned int comp = S.transcript_component[u];
+    unsigned int f0 = S.component_frag[comp+1];
+    unsigned int f1 = S.component_frag[comp];
+    if (S.weight_matrix->rowlens[u] > 0) {
+        f0 = S.weight_matrix->idxs[u][0];
+        f1 = 1 + S.weight_matrix->idxs[u][S.weight_matrix->rowlens[u] - 1];
+    }
+
+    if (S.weight_matrix->rowlens[v] > 0) {
+        f0 = std::min(f0, S.weight_matrix->idxs[v][0]);
+        f1 = std::max(f1,  1 + S.weight_matrix->idxs[v][S.weight_matrix->rowlens[v] - 1]);
+    }
+
+    if (f0 > f1) f0 = f1 = S.component_frag[comp];
+    f0 -= S.component_frag[comp];
+    f1 -= S.component_frag[comp];
+
+    /* Round f0 down to the nearst 32-byte boundry so we can use avx/sse. */
+    f0 &= 0xfffffff8;
+
+    /* Current probability over [f0, f1). */
+    float pf01 = dotlog(S.frag_counts[comp] + f0, S.frag_probs[comp] + f0, f1 - f0);
+
+    const float tmixuv = S.tmix[u] + S.tmix[v];
+
+    /* current estimate */
+    float z = left ? constants::zero_eps : 1.0f - constants::zero_eps;
+
+    /* log probability minus slice height */
+    float p;
+
+    /* derivative */
+    float d;
+
+    z = z0;
+    p = recompute_component_probability(
+            u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
+    p -= slice_height;
+
+    /* upper or lower bound on z (depending on 'left') */
+    float z_bound = z0;
+
+    unsigned int iter = 0;
+    while (fabs(p) > peps && fabs(p/d) > deps) {
+        float z1 = z - p / d;
+
+        // Handle the case when the zero is out of bounds.
+        if (left && z <= zeps && (z1 < z || p > 0.0)) break;
+        if (!left && z >= 1.0 - zeps && (z1 > z || p > 0.0)) break;
+
+        if (p > 0) z_bound = z;
+
+        // Try to void converging to the wrong zero, use bisection when newton
+        // tells us to go too far.
+        if (left) {
+            if (z1 > z0) {
+                if (p > 0) {
+                    z /= 2.0;
+                }
+                else {
+                    z = (z + z_bound) / 2.0;
+                }
+            }
+            else if (z1 < 0.0) {
+                z /= 2.0;
+            }
+            else z = z1;
+        }
+        else {
+            if (z1 < z0) {
+                if (p > 0) {
+                    z = (z + 1.0) / 2.0;
+                }
+                else {
+                    z = (z + z_bound) / 2.0;
+                }
+            }
+            else if (z1 > 1.0) {
+                z = (z + 1.0) / 2.0;
+            }
+            else z = z1;
+        }
+
+        p = recompute_component_probability(
+                u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
+        p -= slice_height;
+
+        if (++iter > constants::max_newton_iter) break;
+    }
+
+    return z;
+}
+
+
+void AbundanceSamplerThread::run_intra_component(unsigned int c)
+{
+    if (S.component_num_transcripts[c] <= 1) return;
+
+    acopy(S.frag_probs_prop[c], S.frag_probs[c],
+          (S.component_frag[c + 1] - S.component_frag[c]) * sizeof(float));
+
+    // TODO: constant
+    for (unsigned int i = 0; i < std::min<size_t>(5, S.component_num_transcripts[c]); ++i) {
+        double r = gsl_rng_uniform(rng);
+        unsigned int u = 0;
+        while (u < S.component_num_transcripts[c] - 1 &&
+               r > S.tmix[S.component_transcripts[c][u]]) {
+            r -= S.tmix[S.component_transcripts[c][u]];
+            ++u;
+        }
+
+        unsigned int v =
+            gsl_rng_uniform_int(rng, S.component_num_transcripts[c] - 1);
+        if (v >= u) ++v;
+
+        run_inter_transcript(S.component_transcripts[c][u],
+                             S.component_transcripts[c][v]);
+    }
+}
+
+
+void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v)
+{
+    unsigned int c = S.transcript_component[u];
+    assert(c == S.transcript_component[v]);
+
+    if (S.cmix[c] < constants::zero_eps) return;
+
+    unsigned int component_size = S.component_frag[c + 1] - S.component_frag[c];
+
+    double p0 = dotlog(S.frag_counts[c], S.frag_probs[c], component_size);
+    float slice_height = hillclimb ? p0 : p0 + fastlog2(gsl_rng_uniform(rng));
+    float z0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
+
+    float z, s0, s1;
+    if (finite(slice_height)) {
+        s0 = transcript_slice_sample_search(slice_height, u, v, z0, p0, true);
+        s1 = transcript_slice_sample_search(slice_height, u, v, z0, p0, false);
+        if (s1 - s0 < constants::zero_eps || s0 > z0 || s1 < z0) {
+            return;
+        }
+        float r = gsl_rng_uniform(rng);
+        z = s0 + r * s1 - r * s0;
+    }
+    else {
+        z = gsl_rng_uniform(rng);
+    }
+
+    /* proposed tmix[u], tmix[v] values */
+    float tmixu = z * (S.tmix[u] + S.tmix[v]);
+    float tmixv = (1.0 - z) * (S.tmix[u] + S.tmix[v]);
+    float tmix_delta_u = tmixu - S.tmix[u];
+    float tmix_delta_v = tmixv - S.tmix[v];
+
+    asxpy(S.frag_probs[c],
+          S.weight_matrix->rows[u],
+          tmix_delta_u,
+          S.weight_matrix->idxs[u],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[u]);
+
+    asxpy(S.frag_probs[c],
+          S.weight_matrix->rows[v],
+          tmix_delta_v,
+          S.weight_matrix->idxs[v],
+          S.component_frag[c],
+          S.weight_matrix->rowlens[v]);
+
+    S.tmix[u] = tmixu;
+    S.tmix[v] = tmixv;
+}
+
+
+void AbundanceSamplerThread::run_component(unsigned int u)
+{
+    float prec = S.frag_count_sums[u] +
+                 S.component_num_transcripts[u] * constants::tmix_prior_prec;
+    S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
+}
+
+
+class MultireadSamplerThread
+{
+    public:
+        MultireadSamplerThread(Sampler& S,
+                               Queue<MultireadBlock>& q)
+            : hillclimb(false)
+            , S(S)
+            , q(q)
+            , thread(NULL)
+        {
+            rng = gsl_rng_alloc(gsl_rng_mt19937);
+            unsigned long seed = reinterpret_cast<unsigned long>(this) *
+                                 (unsigned long) time(NULL);
+            gsl_rng_set(rng, seed);
+        }
+
+        ~MultireadSamplerThread()
+        {
+            gsl_rng_free(rng);
+            if (thread) delete thread;
+        }
+
+        void run()
+        {
+            MultireadBlock block;
+            while (true) {
+                block = q.pop();
+                if (block.is_end_of_queue()) break;
+                for (; block.u < block.v; ++block.u) {
+                    float sumprob = 0.0;
+                    unsigned int k = S.multiread_num_alignments[block.u];
+
+                    for (unsigned int i = 0; i < k; ++i) {
+                        unsigned int c = S.multiread_alignments[block.u][i].component;
+                        unsigned int f = S.multiread_alignments[block.u][i].frag;
+                        float align_pr = S.multiread_alignments[block.u][i].align_pr;
+                        S.frag_counts[c][f - S.component_frag[c]] = 0;
+                        sumprob += align_pr * S.cmix[c] * S.frag_probs[c][f - S.component_frag[c]];
+                    }
+
+                    if (hillclimb) {
+                        for (unsigned int i = 0; i < k; ++i) {
+                            unsigned int c = S.multiread_alignments[block.u][i].component;
+                            unsigned int f = S.multiread_alignments[block.u][i].frag;
+                            S.frag_counts[c][f - S.component_frag[c]] =
+                                (S.cmix[c] * S.frag_probs[c][f - S.component_frag[c]]) / sumprob;
+                        }
+                    }
+                    else {
+                        float r = sumprob * gsl_rng_uniform(rng);
+                        unsigned int i;
+                        for (i = 0; i < k; ++i) {
+                            unsigned int c = S.multiread_alignments[block.u][i].component;
+                            unsigned int f = S.multiread_alignments[block.u][i].frag;
+                            float align_pr = S.multiread_alignments[block.u][i].align_pr;
+                            float p = align_pr * S.cmix[c] * S.frag_probs[c][f - S.component_frag[c]];
+                            if (r <= p) {
+                                break;
+                            }
+                            else {
+                                r -= p;
+                            }
+                        }
+                        i = std::min(i, k - 1);
+
+                        unsigned int c = S.multiread_alignments[block.u][i].component;
+                        unsigned int f = S.multiread_alignments[block.u][i].frag;
+                        S.frag_counts[c][f - S.component_frag[c]] = 1;
+                    }
+                }
+            }
+        }
+
+        void start()
+        {
+            if (thread != NULL) return;
+            thread = new boost::thread(boost::bind(&MultireadSamplerThread::run, this));
+        }
+
+        void join()
+        {
+            thread->join();
+            delete thread;
+            thread = NULL;
+        }
+
+        /* When true, optimize probability rather than sample. */
+        bool hillclimb;
+
+    private:
+        Sampler& S;
+        Queue<MultireadBlock>& q;
+        boost::thread* thread;
+        gsl_rng* rng;
 };
 
 
@@ -1490,6 +1878,12 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     frag_count_sums = new float [num_components];
     tmix = new double [weight_matrix->nrow];
     cmix = new double [num_components];
+
+    // Allocate sample threads
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        multiread_threads.push_back(new MultireadSamplerThread(*this, multiread_queue));
+        abundance_threads.push_back(new AbundanceSamplerThread(*this, component_queue));
+    }
 }
 
 
@@ -1515,495 +1909,17 @@ Sampler::~Sampler()
     delete weight_matrix;
     delete [] transcript_weights;
     delete [] transcript_gc;
+
+    for (std::vector<MultireadSamplerThread*>::iterator i = multiread_threads.begin();
+         i != multiread_threads.end(); ++i) {
+        delete *i;
+    }
+
+    for (std::vector<AbundanceSamplerThread*>::iterator i = abundance_threads.begin();
+         i != abundance_threads.end(); ++i) {
+        delete *i;
+    }
 }
-
-
-struct ComponentSubset
-{
-    ComponentSubset()
-        : cs(NULL)
-        , len(0)
-    {
-    }
-
-    ComponentSubset(unsigned int* cs, unsigned int len)
-        : cs(cs)
-        , len(len)
-    {
-    }
-
-    /* A sequence of components */
-    unsigned int* cs;
-
-    /* Number of components in the sequence */
-    unsigned int len;
-
-    /* Is this a special value marking the end of the queue. */
-    bool is_end_of_queue() const
-    {
-        return len == 0;
-    }
-};
-
-
-
-/* The interface that MaxPostThread and MCMCThread implement. */
-class InferenceThread
-{
-    public:
-        InferenceThread(Sampler& S,
-                       Queue<ComponentSubset>& q)
-            : S(S)
-            , q(q)
-            , thread(NULL)
-        {
-            rng = gsl_rng_alloc(gsl_rng_mt19937);
-            unsigned long seed = reinterpret_cast<unsigned long>(this) *
-                                 (unsigned long) time(NULL);
-            gsl_rng_set(rng, seed);
-        }
-
-        ~InferenceThread()
-        {
-            gsl_rng_free(rng);
-            if (thread) delete thread;
-        }
-
-        /* Inference of relative expression of two transcripts a and b.. */
-        virtual void run_inter_transcript(unsigned int u, unsigned int v) = 0;
-
-        /* Inference relative expression of two components a and b. */
-        virtual void run_component(unsigned int u) = 0;
-
-        void run_intra_component(unsigned int c)
-        {
-            if (S.component_num_transcripts[c] <= 1) return;
-
-            acopy(S.frag_probs_prop[c], S.frag_probs[c],
-                  (S.component_frag[c + 1] - S.component_frag[c]) * sizeof(float));
-
-            //for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
-            for (unsigned int i = 0; i < std::min<size_t>(5, S.component_num_transcripts[c]); ++i) {
-                double r = gsl_rng_uniform(rng);
-                unsigned int u = 0;
-                while (u < S.component_num_transcripts[c] - 1 &&
-                       r > S.tmix[S.component_transcripts[c][u]]) {
-                    r -= S.tmix[S.component_transcripts[c][u]];
-                    ++u;
-                }
-
-                unsigned int v =
-                    gsl_rng_uniform_int(rng, S.component_num_transcripts[c] - 1);
-                if (v >= u) ++v;
-
-                run_inter_transcript(S.component_transcripts[c][u],
-                                     S.component_transcripts[c][v]);
-            }
-        }
-
-        void run()
-        {
-            ComponentSubset s;
-            while (true) {
-                s = q.pop();
-                if (s.is_end_of_queue()) break;
-
-                for (unsigned int i = 0; i < s.len; ++i) {
-                    run_intra_component(s.cs[i]);
-                }
-
-                for (unsigned int i = 0; i < s.len; ++i) {
-                    run_component(s.cs[i]);
-                }
-            }
-        }
-
-        void start()
-        {
-            if (thread != NULL) return;
-            thread = new boost::thread(boost::bind(&InferenceThread::run, this));
-        }
-
-        void join()
-        {
-            thread->join();
-            delete thread;
-            thread = NULL;
-        }
-
-
-    protected:
-        gsl_rng* rng;
-        Sampler& S;
-
-    private:
-        Queue<ComponentSubset>& q;
-        boost::thread* thread;
-};
-
-
-class MCMCThread : public InferenceThread
-{
-    public:
-        MCMCThread(Sampler& S,
-                   Queue<ComponentSubset>& q)
-            : InferenceThread(S, q)
-            , hillclimb(false)
-        {
-        }
-
-        void run_inter_transcript(unsigned int u, unsigned int v);
-        void run_component(unsigned int u);
-
-        /* When true, perform stochastic hill-climbing rather than MCMC. */
-        bool hillclimb;
-
-    private:
-        float recompute_component_probability(unsigned int u, unsigned int v,
-                                              float tmixu, float tmixv,
-                                              unsigned int f0, unsigned int f1,
-                                              float pf01, float p0, float *d);
-
-        //float recompute_component_probability(unsigned int u, unsigned int v,
-                                              //float tmixu, float tmixv,
-                                              //unsigned int f0, unsigned int f1,
-                                              //float pf01, float p0);
-
-        float transcript_slice_sample_search(float slice_height,
-                                             unsigned int u, unsigned int v,
-                                             float z0, float p0, bool left);
-};
-
-
-float MCMCThread::recompute_component_probability(unsigned int u, unsigned int v,
-                                                  float tmixu, float tmixv,
-                                                  unsigned int f0, unsigned int f1,
-                                                  float pf01, float p0, float* d)
-{
-    unsigned int c = S.transcript_component[u];
-    assert(c == S.transcript_component[v]);
-
-    acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0, (f1 - f0) * sizeof(float));
-
-    asxpy(S.frag_probs_prop[c],
-          S.weight_matrix->rows[u],
-          tmixu - S.tmix[u],
-          S.weight_matrix->idxs[u],
-          S.component_frag[c],
-          S.weight_matrix->rowlens[u]);
-
-    asxpy(S.frag_probs_prop[c],
-          S.weight_matrix->rows[v],
-          tmixv - S.tmix[v],
-          S.weight_matrix->idxs[v],
-          S.component_frag[c],
-          S.weight_matrix->rowlens[v]);
-
-    *d = 0.0;
-    *d += asxtydsz(S.frag_counts[c], S.weight_matrix->rows[u], S.frag_probs_prop[c],
-                   S.weight_matrix->idxs[u], S.component_frag[c],
-                   S.weight_matrix->rowlens[u]);
-
-    *d -= asxtydsz(S.frag_counts[c], S.weight_matrix->rows[v], S.frag_probs_prop[c],
-                   S.weight_matrix->idxs[v], S.component_frag[c],
-                   S.weight_matrix->rowlens[v]);
-
-
-    *d *= tmixu + tmixv;
-    *d /= M_LN2;
-
-    return p0 - pf01 + dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0);
-}
-
-
-/* An experimental implementation using newton's method. */
-float MCMCThread::transcript_slice_sample_search(float slice_height,
-                                                 unsigned int u, unsigned int v,
-                                                 float z0, float p0, bool left)
-{
-    static const float peps = 1e-2f;
-    static const float zeps = 1e-6f;
-    static const float deps = 1e-8f;
-
-    if (fabs(p0 - slice_height) <= peps) return z0;
-
-    /* Find the range of fragment indexes that are affected by updating the u/v
-     * mixture, so we can recompute as little as possible. */
-    unsigned int comp = S.transcript_component[u];
-    unsigned int f0 = S.component_frag[comp+1];
-    unsigned int f1 = S.component_frag[comp];
-    if (S.weight_matrix->rowlens[u] > 0) {
-        f0 = S.weight_matrix->idxs[u][0];
-        f1 = 1 + S.weight_matrix->idxs[u][S.weight_matrix->rowlens[u] - 1];
-    }
-
-    if (S.weight_matrix->rowlens[v] > 0) {
-        f0 = std::min(f0, S.weight_matrix->idxs[v][0]);
-        f1 = std::max(f1,  1 + S.weight_matrix->idxs[v][S.weight_matrix->rowlens[v] - 1]);
-    }
-
-    if (f0 > f1) f0 = f1 = S.component_frag[comp];
-    f0 -= S.component_frag[comp];
-    f1 -= S.component_frag[comp];
-
-    /* Round f0 down to the nearst 32-byte boundry so we can use avx/sse. */
-    f0 &= 0xfffffff8;
-
-    /* Current probability over [f0, f1). */
-    float pf01 = dotlog(S.frag_counts[comp] + f0, S.frag_probs[comp] + f0, f1 - f0);
-
-    const float tmixuv = S.tmix[u] + S.tmix[v];
-
-    /* current estimate */
-    float z = left ? constants::zero_eps : 1.0f - constants::zero_eps;
-
-    /* log probability minus slice height */
-    float p;
-
-    /* derivative */
-    float d;
-
-    z = z0;
-    p = recompute_component_probability(
-            u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
-    p -= slice_height;
-
-    /* upper or lower bound on z (depending on 'left') */
-    float z_bound = z0;
-
-    unsigned int iter = 0;
-    while (fabs(p) > peps && fabs(p/d) > deps) {
-        float z1 = z - p / d;
-
-        // Handle the case when the zero is out of bounds.
-        if (left && z <= zeps && (z1 < z || p > 0.0)) break;
-        if (!left && z >= 1.0 - zeps && (z1 > z || p > 0.0)) break;
-
-        if (p > 0) z_bound = z;
-
-        // Try to void converging to the wrong zero, use bisection when newton
-        // tells us to go too far.
-        if (left) {
-            if (z1 > z0) {
-                if (p > 0) {
-                    z /= 2.0;
-                }
-                else {
-                    z = (z + z_bound) / 2.0;
-                }
-            }
-            else if (z1 < 0.0) {
-                z /= 2.0;
-            }
-            else z = z1;
-        }
-        else {
-            if (z1 < z0) {
-                if (p > 0) {
-                    z = (z + 1.0) / 2.0;
-                }
-                else {
-                    z = (z + z_bound) / 2.0;
-                }
-            }
-            else if (z1 > 1.0) {
-                z = (z + 1.0) / 2.0;
-            }
-            else z = z1;
-        }
-
-        p = recompute_component_probability(
-                u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
-        p -= slice_height;
-
-        if (++iter > constants::max_newton_iter) break;
-    }
-
-    return z;
-}
-
-
-void MCMCThread::run_inter_transcript(unsigned int u, unsigned int v)
-{
-    unsigned int c = S.transcript_component[u];
-    assert(c == S.transcript_component[v]);
-
-    if (S.cmix[c] < constants::zero_eps) return;
-
-    unsigned int component_size = S.component_frag[c + 1] - S.component_frag[c];
-
-    double p0 = dotlog(S.frag_counts[c], S.frag_probs[c], component_size);
-    float slice_height = hillclimb ? p0 : p0 + fastlog2(gsl_rng_uniform(rng));
-    float z0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
-
-    float z, s0, s1;
-    if (finite(slice_height)) {
-        s0 = transcript_slice_sample_search(slice_height, u, v, z0, p0, true);
-        s1 = transcript_slice_sample_search(slice_height, u, v, z0, p0, false);
-        if (s1 - s0 < constants::zero_eps || s0 > z0 || s1 < z0) {
-            return;
-        }
-        float r = gsl_rng_uniform(rng);
-        z = s0 + r * s1 - r * s0;
-    }
-    else {
-        z = gsl_rng_uniform(rng);
-    }
-
-    /* proposed tmix[u], tmix[v] values */
-    float tmixu = z * (S.tmix[u] + S.tmix[v]);
-    float tmixv = (1.0 - z) * (S.tmix[u] + S.tmix[v]);
-    float tmix_delta_u = tmixu - S.tmix[u];
-    float tmix_delta_v = tmixv - S.tmix[v];
-
-    asxpy(S.frag_probs[c],
-          S.weight_matrix->rows[u],
-          tmix_delta_u,
-          S.weight_matrix->idxs[u],
-          S.component_frag[c],
-          S.weight_matrix->rowlens[u]);
-
-    asxpy(S.frag_probs[c],
-          S.weight_matrix->rows[v],
-          tmix_delta_v,
-          S.weight_matrix->idxs[v],
-          S.component_frag[c],
-          S.weight_matrix->rowlens[v]);
-
-    S.tmix[u] = tmixu;
-    S.tmix[v] = tmixv;
-}
-
-
-void MCMCThread::run_component(unsigned int u)
-{
-    float prec = S.frag_count_sums[u] +
-                 S.component_num_transcripts[u] * constants::tmix_prior_prec;
-    S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
-}
-
-
-/* Two numbers given a range of multireads, representing a chunk of work for the
- * sampler. */
-struct MultireadBlock
-{
-    MultireadBlock()
-        : u(INT_MAX)
-        , v(INT_MAX)
-    {
-    }
-
-    MultireadBlock(unsigned int u, unsigned int v)
-        : u(u), v(v)
-    {
-    }
-
-    unsigned int u, v;
-
-    bool is_end_of_queue() const
-    {
-        return u == INT_MAX;
-    }
-};
-
-
-class MultireadSamplerThread
-{
-    public:
-        MultireadSamplerThread(Sampler& S,
-                               Queue<MultireadBlock>& q)
-            : hillclimb(false)
-            , S(S)
-            , q(q)
-            , thread(NULL)
-        {
-            rng = gsl_rng_alloc(gsl_rng_mt19937);
-            unsigned long seed = reinterpret_cast<unsigned long>(this) *
-                                 (unsigned long) time(NULL);
-            gsl_rng_set(rng, seed);
-        }
-
-        ~MultireadSamplerThread()
-        {
-            gsl_rng_free(rng);
-            if (thread) delete thread;
-        }
-
-        void run()
-        {
-            MultireadBlock block;
-            while (true) {
-                block = q.pop();
-                if (block.is_end_of_queue()) break;
-                for (; block.u < block.v; ++block.u) {
-                    float sumprob = 0.0;
-                    unsigned int k = S.multiread_num_alignments[block.u];
-
-                    for (unsigned int i = 0; i < k; ++i) {
-                        unsigned int c = S.multiread_alignments[block.u][i].component;
-                        unsigned int f = S.multiread_alignments[block.u][i].frag;
-                        float align_pr = S.multiread_alignments[block.u][i].align_pr;
-                        S.frag_counts[c][f - S.component_frag[c]] = 0;
-                        sumprob += align_pr * S.cmix[c] * S.frag_probs[c][f - S.component_frag[c]];
-                    }
-
-                    if (hillclimb) {
-                        for (unsigned int i = 0; i < k; ++i) {
-                            unsigned int c = S.multiread_alignments[block.u][i].component;
-                            unsigned int f = S.multiread_alignments[block.u][i].frag;
-                            S.frag_counts[c][f - S.component_frag[c]] =
-                                (S.cmix[c] * S.frag_probs[c][f - S.component_frag[c]]) / sumprob;
-                        }
-                    }
-                    else {
-                        float r = sumprob * gsl_rng_uniform(rng);
-                        unsigned int i;
-                        for (i = 0; i < k; ++i) {
-                            unsigned int c = S.multiread_alignments[block.u][i].component;
-                            unsigned int f = S.multiread_alignments[block.u][i].frag;
-                            float align_pr = S.multiread_alignments[block.u][i].align_pr;
-                            float p = align_pr * S.cmix[c] * S.frag_probs[c][f - S.component_frag[c]];
-                            if (r <= p) {
-                                break;
-                            }
-                            else {
-                                r -= p;
-                            }
-                        }
-                        i = std::min(i, k - 1);
-
-                        unsigned int c = S.multiread_alignments[block.u][i].component;
-                        unsigned int f = S.multiread_alignments[block.u][i].frag;
-                        S.frag_counts[c][f - S.component_frag[c]] = 1;
-                    }
-                }
-            }
-        }
-
-        void start()
-        {
-            if (thread != NULL) return;
-            thread = new boost::thread(boost::bind(&MultireadSamplerThread::run, this));
-        }
-
-        void join()
-        {
-            thread->join();
-            delete thread;
-            thread = NULL;
-        }
-
-        /* When true, optimize probability rather than sample. */
-        bool hillclimb;
-
-    private:
-        Sampler& S;
-        Queue<MultireadBlock>& q;
-        boost::thread* thread;
-        gsl_rng* rng;
-};
-
-
 void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correction)
 {
     /* Initial mixtures */
@@ -2031,239 +1947,51 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
     }
 
     std::fill(cmix, cmix + num_components, 1.0 / (float) num_components);
+    init_multireads();
     init_frag_probs();
 
-    float* maxpost_tmix = new float [weight_matrix->nrow];
-    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-        maxpost_tmix[i] = tmix[i] * cmix[transcript_component[i]];
+    const char* task_name = "Sampling";
+    Logger::push_task(task_name, num_samples + constants::sampler_burnin_samples);
+
+    // burnin
+    for (unsigned int sample_num = 0;
+         sample_num < constants::sampler_burnin_samples; ++sample_num) {
+        // don't start trying to assign multireads until we've drawn a few
+        // samples without them
+        if (sample_num > constants::sampler_burnin_samples / 2) {
+            sample_multireads();
+        }
+        sample_abundance();
+        Logger::get_task(task_name).inc();
     }
 
+    // sample
     samples = new float * [weight_matrix->nrow];
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         samples[i] = new float [num_samples];
     }
 
-    gsl_rng* rng = gsl_rng_alloc(gsl_rng_mt19937);
-    unsigned long seed = reinterpret_cast<unsigned long>(this) *
-                         (unsigned long) time(NULL);
-    gsl_rng_set(rng, seed);
+    for (unsigned int sample_num = 0; sample_num < num_samples; ++sample_num) {
+        sample_multireads();
+        sample_abundance();
 
-    Queue<ComponentSubset> component_queue;
-    std::vector<MCMCThread*> mcmc_threads(constants::num_threads);
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        mcmc_threads[i] = new MCMCThread(*this, component_queue);
-        mcmc_threads[i]->hillclimb = false;
-    }
-
-    Queue<MultireadBlock> multiread_queue;
-    std::vector<MultireadSamplerThread*> multiread_threads(constants::num_threads);
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        multiread_threads[i] = new MultireadSamplerThread(*this, multiread_queue);
-        multiread_threads[i]->hillclimb = false;
-    }
-
-    unsigned int* cs = new unsigned int [num_components];
-    for (unsigned int c = 0; c < num_components; ++c) cs[c] = c;
-
-
-    unsigned int burnin_samples = constants::sampler_burnin_samples;
-
-    const char* task_name = "Sampling";
-    Logger::push_task(task_name, num_samples + burnin_samples +
-                                 constants::sampler_hillclimb_samples);
-
-
-    for (unsigned int sample_num = 0;
-            sample_num < num_samples + constants::sampler_hillclimb_samples; ) {
-
-        /* Sample multiread alignments */
-        for (size_t i = 0; i < constants::num_threads; ++i) {
-            multiread_threads[i]->start();
+        double total_weight = 0.0;
+        for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+            samples[i][sample_num] =
+                tmix[i] * cmix[transcript_component[i]] / transcript_weights[i];
+            total_weight += samples[i][sample_num];
         }
 
-        unsigned int r;
-        for (r = 0; r + constants::sampler_multiread_block_size < num_multireads;
-                r += constants::sampler_multiread_block_size) {
-            multiread_queue.push(MultireadBlock(
-                        r, r + constants::sampler_multiread_block_size));
-        }
-        if (r < num_multireads) {
-            multiread_queue.push(MultireadBlock(r, num_multireads));
-        }
-
-        for (size_t i = 0; i < constants::num_threads; ++i) {
-            multiread_queue.push(MultireadBlock());
-        }
-
-        for (size_t i = 0; i < constants::num_threads; ++i) {
-            multiread_threads[i]->join();
-        }
-
-        /* Recompute total fragments in each component */
-        std::fill(frag_count_sums, frag_count_sums + num_components, 0.0f);
-        for (size_t i = 0; i < num_components; ++i) {
-            unsigned int component_size = component_frag[i + 1] - component_frag[i];
-            for (unsigned int j = 0; j < component_size; ++j) {
-                frag_count_sums[i] += frag_counts[i][j];
-            }
-        }
-
-        /* Sample transcript abundance. */
-        gsl_ran_shuffle(rng, cs, num_components, sizeof(unsigned int));
-        for (size_t i = 0; i < constants::num_threads; ++i) {
-            mcmc_threads[i]->start();
-        }
-
-        unsigned int c;
-        for (c = 0; c + constants::sampler_component_block_size < num_components;
-                c += constants::sampler_component_block_size)
-        {
-            component_queue.push(ComponentSubset(
-                        cs + c, constants::sampler_component_block_size));
-        }
-        if (c < num_components) {
-            component_queue.push(ComponentSubset(cs + c, num_components - c));
-        }
-
-        /* Mark the end. */
-        for (size_t i = 0; i < constants::num_threads; ++i) {
-            component_queue.push(ComponentSubset());
-        }
-
-        for (size_t i = 0; i < constants::num_threads; ++i) {
-            mcmc_threads[i]->join();
-        }
-
-        /* normalize cmix */
-        float z = 0.0;
-        for (unsigned int c = 0; c < num_components; ++c) {
-            z += cmix[c];
-        }
-
-        for (unsigned int c = 0; c < num_components; ++c) {
-            cmix[c] /= z;
-        }
-
-
-        /* Record a new sample */
-        if(burnin_samples == 0 && sample_num < num_samples) {
-            double total_weight = 0.0, new_total_weight = 0.0;
-            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-                if (transcript_weights[i] < constants::min_transcript_weight) {
-                    samples[i][sample_num] = 0.0;
-                }
-                else {
-                    samples[i][sample_num] =
-                        tmix[i] * cmix[transcript_component[i]] /
-                        transcript_weights[i];
-
-                    total_weight += samples[i][sample_num];
-                }
-            }
-
-            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-                samples[i][sample_num] /= total_weight;
-
-                if (samples[i][sample_num] < constants::round_down_eps) {
-                    samples[i][sample_num] = 0.0;
-                }
-                new_total_weight += samples[i][sample_num];
-            }
-
-            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-                samples[i][sample_num] /= new_total_weight;
-            }
-
-
-#if 0
-
-            // XXX: debugging
-            Logger::info("Interesting component tmix:");
-            for (unsigned int i = 0;
-                    i < component_num_transcripts[interesting_component]; ++i) {
-                Logger::info("%e", (double) tmix[component_transcripts[interesting_component][i]]);
-            }
-
-
-            Logger::info("Interesting component cmix: %e",
-                         (double) cmix[interesting_component]);
-            Logger::info("Interesting tid tmix: %e",
-                         (double) tmix[interesting_tid]);
-            Logger::info("Interesting tid expression: %e",
-                         (double) samples[interesting_tid][sample_num]);
-            Logger::info("Interesting fragment pr: %e",
-                    (double) frag_probs[interesting_component][
-                        interesting_frag - component_frag[interesting_component]]);
-#endif
-
-
-
-            ++sample_num;
-
-            if (sample_num == num_samples) {
-                for (size_t i = 0; i < constants::num_threads; ++i) {
-                    mcmc_threads[i]->hillclimb = true;
-                    multiread_threads[i]->hillclimb = true;
-                }
-            }
-        }
-        /* Update the current maximum posterior */
-        else if (burnin_samples == 0) {
-            double total_weight = 0.0, new_total_weight = 0.0;
-            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-                if (transcript_weights[i] < constants::min_transcript_weight) {
-                    maxpost_tmix[i] = 0.0;
-                }
-                else {
-                    maxpost_tmix[i] =
-                        tmix[i] * cmix[transcript_component[i]] /
-                        transcript_weights[i];
-
-                    total_weight += maxpost_tmix[i];
-                }
-                new_total_weight += maxpost_tmix[i];
-            }
-
-            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-                maxpost_tmix[i] /= new_total_weight;
-            }
-
-            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-                maxpost_tmix[i] /= total_weight;
-
-                if (maxpost_tmix[i] < constants::round_down_eps) {
-                    maxpost_tmix[i] = 0.0;
-                }
-                new_total_weight += maxpost_tmix[i];
-            }
-
-            for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-                maxpost_tmix[i] /= new_total_weight;
-            }
-
-            ++sample_num;
-        }
-        /* Throw a sample away */
-        else {
-            --burnin_samples;
-        }
-
-        /* Check for numerical errors. */
-        for (unsigned int i = 0; i < num_components; ++i) {
-            for (unsigned int j = 0; j < component_frag[i + 1] - component_frag[i]; ++j ) {
-                if (!finite(frag_probs[i][j])) {
-                    Logger::warn("numerical error: %f", frag_probs[i][j]);
-                }
-            }
+        for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+            samples[i][sample_num] /= total_weight;
         }
 
         Logger::get_task(task_name).inc();
     }
 
-    Logger::pop_task(task_name);
-
-    // compute the posterior mean, for use with gc correction
+    // compute gc correction
     if (fm.sb[0] && run_gc_correction) {
+        // compute the posterior mean, for use with gc correction
         float* postmean = new float[weight_matrix->nrow];
         std::fill(postmean, postmean + weight_matrix->nrow, 0.0);
         float z = 0.0;
@@ -2282,22 +2010,114 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
         gc_correction(postmean, num_samples);
     }
 
+    // record samples
+    Logger::pop_task(task_name);
+
+    task_name = "Recording samples";
+    Logger::push_task(task_name);
     out.begin_transaction();
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         out.insert_sampler_result(
                 t->transcript_id, t->gene_id,
                 transcript_weights[t->id],
-                maxpost_tmix[t->id],
                 samples[t->id],
                 num_samples);
     }
     out.commit_transaction();
+    Logger::pop_task(task_name);
 
-    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-        delete [] samples[i];
+    for (unsigned int i = 0; i < ts.size(); ++i) {
+        delete [] samples;
     }
     delete [] samples;
-    delete [] maxpost_tmix;
+}
+
+
+void Sampler::sample_multireads()
+{
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        multiread_threads[i]->start();
+    }
+
+    unsigned int r;
+    for (r = 0; r + constants::sampler_multiread_block_size < num_multireads;
+            r += constants::sampler_multiread_block_size) {
+        multiread_queue.push(MultireadBlock(
+                    r, r + constants::sampler_multiread_block_size));
+    }
+    if (r < num_multireads) {
+        multiread_queue.push(MultireadBlock(r, num_multireads));
+    }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        multiread_queue.push(MultireadBlock());
+    }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        multiread_threads[i]->join();
+    }
+
+    // Recompute total fragments in each component
+    std::fill(frag_count_sums, frag_count_sums + num_components, 0.0f);
+    for (size_t i = 0; i < num_components; ++i) {
+        unsigned int component_size = component_frag[i + 1] - component_frag[i];
+        for (unsigned int j = 0; j < component_size; ++j) {
+            frag_count_sums[i] += frag_counts[i][j];
+        }
+    }
+}
+
+
+void Sampler::sample_abundance()
+{
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        abundance_threads[i]->start();
+    }
+
+    unsigned int c;
+    for (c = 0; c + constants::sampler_component_block_size < num_components;
+            c += constants::sampler_component_block_size)
+    {
+        component_queue.push(ComponentBlock(
+            c, c + constants::sampler_component_block_size));
+    }
+    if (c < num_components) {
+        component_queue.push(ComponentBlock(c, num_components));
+    }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        component_queue.push(ComponentBlock());
+    }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        abundance_threads[i]->join();
+    }
+
+    // normalize cmix (so it becomes a random dirichlet deviate)
+    float z = 0.0;
+    for (unsigned int c = 0; c < num_components; ++c) z += cmix[c];
+    for (unsigned int c = 0; c < num_components; ++c) cmix[c] /= z;
+
+    // check for numerical errors
+    for (unsigned int i = 0; i < num_components; ++i) {
+        for (unsigned int j = 0; j < component_frag[i + 1] - component_frag[i]; ++j ) {
+            if (!finite(frag_probs[i][j])) {
+                Logger::warn("numerical error: %f", frag_probs[i][j]);
+            }
+        }
+    }
+}
+
+
+void Sampler::init_multireads()
+{
+    for (unsigned int i = 0; i < num_multireads; ++i) {
+        for (unsigned int j = 0; j < multiread_num_alignments[i]; ++j) {
+            unsigned int c = multiread_alignments[i][j].component;
+            unsigned int f = multiread_alignments[i][j].frag;
+            frag_counts[c][f - component_frag[c]] = 0;
+        }
+    }
 }
 
 
@@ -2318,6 +2138,7 @@ void Sampler::init_frag_probs()
               weight_matrix->rowlens[i]);
     }
 }
+
 
 void Sampler::gc_correction(float* maxpost, size_t num_samples)
 {
@@ -2354,9 +2175,6 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     std::vector<double> xs(n), ys(n);
     size_t i = 0;
     double max_gc = 0.0, min_gc = 1.0;
-    Logger::info("%ld gc data points", (long) n);
-    FILE* out = fopen("gc_loess.tsv", "w");
-    fprintf(out, "gc\texpr\n");
 
     for (std::map<GeneID, double>::iterator g = gene_gc.begin();
             g != gene_gc.end(); ++g, ++i) {
@@ -2364,22 +2182,13 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
         max_gc = std::max<double>(max_gc, g->second);
         min_gc = std::min<double>(min_gc, g->second);
         ys[i] = log(gene_expr[g->first]);
-        fprintf(out, "%e\t%e\n", xs[i], ys[i]);
     }
-    fclose(out);
-
-    Logger::info("min_gc = %f", min_gc);
-    Logger::info("max_gc = %f", max_gc);
 
     loess_struct lo;
     loess_setup(&xs.at(0), &ys.at(0), n, 1, &lo);
     lo.model.span = constants::gc_loess_smoothing;
     lo.model.family = "symmetric";
     lo.model.degree = 2;
-
-    Logger::info("training loess");
-    Logger::info("");
-    Logger::info("");
     loess(&lo);
 
     // normalize fit's to this point in the curve
@@ -2419,112 +2228,3 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     loess_free_mem(&lo);
 }
 
-
-
-#if 0
-void Sampler::gc_correction(float* maxpost, size_t num_samples)
-{
-    std::map<GeneID, double> gene_expr;
-    std::map<GeneID, double> gene_gc;
-
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (maxpost[t->id] < 1e-7 ||
-            t->exonic_length() < 200 ||
-            transcript_gc[t->id] < 0.30 ||
-            transcript_gc[t->id] > 0.70) {
-            continue;
-        }
-        std::map<GeneID, double>::iterator i = gene_expr.find(t->gene_id);
-        if (i == gene_expr.end()) {
-            gene_expr.insert(std::make_pair(t->gene_id, maxpost[t->id]));
-            gene_gc.insert(std::make_pair(t->gene_id,
-                            maxpost[t->id] * transcript_gc[t->id]));
-        }
-        else {
-            gene_expr[t->gene_id] += maxpost[t->id];
-            gene_gc[t->gene_id] += maxpost[t->id] * transcript_gc[t->id];
-        }
-    }
-
-    for (std::map<GeneID, double>::iterator i = gene_gc.begin();
-            i != gene_gc.end(); ++i) {
-        i->second /= gene_expr[i->first];
-    }
-
-    size_t n = gene_gc.size();
-    const int degree = 3;
-
-    gsl_vector* cs = gsl_vector_alloc(degree);
-    gsl_vector* xs = gsl_vector_alloc(n);
-    gsl_matrix* gcs = gsl_matrix_alloc(n, degree);
-    gsl_matrix* cov = gsl_matrix_alloc(degree, degree);
-
-    size_t i = 0;
-    for (std::map<GeneID, double>::iterator g = gene_gc.begin();
-            g != gene_gc.end(); ++g, ++i) {
-        for (int j = 0; j < degree; ++j) {
-            gsl_matrix_set(gcs, i, j, pow(g->second, j));
-            if (!finite(gsl_matrix_get(gcs, i, j))) {
-                fprintf(stderr, "Non-finite gc factor");
-                exit(1);
-            }
-        }
-        gsl_vector_set(xs, i, log(gene_expr[g->first]));
-        if (!finite(gsl_vector_get(xs, i))) {
-            fprintf(stderr, "Non-finite xs factor");
-            exit(1);
-        }
-    }
-
-    double chisq;
-    gsl_multifit_linear_workspace* work = gsl_multifit_linear_alloc(n, degree);
-    gsl_multifit_linear(gcs, xs, cs, cov, &chisq, work);
-    gsl_multifit_linear_free(work);
-
-    double* csd = cs->data;
-
-    for (int j = 0; j < degree; ++j) {
-        Logger::info("c%d = %f", j, csd[j]);
-    }
-
-    // normalize fit's to this point in the curve
-    double ref = 0.0;
-    double x = 1.0;
-    for (int j = 0; j < degree; ++j) {
-        ref += csd[j] * x;
-        x *= 0.5;
-    }
-
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        double gc = transcript_gc[t->id];
-        //gc = std::min(0.65, std::max(0.35, gc));
-        double x = 1.0;
-        double p = 0.0;
-        for (int j = 0; j < degree; ++j) {
-            p += csd[j] * x;
-            x *= gc;
-        }
-        p = ref / p;
-
-        maxpost[t->id] = pow(maxpost[t->id], p);
-        for (size_t j = 0; j < num_samples; ++j) {
-            samples[t->id][j]  = pow(samples[t->id][j], p);
-        }
-    }
-    // renormalize everything
-    double z = 0.0;
-    for (size_t i = 0; i < ts.size(); ++i) z += maxpost[i];
-    for (size_t i = 0; i < ts.size(); ++i) maxpost[i] /= z;
-
-    for (size_t i = 0; i < num_samples; ++i) {
-        z = 0.0;
-        for (size_t j = 0; j < ts.size(); ++j) z += samples[j][i];
-        for (size_t j = 0; j < ts.size(); ++j) samples[j][i] /= z;
-    }
-
-    gsl_vector_free(cs);
-    gsl_vector_free(xs);
-    gsl_matrix_free(gcs);
-    gsl_matrix_free(cov);
-}
-#endif

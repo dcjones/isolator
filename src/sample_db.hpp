@@ -30,7 +30,6 @@ class SampleDB
         void insert_sampler_result(TranscriptID transcript_id,
                                    GeneID gene_id,
                                    float effective_length,
-                                   float map_estimate,
                                    float* samples,
                                    size_t num_samples);
 
@@ -55,7 +54,6 @@ struct SampleDBEntry
     TranscriptID transcript_id;
     GeneID gene_id;
     float effective_length;
-    float map_estimate;
     std::vector<float> samples;
 };
 

@@ -300,7 +300,7 @@ int summarize(int argc, char* argv[])
     SampleDB db(in_fn, false);
 
     fprintf(out_f,
-            "transcript_id\tgene_id\tmap_estimate\teffective_length\t"
+            "transcript_id\tgene_id\teffective_length\t"
             "posterior_mean\tposterior_sd\tposterior_median\tposterior_mad\t"
             "lower_95_cred\tupper_95_cred\n");
 
@@ -331,10 +331,9 @@ int summarize(int argc, char* argv[])
         float posterior_mad = gsl_stats_float_median_from_sorted_data(
                 &samples.at(0), 1, samples.size());
 
-        fprintf(out_f, "%s\t%s\t%e\t%f\t%e\t%e\t%e\t%e\t%e\t%e\n",
+        fprintf(out_f, "%s\t%s\t%f\t%e\t%e\t%e\t%e\t%e\t%e\n",
                 i->transcript_id.get().c_str(),
                 i->gene_id.get().c_str(),
-                i->map_estimate,
                 i->effective_length,
                 posterior_mean,
                 posterior_sd,

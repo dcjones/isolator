@@ -27,7 +27,7 @@ SampleDB::SampleDB(const char* fn, bool writeable)
         exec("create table parameters (name text, value real)");
 
         exec("drop table if exists samples");
-        exec("create table samples (transcript_id text primary key, effective_length real, map_estimate real, samples blob)");
+        exec("create table samples (transcript_id text primary key, effective_length real, samples blob)");
     }
 
     /* prepared statements */
@@ -87,7 +87,6 @@ void SampleDB::insert_param(const char* key, double val)
 void SampleDB::insert_sampler_result(TranscriptID transcript_id,
                                      GeneID gene_id,
                                      float effective_length,
-                                     float map_estimate,
                                      float* samples,
                                      size_t num_samples)
 {
@@ -95,7 +94,6 @@ void SampleDB::insert_sampler_result(TranscriptID transcript_id,
     sqlite3_bind_text(sample_ins_stmt, 1, transcript_id.get().c_str(),
                       -1, SQLITE_STATIC);
     sqlite3_bind_double(sample_ins_stmt, 2, effective_length);
-    sqlite3_bind_double(sample_ins_stmt, 3, map_estimate);
     Bytef* zbuf = NULL;
 
     size_t N  = num_samples * sizeof(float);
@@ -109,7 +107,7 @@ void SampleDB::insert_sampler_result(TranscriptID transcript_id,
         Logger::abort("Error compressing results: %d.", ret);
     }
 
-    sqlite3_bind_blob(sample_ins_stmt, 4,
+    sqlite3_bind_blob(sample_ins_stmt, 3,
                      reinterpret_cast<const void*>(zbuf),
                      (int) readsize,
                      SQLITE_STATIC);
@@ -189,7 +187,7 @@ SampleDBIterator::SampleDBIterator(SampleDB& owner)
     entry.samples.resize(num_samples);
 
     result = sqlite3_prepare_v2(owner.db,
-            "select transcript_id, gene_id, effective_length, map_estimate, samples "
+            "select transcript_id, gene_id, effective_length, samples "
             "from samples join ids using (transcript_id)", -1, &s, NULL);
 
     if (result != SQLITE_OK) {
@@ -214,10 +212,9 @@ void SampleDBIterator::increment()
         entry.transcript_id    = (const char*) sqlite3_column_text(s, 0);
         entry.gene_id          = (const char*) sqlite3_column_text(s, 1);
         entry.effective_length = (float) sqlite3_column_double(s, 2);
-        entry.map_estimate     = (float) sqlite3_column_double(s, 3);
 
-        const void* blob = sqlite3_column_blob(s, 4);
-        size_t blobsize = sqlite3_column_bytes(s, 4);
+        const void* blob = sqlite3_column_blob(s, 3);
+        size_t blobsize = sqlite3_column_bytes(s, 3);
 
         uLongf N = num_samples * sizeof(float);
         int ret = uncompress(reinterpret_cast<Bytef*>(&entry.samples.at(0)), &N,
