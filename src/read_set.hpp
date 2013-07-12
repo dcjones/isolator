@@ -94,6 +94,7 @@ struct AlignedRead
 struct AlignmentPair
 {
     AlignmentPair();
+    AlignmentPair(const AlignmentPair& other);
 
     bool operator < (const AlignmentPair& other) const;
 

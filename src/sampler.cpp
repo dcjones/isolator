@@ -940,6 +940,17 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 
         for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
             float w = fragment_weight(*t, f->first);
+
+#if 0
+            if (t->transcript_id == "ENST00000535460" &&
+                f->first.mate1 && f->first.mate2 &&
+                (f->first.mate1->cigar_len >= 3 || f->first.mate2->cigar_len >= 3) &&
+                f->first.mate1->start > 125396670 &&
+                f->first.mate1->start < 125396700) {
+                Logger::info("here");
+            }
+#endif
+
             if (w > 0.0) {
                 weight_matrix.push(t->id, f->second.first, w);
             }
@@ -1037,9 +1048,19 @@ void SamplerInitThread::transcript_sequence_bias(
         std::reverse(seqbias[0].begin(), seqbias[0].begin() + tlen);
     }
 
+
+#if 0
+    for (pos_t pos = 0; pos < tlen; ++pos) {
+        seqbias[0][pos] = std::max<float>(1e-2, std::min<float>(1e2, seqbias[0][pos]));
+        seqbias[1][pos] = std::max<float>(1e-2, std::min<float>(1e2, seqbias[1][pos]));
+    }
+#endif
+
+
     // TODO: magic number
     // Flatten bias predictions at the ends of the transcript, since we would otherwise
     // be basing the prediction off sequence that lies outside the transcript.
+#if 0
     if (tlen < 20) return;
 
     for (pos_t pos = 0; pos < 20; ++pos) {
@@ -1050,6 +1071,7 @@ void SamplerInitThread::transcript_sequence_bias(
         seqbias[0][pos] = 1.0;
         seqbias[1][pos] = 1.0;
     }
+#endif
 }
 
 
@@ -1402,7 +1424,8 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
             if (multiread_frags[i].first != multiread_frags[j].first) break;
         }
 
-        if (j - i > 1) {
+        // XXX
+        if (j - i >= 1) {
             ++num_multireads;
             num_alignments += j - i;
         }
@@ -1422,7 +1445,8 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
             if (multiread_frags[i].first != multiread_frags[j].first) break;
         }
 
-        if (j - i > 1) {
+        // XXX
+        if (j - i >= 1) {
             multiread_alignments[multiread_num] =
                 &multiread_alignment_pool[alignment_num];
             multiread_num_alignments[multiread_num] = j - i;
@@ -1679,7 +1703,7 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
 {
     static const float peps = 1e-2f;
     static const float zeps = 1e-6f;
-    static const float deps = 1e-4f;
+    static const float deps = 1e-8f;
 
     if (fabs(p0 - slice_height) <= peps) return z0;
 
@@ -1779,12 +1803,14 @@ float MCMCThread::transcript_slice_sample_search(float slice_height,
 }
 
 
+static unsigned int interesting_tid;
+
 void MCMCThread::run_inter_transcript(unsigned int u, unsigned int v)
 {
     unsigned int c = S.transcript_component[u];
     assert(c == S.transcript_component[v]);
 
-    if (S.cmix[c] * (S.tmix[u] + S.tmix[v]) < constants::zero_eps) return;
+    if (S.cmix[c] < constants::zero_eps) return;
 
     unsigned int component_size = S.component_frag[c + 1] - S.component_frag[c];
 
@@ -1906,6 +1932,16 @@ class MultireadSamplerThread
                         sumprob += 1.0;
                     }
 
+                    continue;
+
+#if 0
+                    // XXX Assign uniformly
+                    unsigned int i = gsl_rng_uniform_int(rng, k);
+                    unsigned int c = S.multiread_alignments[block.u][i].component;
+                    unsigned int f = S.multiread_alignments[block.u][i].frag;
+                    S.frag_counts[c][f - S.component_frag[c]] = 1;
+#endif
+
                     if (hillclimb) {
                         for (unsigned int i = 0; i < k; ++i) {
                             unsigned int c = S.multiread_alignments[block.u][i].component;
@@ -1975,12 +2011,14 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
             }
         }
 
+        double eps = 1e-5;
+
         tmix[component_transcripts[i][j_max]] =
-            1.0 - component_num_transcripts[i] * constants::zero_eps;
+            1.0 - component_num_transcripts[i] * eps;
 
         for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
             if (j != j_max) {
-                tmix[component_transcripts[i][j]] = constants::zero_eps;
+                tmix[component_transcripts[i][j]] = eps;
             }
         }
     }
@@ -2027,8 +2065,68 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
     Logger::push_task(task_name, num_samples + burnin_samples +
                                  constants::sampler_hillclimb_samples);
 
+        // XXX: Debugging
+        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+            if (t->transcript_id == "ENST00000535460" ||
+                t->transcript_id == "ENST00000339647") {
+                FILE* out = fopen(t->transcript_id.get().c_str(), "w");
+                for (size_t i = 0; i < weight_matrix->rowlens[t->id]; ++i) {
+                    fprintf(out, "%e\n", weight_matrix->rows[t->id][i]);
+                }
+                fclose(out);
+            }
+        }
+
+
+        // XXX: Debugging
+        unsigned int interesting_frag = 0;
+        //unsigned int interesting_tid = 0;
+        unsigned int interesting_component = 0;
+        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+            if (t->transcript_id == "ENST00000535460") {
+                interesting_tid = t->id;
+                unsigned int c = transcript_component[t->id];
+                interesting_component = c;
+                unsigned int unique = 0;
+
+                for (unsigned int j = 0; j < weight_matrix->rowlens[t->id]; ++j) {
+                    // Count the number of fragments supported only by this
+                    // transcript.
+                    for (unsigned int i = 0; i < component_num_transcripts[c]; ++i) {
+                        unsigned int tid = component_transcripts[c][i];
+                        if (tid == t->id) continue;
+                        for (unsigned int k = 0; k < weight_matrix->rowlens[tid]; ++k)  {
+                            if (weight_matrix->idxs[tid][k] == weight_matrix->idxs[t->id][j]) {
+                                goto continue_outer_thing;
+                            }
+                        }
+                    }
+                    ++unique;
+                    interesting_frag = weight_matrix->idxs[t->id][j];
+                    Logger::info("interesting fragment weight: %e",
+                                 weight_matrix->rows[t->id][j]);
+continue_outer_thing:
+                    continue;
+                }
+
+
+                Logger::info("ENST00000535460 has %ld unique frags",
+                             unique);
+
+#if 0
+                Logger::info("ENST00000535460 %ld frags",
+                        (long) weight_matrix->rowlens[t->id]);
+                Logger::info("ENST00000535460 has %0.2f%% GC",
+                             100.0 * transcript_gc[t->id]);
+#endif
+                break;
+            }
+        }
+
+
     for (unsigned int sample_num = 0;
             sample_num < num_samples + constants::sampler_hillclimb_samples; ) {
+
         /* Sample multiread alignments */
         for (size_t i = 0; i < constants::num_threads; ++i) {
             multiread_threads[i]->start();
@@ -2097,6 +2195,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
             cmix[c] /= z;
         }
 
+
         /* Record a new sample */
         if(burnin_samples == 0 && sample_num < num_samples) {
             double total_weight = 0.0, new_total_weight = 0.0;
@@ -2125,6 +2224,30 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
             for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
                 samples[i][sample_num] /= new_total_weight;
             }
+
+
+#if 0
+
+            // XXX: debugging
+            Logger::info("Interesting component tmix:");
+            for (unsigned int i = 0;
+                    i < component_num_transcripts[interesting_component]; ++i) {
+                Logger::info("%e", (double) tmix[component_transcripts[interesting_component][i]]);
+            }
+
+
+            Logger::info("Interesting component cmix: %e",
+                         (double) cmix[interesting_component]);
+            Logger::info("Interesting tid tmix: %e",
+                         (double) tmix[interesting_tid]);
+            Logger::info("Interesting tid expression: %e",
+                         (double) samples[interesting_tid][sample_num]);
+            Logger::info("Interesting fragment pr: %e",
+                    (double) frag_probs[interesting_component][
+                        interesting_frag - component_frag[interesting_component]]);
+#endif
+
+
 
             ++sample_num;
 
@@ -2193,6 +2316,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
     // compute the posterior mean, for use with gc correction
     if (fm.sb[0] && run_gc_correction) {
         float* postmean = new float[weight_matrix->nrow];
+        std::fill(postmean, postmean + weight_matrix->nrow, 0.0);
         float z = 0.0;
         for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
             for (unsigned int j = 0; j < num_samples; ++j){
@@ -2232,7 +2356,7 @@ void Sampler::init_frag_probs()
 {
     for (unsigned int i = 0; i < num_components; ++i) {
         unsigned component_size = component_frag[i + 1] - component_frag[i];
-        std::fill(frag_probs[i], frag_probs[i] + component_size, 1e-8);
+        std::fill(frag_probs[i], frag_probs[i] + component_size, 0.0);
     }
 
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
@@ -2246,14 +2370,19 @@ void Sampler::init_frag_probs()
     }
 }
 
-
 void Sampler::gc_correction(float* maxpost, size_t num_samples)
 {
     std::map<GeneID, double> gene_expr;
     std::map<GeneID, double> gene_gc;
 
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (maxpost[t->id] < 1e-7) continue;
+        if (maxpost[t->id] == 0.0 ||
+            t->exonic_length() < 200 ||
+            transcript_gc[t->id] < 0.30 ||
+            transcript_gc[t->id] > 0.70) {
+            continue;
+        }
+
         std::map<GeneID, double>::iterator i = gene_expr.find(t->gene_id);
         if (i == gene_expr.end()) {
             gene_expr.insert(std::make_pair(t->gene_id, maxpost[t->id]));
@@ -2276,13 +2405,19 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     std::vector<double> xs(n), ys(n);
     size_t i = 0;
     double max_gc = 0.0, min_gc = 1.0;
+    Logger::info("%ld gc data points", (long) n);
+    FILE* out = fopen("gc_loess.tsv", "w");
+    fprintf(out, "gc\texpr\n");
+
     for (std::map<GeneID, double>::iterator g = gene_gc.begin();
             g != gene_gc.end(); ++g, ++i) {
         xs[i] = g->second;
         max_gc = std::max<double>(max_gc, g->second);
         min_gc = std::min<double>(min_gc, g->second);
         ys[i] = log(gene_expr[g->first]);
+        fprintf(out, "%e\t%e\n", xs[i], ys[i]);
     }
+    fclose(out);
 
     Logger::info("min_gc = %f", min_gc);
     Logger::info("max_gc = %f", max_gc);
@@ -2290,14 +2425,13 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     loess_struct lo;
     loess_setup(&xs.at(0), &ys.at(0), n, 1, &lo);
     lo.model.span = constants::gc_loess_smoothing;
+    lo.model.family = "symmetric";
+    lo.model.degree = 2;
 
     Logger::info("training loess");
     Logger::info("");
     Logger::info("");
     loess(&lo);
-
-    // XXX: Debug
-    loess_summary(&lo);
 
     // normalize fit's to this point in the curve
     pred_struct pre;
@@ -2317,7 +2451,7 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         double p = ref / pre.fit[t->id];
         for (size_t j = 0; j < num_samples; ++j) {
-            samples[t->id][j]  = pow(samples[t->id][j], p);
+            samples[t->id][j] = pow(samples[t->id][j], p);
         }
     }
 
@@ -2336,3 +2470,112 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
     loess_free_mem(&lo);
 }
 
+
+
+#if 0
+void Sampler::gc_correction(float* maxpost, size_t num_samples)
+{
+    std::map<GeneID, double> gene_expr;
+    std::map<GeneID, double> gene_gc;
+
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        if (maxpost[t->id] < 1e-7 ||
+            t->exonic_length() < 200 ||
+            transcript_gc[t->id] < 0.30 ||
+            transcript_gc[t->id] > 0.70) {
+            continue;
+        }
+        std::map<GeneID, double>::iterator i = gene_expr.find(t->gene_id);
+        if (i == gene_expr.end()) {
+            gene_expr.insert(std::make_pair(t->gene_id, maxpost[t->id]));
+            gene_gc.insert(std::make_pair(t->gene_id,
+                            maxpost[t->id] * transcript_gc[t->id]));
+        }
+        else {
+            gene_expr[t->gene_id] += maxpost[t->id];
+            gene_gc[t->gene_id] += maxpost[t->id] * transcript_gc[t->id];
+        }
+    }
+
+    for (std::map<GeneID, double>::iterator i = gene_gc.begin();
+            i != gene_gc.end(); ++i) {
+        i->second /= gene_expr[i->first];
+    }
+
+    size_t n = gene_gc.size();
+    const int degree = 3;
+
+    gsl_vector* cs = gsl_vector_alloc(degree);
+    gsl_vector* xs = gsl_vector_alloc(n);
+    gsl_matrix* gcs = gsl_matrix_alloc(n, degree);
+    gsl_matrix* cov = gsl_matrix_alloc(degree, degree);
+
+    size_t i = 0;
+    for (std::map<GeneID, double>::iterator g = gene_gc.begin();
+            g != gene_gc.end(); ++g, ++i) {
+        for (int j = 0; j < degree; ++j) {
+            gsl_matrix_set(gcs, i, j, pow(g->second, j));
+            if (!finite(gsl_matrix_get(gcs, i, j))) {
+                fprintf(stderr, "Non-finite gc factor");
+                exit(1);
+            }
+        }
+        gsl_vector_set(xs, i, log(gene_expr[g->first]));
+        if (!finite(gsl_vector_get(xs, i))) {
+            fprintf(stderr, "Non-finite xs factor");
+            exit(1);
+        }
+    }
+
+    double chisq;
+    gsl_multifit_linear_workspace* work = gsl_multifit_linear_alloc(n, degree);
+    gsl_multifit_linear(gcs, xs, cs, cov, &chisq, work);
+    gsl_multifit_linear_free(work);
+
+    double* csd = cs->data;
+
+    for (int j = 0; j < degree; ++j) {
+        Logger::info("c%d = %f", j, csd[j]);
+    }
+
+    // normalize fit's to this point in the curve
+    double ref = 0.0;
+    double x = 1.0;
+    for (int j = 0; j < degree; ++j) {
+        ref += csd[j] * x;
+        x *= 0.5;
+    }
+
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        double gc = transcript_gc[t->id];
+        //gc = std::min(0.65, std::max(0.35, gc));
+        double x = 1.0;
+        double p = 0.0;
+        for (int j = 0; j < degree; ++j) {
+            p += csd[j] * x;
+            x *= gc;
+        }
+        p = ref / p;
+
+        maxpost[t->id] = pow(maxpost[t->id], p);
+        for (size_t j = 0; j < num_samples; ++j) {
+            samples[t->id][j]  = pow(samples[t->id][j], p);
+        }
+    }
+    // renormalize everything
+    double z = 0.0;
+    for (size_t i = 0; i < ts.size(); ++i) z += maxpost[i];
+    for (size_t i = 0; i < ts.size(); ++i) maxpost[i] /= z;
+
+    for (size_t i = 0; i < num_samples; ++i) {
+        z = 0.0;
+        for (size_t j = 0; j < ts.size(); ++j) z += samples[j][i];
+        for (size_t j = 0; j < ts.size(); ++j) samples[j][i] /= z;
+    }
+
+    gsl_vector_free(cs);
+    gsl_vector_free(xs);
+    gsl_matrix_free(gcs);
+    gsl_matrix_free(cov);
+}
+#endif

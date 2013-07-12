@@ -78,7 +78,7 @@ int quantify(int argc, char* argv[])
     const char* fa_fn  = NULL;
     const char* out_fn = "isolator.db";
     constants::num_threads = boost::thread::hardware_concurrency();
-    unsigned int num_samples = 300;
+    unsigned int num_samples = 250;
     Logger::level logger_level = Logger::INFO;
     bool run_gc_correction = true;
 

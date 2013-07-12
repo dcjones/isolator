@@ -214,6 +214,13 @@ AlignmentPair::AlignmentPair()
 }
 
 
+AlignmentPair::AlignmentPair(const AlignmentPair& other)
+    : mate1(other.mate1)
+    , mate2(other.mate2)
+{
+}
+
+
 bool AlignmentPair::operator < (const AlignmentPair& other) const
 {
     if (mate1 == other.mate1 ||
@@ -305,6 +312,9 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     CigarIterator c1(*a1);
     pos_t intron_len = 0;
 
+    // Skip any leading soft clip
+    if (c1 != CigarIterator() && c1->op == BAM_CSOFT_CLIP) ++c1;
+
     while (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
         // case 1: e entirely preceedes c
         if (c1->start > e1->first.end) {
@@ -380,6 +390,9 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
             return -1;
         }
     }
+
+    // skip any trailing soft clip
+    if (c2 != CigarIterator() && c2->op == BAM_CSOFT_CLIP) ++c2;
 
     if (c2 != CigarIterator()) return -1;
 
