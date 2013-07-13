@@ -1533,9 +1533,14 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
 
 void AbundanceSamplerThread::run_component(unsigned int u)
 {
-    float prec = S.frag_count_sums[u] +
-                 S.component_num_transcripts[u] * constants::tmix_prior_prec;
-    S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
+    if (S.frag_count_sums[u] == 0.0) {
+        S.cmix[u] = 0.0;
+    }
+    else {
+        float prec = S.frag_count_sums[u] +
+                     S.component_num_transcripts[u] * constants::tmix_prior_prec;
+        S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
+    }
 }
 
 
@@ -1920,6 +1925,9 @@ Sampler::~Sampler()
         delete *i;
     }
 }
+
+
+
 void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correction)
 {
     /* Initial mixtures */
@@ -1949,6 +1957,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
     std::fill(cmix, cmix + num_components, 1.0 / (float) num_components);
     init_multireads();
     init_frag_probs();
+    update_frag_count_sums();
 
     const char* task_name = "Sampling";
     Logger::push_task(task_name, num_samples + constants::sampler_burnin_samples);
@@ -1956,11 +1965,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
     // burnin
     for (unsigned int sample_num = 0;
          sample_num < constants::sampler_burnin_samples; ++sample_num) {
-        // don't start trying to assign multireads until we've drawn a few
-        // samples without them
-        if (sample_num > constants::sampler_burnin_samples / 2) {
-            sample_multireads();
-        }
+        sample_multireads();
         sample_abundance();
         Logger::get_task(task_name).inc();
     }
@@ -1978,7 +1983,8 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
         double total_weight = 0.0;
         for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
             samples[i][sample_num] =
-                tmix[i] * cmix[transcript_component[i]] / transcript_weights[i];
+                transcript_weights[i] == 0.0 ?
+                0.0 : tmix[i] * cmix[transcript_component[i]] / transcript_weights[i];
             total_weight += samples[i][sample_num];
         }
 
@@ -2026,8 +2032,8 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
     out.commit_transaction();
     Logger::pop_task(task_name);
 
-    for (unsigned int i = 0; i < ts.size(); ++i) {
-        delete [] samples;
+    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+        delete [] samples[i];
     }
     delete [] samples;
 }
@@ -2057,6 +2063,12 @@ void Sampler::sample_multireads()
         multiread_threads[i]->join();
     }
 
+    update_frag_count_sums();
+}
+
+
+void Sampler::update_frag_count_sums()
+{
     // Recompute total fragments in each component
     std::fill(frag_count_sums, frag_count_sums + num_components, 0.0f);
     for (size_t i = 0; i < num_components; ++i) {

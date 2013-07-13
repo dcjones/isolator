@@ -85,6 +85,9 @@ class Sampler
         // Zero the count of each multiread alignment
         void init_multireads();
 
+        // Recompute frag_count_sums
+        void update_frag_count_sums();
+
         /* Perform post-hoc adjustment for transcript GC-content. */
         void gc_correction(float* xs, size_t num_samples);
 

@@ -33,7 +33,7 @@ SampleDB::SampleDB(const char* fn, bool writeable)
     /* prepared statements */
     meta_ins_stmt   = prep("insert into meta values (?, ?)");
     param_ins_stmt  = prep("insert into parameters values (?, ?)");
-    sample_ins_stmt = prep("insert into samples values (?, ?, ?, ?)");
+    sample_ins_stmt = prep("insert into samples values (?, ?, ?)");
     id_ins_stmt     = prep("insert into ids values (?, ?)");
 }
 
