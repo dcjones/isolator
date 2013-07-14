@@ -1,6 +1,9 @@
 
 #include <set>
 #include <gsl/gsl_randist.h>
+#include <gsl/gsl_sf_gamma.h>
+#include <boost/foreach.hpp>
+#include <boost/numeric/ublas/matrix_proxy.hpp>
 #include "constants.hpp"
 #include "switchtest.hpp"
 #include "logger.hpp"
@@ -22,6 +25,118 @@ static double gaussian_lnpdf(double mu, double lambda, double x)
 }
 
 
+static double gamma_lnpdf(double alpha, double beta, double x)
+{
+	return alpha * log(beta) -
+	       gsl_sf_lngamma(alpha) +
+	       (alpha - 1) * log(x) -
+	       beta * x;
+}
+
+
+// A generic slice one dimensional sampler.
+class SliceSampler
+{
+public:
+	SliceSampler();
+	virtual ~SliceSampler();
+
+	// Generate a new sample given the current value x0.
+	double sample(double x0);
+
+	// Log-probability at value x.
+	virtual double lpr(double x) = 0;
+
+private:
+	double find_slice_edge(double x0, double slice_height, double init_step);
+
+	gsl_rng* rng;
+};
+
+
+SliceSampler::SliceSampler()
+{
+    rng = gsl_rng_alloc(gsl_rng_mt19937);
+}
+
+
+SliceSampler::~SliceSampler()
+{
+	gsl_rng_free(rng);
+}
+
+
+double SliceSampler::sample(double x0)
+{
+	double y0 = lpr(x0);
+	double slice_height = log(gsl_rng_uniform(rng)) + y0;
+
+	// find slice extents
+	double x_min = find_slice_edge(x0, slice_height, 1e-1);
+	double x_max = find_slice_edge(x0, slice_height, 1e+1);
+
+	// sample
+	double x = 0.0;
+	double y = -INFINITY;
+	while (y < slice_height) {
+		x = x_min + (x_max - x_min) * gsl_rng_uniform(rng);
+		y = lpr(y);
+	}
+	return x;
+};
+
+
+double SliceSampler::find_slice_edge(double x0, double slice_height, double step)
+{
+	const double eps = 1e-2;
+
+	// step further and further until something outside the slice is found
+	double x, y;
+	do {
+		x = x0 + step;
+		y = lpr(x);
+		step *= 2;
+	} while (y > slice_height);
+	step /= 2;
+
+	// binary search to find the edge
+	double a = x0, b = x0 + step;
+	while (fabs(b - a) < eps) {
+		double c = (a + b) / 2;
+		double w = lpr(c);
+
+		// No! this depends on the direction
+		if (w > slice_height) a = c;
+		else                  b = c;
+	}
+
+	return (a + b) / 2;
+}
+
+
+// Slice sampler realizations
+class LambdaSliceSampler : public SliceSampler
+{
+public:
+	~LambdaSliceSampler() {}
+
+	double lpr(double lambda)
+	{
+		double p = gamma_lnpdf(alpha, beta, lambda);
+		for (std::vector<double>::iterator x = xs.begin(); x != xs.end(); ++x) {
+			p += gaussian_lnpdf(mu, lambda, *x);
+		}
+		return p;
+	}
+
+	double alpha;
+	double beta;
+	double mu;
+	std::vector<double> xs;
+};
+
+
+
 SwitchTest::SwitchTest(TranscriptSet& ts)
 	: ts(ts)
 	, mu0(-10.0)
@@ -40,20 +155,21 @@ SwitchTest::SwitchTest(TranscriptSet& ts)
 	m = ts.size();
 	tss_index.resize(m);
 	unsigned int tss_id = 0;
-	for (std::map<Interval, std::vector<unsigned int> >::iterator i = tss_group.begin();
-		 i != tss_group.end(); ++i, ++tss_id) {
-		for (std::vector<unsigned int>::iterator j = i->second.begin();
-			 j != i->second.end(); ++j) {
-			tss_index[*j] = tss_id;
+	BOOST_FOREACH (const TSMapItem& i, tss_group) {
+		BOOST_FOREACH (const unsigned int& j, i.second) {
+			tss_index[j] = tss_id;
 		}
+		++tss_id;
 	}
 
+	lambda_sampler = new LambdaSliceSampler();
     rng = gsl_rng_alloc(gsl_rng_mt19937);
 }
 
 
 SwitchTest::~SwitchTest()
 {
+	delete lambda_sampler;
 	gsl_rng_free(rng);
 }
 
@@ -121,15 +237,14 @@ void SwitchTest::check_data()
 	std::set<TranscriptID> transcript_ids;
 	std::set<TranscriptID> replicate_transcript_ids;
 	unsigned int repl_num = 0;
-	for (CondMap::iterator i = data.begin(); i != data.end(); ++i) {
-		if (i->second.size() == 0) {
-			Logger::abort("Condition %s has no replicates.", i->first.c_str());
+	BOOST_FOREACH (CondMapItem& i, data) {
+		if (i.second.size() == 0) {
+			Logger::abort("Condition %s has no replicates.", i.first.c_str());
 		}
 
 		replicate_transcript_ids.clear();
-		std::vector<SampleDB*>::iterator j;
-		for (j = i->second.begin(); j != i->second.end(); ++j, ++repl_num) {
-			for (SampleDBIterator k(**j); k != SampleDBIterator(); ++k) {
+		BOOST_FOREACH (SampleDB*& j, i.second) {
+			for (SampleDBIterator k(*j); k != SampleDBIterator(); ++k) {
 				replicate_transcript_ids.insert(k->transcript_id);
 			}
 		}
@@ -157,20 +272,20 @@ void SwitchTest::build_sample_matrix()
 
 	// for each replicate build a sample matrix in which rows are indexed by transcript
 	// and columns by sample number.
-	unsigned int repl_num = 0;
-	for (CondMap::iterator i = data.begin(); i != data.end(); ++i) {
-		condition_name.push_back(i->first);
+	unsigned int repl_idx = 0;
+	BOOST_FOREACH (CondMapItem& i, data) {
+		condition_name.push_back(i.first);
 		condition_replicates.push_back(std::vector<unsigned int>());
-		std::vector<SampleDB*>::iterator j;
-		for (j = i->second.begin(); j != i->second.end(); ++j, ++repl_num) {
-			condition_replicates.back().push_back(repl_num);
+		BOOST_FOREACH (SampleDB*& j, i.second) {
+			condition_replicates.back().push_back(repl_idx);
 			samples.push_back(matrix<float>());
-			samples.back().resize(tids.size(), (*j)->get_num_samples());
-			for (SampleDBIterator k(**j); k != SampleDBIterator(); ++k) {
+			samples.back().resize(tids.size(), j->get_num_samples());
+			for (SampleDBIterator k(*j); k != SampleDBIterator(); ++k) {
 				for (unsigned int l = 0; l < k->samples.size(); ++l) {
 					samples.back()(tids[k->transcript_id], l) = k->samples[l];
 				}
 			}
+			++repl_idx;
 		}
 	}
 }
@@ -196,14 +311,10 @@ double SwitchTest::sample_log_likelihood(unsigned int i, unsigned int k)
 		p += gaussian_lnpdf(mu(i, j), lambda(i, j), x);
 	}
 
-	// tts usage log-probabilities
-	// TODO:
+	// TODO: tts usage and splicing probabilities
 	// For every replicate and tss, we need a vector of probabilities for
 	// the catagorial distribution. Then, another level for tss/tts/splicing.
 	// Fancy shit.
-
-	// splicing log-probabilities
-	// TODO
 
 	return p;
 }
@@ -233,45 +344,20 @@ void SwitchTest::sample_condition_tss_usage()
 {
 	for (unsigned int i = 0; i < condition_replicates.size(); ++i) {
 		for (unsigned int k = 0; k < tss_usage.size2(); ++k) {
-
-			// TODO: Draw precision sample
-			// We have to sample precision numerically
-			// Should we fall back on our old standard of slice sampling?
-
-
-			// Ok, this is what we need to tackle tomorrow morning.
-			// This is a comparatively easy slice sampler. 
-
-#if 0
-			unsigned num_cond_replicates = condition_replicates[i].size();
-			double a = alpha + (double) num_cond_replicates / 2.0;
-
-			double sample_mu = 0.0;
-			for (std::vector<unsigned int>::iterator j = condition_replicates[i].begin();
-				 j != condition_replicates[i].end(); ++j) {
-				sample_mu += tss_usage(*j, k);
-			}
-			sample_mu /= (double) num_cond_replicates;
-
-			double sample_var = 0.0
-			for (std::vector<unsigned int>::iterator j = condition_replicates[i].begin();
-				 j != condition_replicates[i].end(); ++j) {
-				sample_var += sq(sample_mu - tss_usage(*j, k));
-			}
-
-			double b = beta +
-			           sample_var / 2.0 +
-			           num_cond_replicates * sq(mu0 - sample_mean)
-			}
-#endif
-
+			// sample from lambda given mu and transcript abundance
+			lambda_sampler->alpha = alpha[k];
+			lambda_sampler->beta = beta[k];
+			lambda_sampler->mu = mu(i, k);
+			lambda_sampler->xs.resize(condition_replicates[i].size());
+			matrix_column<matrix<float> > col(tss_usage, k);
+			std::copy(col.begin(), col.end(), lambda_sampler->xs.begin());
+			lambda(i, k) = lambda_sampler->sample(lambda(i, k));
 
 			// sample from mu given lambda and transcript abundance
 			unsigned num_cond_replicates = condition_replicates[i].size();
 			double sample_mu = 0.0;
-			for (std::vector<unsigned int>::iterator j = condition_replicates[i].begin();
-				 j != condition_replicates[i].end(); ++j) {
-				sample_mu += tss_usage(*j, k);
+			BOOST_FOREACH(float& x, col) {
+				sample_mu += x;
 			}
 			sample_mu /= (double) num_cond_replicates;
 

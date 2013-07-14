@@ -12,6 +12,9 @@
 #include "transcripts.hpp"
 
 
+class LambdaSliceSampler;
+
+
 class SwitchTest
 {
 	public:
@@ -44,8 +47,10 @@ class SwitchTest
 		// number of transcripts
 		unsigned int m;
 
-		std::map<Interval, std::vector<unsigned int> > tss_group;
-		std::map<Interval, std::vector<unsigned int> > tss_tts_group;
+		typedef std::map<Interval, std::vector<unsigned int> > TSMap;
+		typedef std::pair<const Interval, std::vector<unsigned int> > TSMapItem;
+		TSMap tss_group;
+		TSMap tss_tts_group;
 
 		// map each transcript index to it's tss index
 		std::vector<unsigned int> tss_index;
@@ -54,6 +59,7 @@ class SwitchTest
 
 		// map a condition name to data from some number of replicates
 		typedef std::map<std::string, std::vector<SampleDB*> > CondMap;
+		typedef std::pair<const std::string, std::vector<SampleDB*> > CondMapItem;
 		CondMap data;
 
 		// condition index to condition name
@@ -76,11 +82,14 @@ class SwitchTest
 		boost::numeric::ublas::matrix<float> mu;
 		boost::numeric::ublas::matrix<float> lambda;
 
-		// parameters for the normal prior on mu
+		// parameters for the normal prior on mu, indexd by
+		// replicate index -> tss index
 		double mu0, lambda0;
 
 		// gamma parameters for the prior on sigma
 		std::vector<float> alpha, beta;
+
+		LambdaSliceSampler* lambda_sampler;
 
 		gsl_rng* rng;
 };
