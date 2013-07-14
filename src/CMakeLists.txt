@@ -23,6 +23,7 @@ add_executable(isolator
                sample_db.cpp
                sampler.cpp
                sparse_mat.cpp
+               switchtest.cpp
                transcripts.cpp)
 
 include_directories(${isolator_SOURCE_DIR}/src

@@ -7,7 +7,8 @@
 struct Interval
 {
     Interval();
-    Interval(const char* seqname, pos_t start, pos_t end, strand_t starnd);
+    Interval(const char* seqname, pos_t start, pos_t end, strand_t strand);
+    Interval(SeqName seqname, pos_t start, pos_t end, strand_t strand);
     Interval(const Interval&);
 
     bool operator < (const Interval&) const;

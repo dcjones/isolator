@@ -18,6 +18,15 @@ Interval::Interval(const char* seqname, pos_t start, pos_t end, strand_t strand)
 }
 
 
+Interval::Interval(SeqName seqname, pos_t start, pos_t end, strand_t strand)
+    : seqname(seqname)
+    , start(start)
+    , end(end)
+    , strand(strand)
+{
+}
+
+
 Interval::Interval(const Interval& other)
     : seqname(other.seqname)
     , start(other.start)

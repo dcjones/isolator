@@ -72,6 +72,25 @@ void SampleDB::insert_meta(const char* key, const char* val)
 }
 
 
+unsigned int SampleDB::get_num_samples()
+{
+    sqlite3_stmt* s;
+    int result = sqlite3_prepare_v2(db,
+            "select value from parameters where name = \"num_samples\"", -1, &s, NULL);
+    if (result != SQLITE_OK) {
+        Logger::abort("Sqlite3 error: '%s'.", sqlite3_errmsg(db));
+    }
+
+    result = sqlite3_step(s);
+    if (result != SQLITE_ROW) {
+        Logger::abort("Malformed sampler results.");
+    }
+    unsigned int num_samples = sqlite3_column_double(s, 0);
+    sqlite3_finalize(s);
+    return num_samples;
+}
+
+
 void SampleDB::insert_param(const char* key, double val)
 {
     sqlite3_bind_text(param_ins_stmt, 1, key, -1, SQLITE_STATIC);
@@ -172,21 +191,10 @@ SampleDBIterator::SampleDBIterator()
 SampleDBIterator::SampleDBIterator(SampleDB& owner)
     : owner(&owner)
 {
-    int result = sqlite3_prepare_v2(owner.db,
-            "select value from parameters where name = \"num_samples\"", -1, &s, NULL);
-    if (result != SQLITE_OK) {
-        Logger::abort("Sqlite3 error: '%s'.", sqlite3_errmsg(owner.db));
-    }
-
-    result = sqlite3_step(s);
-    if (result != SQLITE_ROW) {
-        Logger::abort("Malformed sampler results.");
-    }
-    num_samples = (unsigned int) sqlite3_column_double(s, 0);
-    sqlite3_finalize(s);
+    num_samples = owner.get_num_samples();
     entry.samples.resize(num_samples);
 
-    result = sqlite3_prepare_v2(owner.db,
+    int result = sqlite3_prepare_v2(owner.db,
             "select transcript_id, gene_id, effective_length, samples "
             "from samples join ids using (transcript_id)", -1, &s, NULL);
 

@@ -2,6 +2,7 @@
 #ifndef ISOLATOR_SAMPLE_DB
 #define ISOLATOR_SAMPLE_DB
 
+#include <string>
 #include <boost/iterator/iterator_facade.hpp>
 
 #include "common.hpp"
@@ -32,6 +33,8 @@ class SampleDB
                                    float effective_length,
                                    float* samples,
                                    size_t num_samples);
+
+        unsigned int get_num_samples();
 
     private:
         void exec(const char* stmt);
