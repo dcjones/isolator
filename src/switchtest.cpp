@@ -21,7 +21,7 @@ static const double LN_SQRT_TWO_PI = log(sqrt(2.0 * M_PI));
 
 static double gaussian_lnpdf(double mu, double lambda, double x)
 {
-	return -LN_SQRT_TWO_PI + sqrt(lambda) - sq(x - mu) * lambda  / 2.0;
+	return -LN_SQRT_TWO_PI + sqrt(lambda) - sq(x - mu) * lambda / 2.0;
 }
 
 
@@ -152,6 +152,8 @@ SwitchTest::SwitchTest(TranscriptSet& ts)
 		tss_tts_group[tss_tts].push_back(t->id);
 	}
 
+	Logger::info("%u transcript start sites", (unsigned int) tss_group.size());
+
 	m = ts.size();
 	tss_index.resize(m);
 	unsigned int tss_id = 0;
@@ -182,51 +184,43 @@ void SwitchTest::add_replicate(const char* condition_name, SampleDB& replicate_d
 
 void SwitchTest::run(unsigned int num_samples)
 {
-	check_data();
+	n = 0;
+	BOOST_FOREACH (CondMapItem& i, data) n += i.second.size();
+
 	build_sample_matrix();
 
-	n = 0;
-	for (CondMap::iterator i = data.begin(); i != data.end(); ++i) {
-		n += i->second.size();
-	}
-
 	mu.resize(n, tss_group.size());
-	lambda.resize(n, tss_tts_group.size());
-	tss_usage.resize(n, tss_group.size());
-	// TODO: initialize
+	std::fill(mu.data().begin(), mu.data().end(), mu0);
 
+	lambda.resize(n, tss_group.size());
+	std::fill(lambda.data().begin(), lambda.data().end(), lambda0);
+
+	alpha.resize(tss_group.size());
+	std::fill(alpha.begin(), alpha.end(), 1.0);
+
+	beta.resize(tss_group.size());
+	std::fill(beta.begin(), beta.end(), 0.5);
+
+	tss_usage.resize(n, tss_group.size());
 	repl_sample_idx.resize(n);
 	std::fill(repl_sample_idx.begin(), repl_sample_idx.end(), 0);
 
 
 	// TODO burnin
-
 	for (unsigned int sample_num = 0; sample_num < num_samples; ++sample_num) {
 		sample_replicate_transcript_abundance();
 		sample_condition_tss_usage();
 	}
 
-	// TODO:
-	// We need to add parameter vectors for
-	//   replicate tss usage
-	//   replicate tts usage
-	//   replatete splice usage
-
-	//   condition tss usage
-	//   condition tts usage
-	//   condition splice usage
-
-	//   hyperparameters for priors on
-	//     variability of
-
-
 	samples.clear();
 }
 
 
-// basic sanity check for input data: it must have the same transcript_ids and be non-empty.
-void SwitchTest::check_data()
+void SwitchTest::build_sample_matrix()
 {
+	const char* task_name = "Loading quantification data";
+	Logger::push_task(task_name, n);
+
 	if (data.size() == 0) {
 		Logger::abort("No data to test.");
 	}
@@ -234,34 +228,6 @@ void SwitchTest::check_data()
 		Logger::abort("Only one condition provided to test.");
 	}
 
-	std::set<TranscriptID> transcript_ids;
-	std::set<TranscriptID> replicate_transcript_ids;
-	unsigned int repl_num = 0;
-	BOOST_FOREACH (CondMapItem& i, data) {
-		if (i.second.size() == 0) {
-			Logger::abort("Condition %s has no replicates.", i.first.c_str());
-		}
-
-		replicate_transcript_ids.clear();
-		BOOST_FOREACH (SampleDB*& j, i.second) {
-			for (SampleDBIterator k(*j); k != SampleDBIterator(); ++k) {
-				replicate_transcript_ids.insert(k->transcript_id);
-			}
-		}
-
-		if (repl_num == 0) {
-			transcript_ids = replicate_transcript_ids;
-		}
-		else if (transcript_ids != replicate_transcript_ids) {
-			Logger::abort("Same was generated using different gene annotations. "
-				          "Use the same annotations to proceed.");
-		}
-	}
-}
-
-
-void SwitchTest::build_sample_matrix()
-{
 	condition_name.clear();
 	condition_replicates.clear();
 
@@ -274,6 +240,10 @@ void SwitchTest::build_sample_matrix()
 	// and columns by sample number.
 	unsigned int repl_idx = 0;
 	BOOST_FOREACH (CondMapItem& i, data) {
+		if (i.second.size() == 0) {
+			Logger::abort("Condition %s has no replicates.", i.first.c_str());
+		}
+
 		condition_name.push_back(i.first);
 		condition_replicates.push_back(std::vector<unsigned int>());
 		BOOST_FOREACH (SampleDB*& j, i.second) {
@@ -281,19 +251,31 @@ void SwitchTest::build_sample_matrix()
 			samples.push_back(matrix<float>());
 			samples.back().resize(tids.size(), j->get_num_samples());
 			for (SampleDBIterator k(*j); k != SampleDBIterator(); ++k) {
-				for (unsigned int l = 0; l < k->samples.size(); ++l) {
-					samples.back()(tids[k->transcript_id], l) = k->samples[l];
+				std::map<TranscriptID, unsigned int>::iterator tid;
+				tid = tids.find(k->transcript_id);
+				if (tid == tids.end()) {
+					Logger::abort(
+						"Transcript %s is in the quantification data but "
+						" not in the provided annotations.",
+						k->transcript_id.get().c_str());
 				}
+
+				matrix_row<matrix<float> > row(samples.back(), tid->second);
+				std::copy(k->samples.begin(), k->samples.end(), row.begin());
 			}
+			Logger::get_task(task_name).inc();
 			++repl_idx;
 		}
 	}
+
+	Logger::pop_task(task_name);
 }
 
 
 void SwitchTest::compute_tss_usage(unsigned int i, unsigned int k)
 {
-	std::fill(tss_usage.data().begin(), tss_usage.data().end(), 0.0);
+	matrix_row<matrix<float> > row(tss_usage, i);
+	std::fill(row.begin(), row.end(), 0.0);
 	for (unsigned int j = 0; j < m; ++j) {
 		tss_usage(i, tss_index[j]) += samples[i](j, k);
 	}
@@ -308,7 +290,7 @@ double SwitchTest::sample_log_likelihood(unsigned int i, unsigned int k)
 	compute_tss_usage(i, k);
 	for (unsigned int j = 0; j < tss_usage.size2(); ++j)  {
 		double x = std::max<double>(tss_usage(i, j), constants::zero_eps);
-		p += gaussian_lnpdf(mu(i, j), lambda(i, j), x);
+		p += gaussian_lnpdf(mu(i, j), lambda(i, j), log(x));
 	}
 
 	// TODO: tts usage and splicing probabilities

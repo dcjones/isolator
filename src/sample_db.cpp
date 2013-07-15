@@ -1,5 +1,6 @@
 
 #include <zlib.h>
+#include <boost/foreach.hpp>
 
 #include "sample_db.hpp"
 #include "logger.hpp"
@@ -227,7 +228,8 @@ void SampleDBIterator::increment()
         uLongf N = num_samples * sizeof(float);
         int ret = uncompress(reinterpret_cast<Bytef*>(&entry.samples.at(0)), &N,
                              reinterpret_cast<const Bytef*>(blob), blobsize);
-        if (ret != Z_OK) {
+
+        if (ret != Z_OK)    {
             Logger::abort("Error decompressing sampler output %d.", ret);
         }
 

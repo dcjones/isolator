@@ -2,9 +2,11 @@
 //#include <google/profiler.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <getopt.h>
 #include <gsl/gsl_statistics_float.h>
+#include <boost/foreach.hpp>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -15,6 +17,7 @@
 #include "logger.hpp"
 #include "sample_db.hpp"
 #include "sampler.hpp"
+#include "switchtest.hpp"
 #include "transcripts.hpp"
 
 const char* isolator_logo =
@@ -54,12 +57,12 @@ void print_quantify_help(FILE* fout)
             "                          will be quantified (by default, every transcript).\n"
             "-G, --gene-ids=FILE       A file listing gene id's of transcripts that\n"
             "                          will be quantified (by default, every transcript).\n"
-            "-N, --num-samples         Generate this number of samples (by default: 500).\n\n"
+            "-N, --num-samples         Generate this number of samples (by default: 250).\n\n"
             "See 'isolator help quantify' for more.\n");
 }
 
 
-int quantify(int argc, char* argv[])
+int isolator_quantify(int argc, char* argv[])
 {
     static struct option long_options[] =
     {
@@ -231,7 +234,7 @@ void print_summarize_help(FILE* fout)
 }
 
 
-int summarize(int argc, char* argv[])
+int isolator_summarize(int argc, char* argv[])
 {
     static struct option long_options[] =
     {
@@ -348,6 +351,116 @@ int summarize(int argc, char* argv[])
 }
 
 
+void print_test_usage(FILE* fout)
+{
+    fprintf(fout, "Usage: isolator test [options] genes.gtf a1.db[,a2.db...] [b1.db[,b2.db...]]\n");
+}
+
+void print_test_help(FILE* fout)
+{
+    print_test_usage(fout);
+    fprintf(fout,
+        "\nOptions:\n"
+        "-h, --help          Print this help message\n"
+        "-v, --verbose       Print a bunch of information useful mainly for debugging\n"
+        "-N, --num-samples   Generate this many samples (by default: 100)\n\n"
+        "See 'isolator help teste' for more.\n");
+}
+
+
+int isolator_test(int argc, char* argv[])
+{
+    static struct option long_options[] =
+    {
+        {"help", no_argument, NULL, 'h'},
+        {"verbose",     no_argument,       NULL, 'v'},
+        {0, 0, 0, 0}
+    };
+
+    Logger::level logger_level = Logger::INFO;
+    unsigned int num_samples = 10;
+
+    int opt;
+    int opt_idx;
+    while (true) {
+        opt = getopt_long(argc, argv, "hvo:", long_options, &opt_idx);
+
+        if (opt == -1) break;
+
+        switch (opt) {
+            case 'h':
+                print_summarize_help(stdout);
+                return 0;
+
+            case 'v':
+                logger_level = Logger::DEBUG;
+                break;
+
+            case 'N':
+                num_samples = strtoul(optarg, NULL, 10);
+                break;
+
+            case '?':
+                fprintf(stderr, "\n");
+                print_test_help(stderr);
+                return 1;
+
+            default:
+                abort();
+        }
+    }
+
+    // no positional argumens
+    if (optind + 1 >= argc) {
+        print_test_usage(stdout);
+        return 0;
+    }
+
+    print_logo();
+    Logger::start();
+    Logger::set_level(logger_level);
+
+    // read transcripts
+    const char* gtf_fn = argv[optind++];
+    TranscriptSet ts;
+    FILE* gtf_f = fopen(gtf_fn, "rb");
+    if (gtf_f == NULL) {
+        Logger::abort("Can't open file %s for reading.", gtf_fn);
+    }
+    ts.read_gtf(gtf_f);
+    fclose(gtf_f);
+
+    // initialize switch test
+    SwitchTest switchtest(ts);
+    int condition_num = 1;
+    std::vector<SampleDB*> sample_dbs;
+    for (; optind < argc; ++optind) {
+        char condition_name[100];
+        snprintf(condition_name, sizeof(condition_name), "condition%d", condition_num);
+
+        const char* fn;
+        for (fn = strtok(argv[optind], ","); fn; fn = strtok(NULL, ",")) {
+            sample_dbs.push_back(new SampleDB(fn, false));
+            switchtest.add_replicate(condition_name, *sample_dbs.back());
+            Logger::debug("Adding '%s' to condition '%s'", fn, condition_name);
+        }
+
+        ++condition_num;
+    }
+
+    switchtest.run(num_samples);
+
+    BOOST_FOREACH (SampleDB*& sample_db, sample_dbs) {
+        delete sample_db;
+    }
+
+    Logger::info("Finished. Have a nice day!");
+    Logger::end();
+
+    return EXIT_SUCCESS;
+}
+
+
 void print_usage(FILE* fout)
 {
     fprintf(fout,
@@ -401,13 +514,13 @@ int main(int argc, char* argv[])
     }
 
     if (strcmp(argv[0], "quantify") == 0) {
-        return quantify(argc, argv);
+        return isolator_quantify(argc, argv);
     }
     else if (strcmp(argv[0], "summarize") == 0) {
-        return summarize(argc, argv);
+        return isolator_summarize(argc, argv);
     }
     else if (strcmp(argv[0], "test") == 0) {
-        return EXIT_FAILURE; /* TODO */
+        return isolator_test(argc, argv);
     }
     else if (strcmp(argv[0], "help") == 0) {
         return isolator_help(argc, argv);
