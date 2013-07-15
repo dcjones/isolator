@@ -68,6 +68,9 @@ class SwitchTest
 		// condition index to replicate indexes
 		std::vector<std::vector<unsigned int> > condition_replicates;
 
+		// replicate index to condition index
+		std::vector<unsigned int> replicate_condition;
+
 		// temporary space used to marginalize tss abundance, indexed by
 		// replicate index -> tss index
 		boost::numeric::ublas::matrix<float> tss_usage;

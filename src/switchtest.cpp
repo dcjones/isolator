@@ -118,7 +118,7 @@ double SliceSampler::find_slice_edge(double x0, double slice_height, double step
 class LambdaSliceSampler : public SliceSampler
 {
 public:
-	~LambdaSliceSampler() {}
+	virtual ~LambdaSliceSampler() {}
 
 	double lpr(double lambda)
 	{
@@ -152,7 +152,7 @@ SwitchTest::SwitchTest(TranscriptSet& ts)
 		tss_tts_group[tss_tts].push_back(t->id);
 	}
 
-	Logger::info("%u transcript start sites", (unsigned int) tss_group.size());
+	Logger::info("%u transcription start sites", (unsigned int) tss_group.size());
 
 	m = ts.size();
 	tss_index.resize(m);
@@ -189,10 +189,10 @@ void SwitchTest::run(unsigned int num_samples)
 
 	build_sample_matrix();
 
-	mu.resize(n, tss_group.size());
+	mu.resize(data.size(), tss_group.size());
 	std::fill(mu.data().begin(), mu.data().end(), mu0);
 
-	lambda.resize(n, tss_group.size());
+	lambda.resize(data.size(), tss_group.size());
 	std::fill(lambda.data().begin(), lambda.data().end(), lambda0);
 
 	alpha.resize(tss_group.size());
@@ -212,6 +212,20 @@ void SwitchTest::run(unsigned int num_samples)
 		sample_condition_tss_usage();
 	}
 
+
+	// XXX: Dump condition tss means and variances
+	for (unsigned int i = 0; i < data.size(); ++i) {
+		char fn[100];
+		snprintf(fn, sizeof(fn), "%s.tsv", condition_name[i].c_str());
+		FILE* out = fopen(fn, "w");
+		fprintf(out, "mu\tlambda\n");
+		for (unsigned int j = 0; j < tss_group.size(); ++j) {
+			fprintf(out, "%e\t%e\n", mu(i, j), lambda(i, j));
+		}
+		fclose(out);
+	}
+
+
 	samples.clear();
 }
 
@@ -230,6 +244,7 @@ void SwitchTest::build_sample_matrix()
 
 	condition_name.clear();
 	condition_replicates.clear();
+	replicate_condition.resize(n);
 
 	std::map<TranscriptID, unsigned int> tids;
 	for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
@@ -238,6 +253,7 @@ void SwitchTest::build_sample_matrix()
 
 	// for each replicate build a sample matrix in which rows are indexed by transcript
 	// and columns by sample number.
+	unsigned int cond_idx = 0;
 	unsigned int repl_idx = 0;
 	BOOST_FOREACH (CondMapItem& i, data) {
 		if (i.second.size() == 0) {
@@ -248,6 +264,7 @@ void SwitchTest::build_sample_matrix()
 		condition_replicates.push_back(std::vector<unsigned int>());
 		BOOST_FOREACH (SampleDB*& j, i.second) {
 			condition_replicates.back().push_back(repl_idx);
+			replicate_condition[repl_idx] = cond_idx;
 			samples.push_back(matrix<float>());
 			samples.back().resize(tids.size(), j->get_num_samples());
 			for (SampleDBIterator k(*j); k != SampleDBIterator(); ++k) {
@@ -266,6 +283,7 @@ void SwitchTest::build_sample_matrix()
 			Logger::get_task(task_name).inc();
 			++repl_idx;
 		}
+		++cond_idx;
 	}
 
 	Logger::pop_task(task_name);
@@ -290,7 +308,9 @@ double SwitchTest::sample_log_likelihood(unsigned int i, unsigned int k)
 	compute_tss_usage(i, k);
 	for (unsigned int j = 0; j < tss_usage.size2(); ++j)  {
 		double x = std::max<double>(tss_usage(i, j), constants::zero_eps);
-		p += gaussian_lnpdf(mu(i, j), lambda(i, j), log(x));
+		p += gaussian_lnpdf(mu(replicate_condition[i], j),
+			                lambda(replicate_condition[i], j),
+		                	log(x));
 	}
 
 	// TODO: tts usage and splicing probabilities
@@ -324,7 +344,7 @@ void SwitchTest::sample_replicate_transcript_abundance()
 
 void SwitchTest::sample_condition_tss_usage()
 {
-	for (unsigned int i = 0; i < condition_replicates.size(); ++i) {
+	for (unsigned int i = 0; i < data.size(); ++i) {
 		for (unsigned int k = 0; k < tss_usage.size2(); ++k) {
 			// sample from lambda given mu and transcript abundance
 			lambda_sampler->alpha = alpha[k];

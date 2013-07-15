@@ -378,7 +378,7 @@ int isolator_test(int argc, char* argv[])
     };
 
     Logger::level logger_level = Logger::INFO;
-    unsigned int num_samples = 10;
+    unsigned int num_samples = 100;
 
     int opt;
     int opt_idx;
