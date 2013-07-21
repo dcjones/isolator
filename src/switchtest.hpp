@@ -13,6 +13,8 @@
 
 
 class LambdaSliceSampler;
+class AlphaSliceSampler;
+class BetaSliceSampler;
 
 
 class SwitchTest
@@ -42,10 +44,11 @@ class SwitchTest
 		void sample_condition_tss_usage();
 
 		// number of replicates
-		unsigned int n;
-
-		// number of transcripts
 		unsigned int m;
+
+		// number of transcription start sites
+		unsigned int n_tss;
+
 
 		typedef std::map<Interval, std::vector<unsigned int> > TSMap;
 		typedef std::pair<const Interval, std::vector<unsigned int> > TSMapItem;
@@ -76,23 +79,34 @@ class SwitchTest
 		boost::numeric::ublas::matrix<float> tss_usage;
 
 		// matrices containing sampled transcript abundances from 'isolator quantify'
+		// Indexed by: replicate -> transcript -> sample_num
 		std::vector<boost::numeric::ublas::matrix<float> > samples;
 
 		// replicate transcript abundance (index into samples)
 		std::vector<unsigned int> repl_sample_idx;
 
-		// condition tss abundance parameters mean and precision
+		// condition tss abundance mean. Indexed by: condition -> tss.
 		boost::numeric::ublas::matrix<float> mu;
-		boost::numeric::ublas::matrix<float> lambda;
+
+		// tss abundance precision. Indexed by: tss.
+		std::vector<float> lambda;
+
+		// gamma parameters for the gamma prior on lambda[i]
+		double alpha, beta;
+
+		// gamma parameters for the gamma pior on the alpha
+		double alpha_alpha_0, beta_alpha_0;
+
+		// gamma parameters for the gamma pior on the beta
+		double alpha_beta_0, beta_beta_0;
 
 		// parameters for the normal prior on mu, indexd by
 		// replicate index -> tss index
 		double mu0, lambda0;
 
-		// gamma parameters for the prior on sigma
-		std::vector<float> alpha, beta;
-
 		LambdaSliceSampler* lambda_sampler;
+		AlphaSliceSampler* alpha_sampler;
+		BetaSliceSampler* beta_sampler;
 
 		gsl_rng* rng;
 };

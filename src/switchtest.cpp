@@ -21,7 +21,7 @@ static const double LN_SQRT_TWO_PI = log(sqrt(2.0 * M_PI));
 
 static double gaussian_lnpdf(double mu, double lambda, double x)
 {
-	return -LN_SQRT_TWO_PI + sqrt(lambda) - sq(x - mu) * lambda / 2.0;
+	return -LN_SQRT_TWO_PI + log(sqrt(lambda)) - sq(x - mu) * lambda / 2.0;
 }
 
 
@@ -38,23 +38,29 @@ static double gamma_lnpdf(double alpha, double beta, double x)
 class SliceSampler
 {
 public:
-	SliceSampler();
+	SliceSampler(double lower_limit, double upper_limit);
 	virtual ~SliceSampler();
+
+
+protected:
+	// Log-probability at value x.
+	virtual double lpr(double x) = 0;
 
 	// Generate a new sample given the current value x0.
 	double sample(double x0);
 
-	// Log-probability at value x.
-	virtual double lpr(double x) = 0;
 
 private:
 	double find_slice_edge(double x0, double slice_height, double init_step);
+	double lower_limit, upper_limit;
 
 	gsl_rng* rng;
 };
 
 
-SliceSampler::SliceSampler()
+SliceSampler::SliceSampler(double lower_limit, double upper_limit)
+	: lower_limit(lower_limit)
+	, upper_limit(upper_limit)
 {
     rng = gsl_rng_alloc(gsl_rng_mt19937);
 }
@@ -69,45 +75,69 @@ SliceSampler::~SliceSampler()
 double SliceSampler::sample(double x0)
 {
 	double y0 = lpr(x0);
+
+	// XXX: optimization, not sampling
 	double slice_height = log(gsl_rng_uniform(rng)) + y0;
 
 	// find slice extents
-	double x_min = find_slice_edge(x0, slice_height, 1e-1);
-	double x_max = find_slice_edge(x0, slice_height, 1e+1);
+	double step = 0.1 * x0;
+	double x_min = find_slice_edge(x0, slice_height, -step);
+	double x_max = find_slice_edge(x0, slice_height, +step);
 
 	// sample
 	double x = 0.0;
-	double y = -INFINITY;
-	while (y < slice_height) {
+	double y;
+	// while (true) {
 		x = x_min + (x_max - x_min) * gsl_rng_uniform(rng);
-		y = lpr(y);
-	}
+		y = lpr(x);
+
+		// if (y < slice_height) {
+		// 	if (x < x0) x_min = x;
+		// 	else        x_max = x;
+		// }
+		// else break;
+	// }
+
 	return x;
 };
 
 
 double SliceSampler::find_slice_edge(double x0, double slice_height, double step)
 {
-	const double eps = 1e-2;
+	const double eps = 1e-2 * x0;
 
 	// step further and further until something outside the slice is found
 	double x, y;
 	do {
-		x = x0 + step;
+		x = std::max(lower_limit, std::min(upper_limit, x0 + step));
 		y = lpr(x);
 		step *= 2;
-	} while (y > slice_height);
+	} while (y > slice_height && x > lower_limit && x < upper_limit);
 	step /= 2;
 
 	// binary search to find the edge
-	double a = x0, b = x0 + step;
-	while (fabs(b - a) < eps) {
+	double a, b;
+	if (step < 0.0) {
+		a = std::max(lower_limit, std::min(upper_limit, x0 + step));
+		b = x0;
+	}
+	else {
+		a = x0;
+		b = std::max(lower_limit, std::min(upper_limit, x0 + step));
+	}
+
+	while (fabs(b - a) > eps) {
 		double c = (a + b) / 2;
 		double w = lpr(c);
 
-		// No! this depends on the direction
-		if (w > slice_height) a = c;
-		else                  b = c;
+		if (step < 0) {
+			if (w > slice_height) b = c;
+			else                  a = c;
+		}
+		else {
+			if (w > slice_height) a = c;
+			else                  b = c;
+		}
 	}
 
 	return (a + b) / 2;
@@ -118,27 +148,152 @@ double SliceSampler::find_slice_edge(double x0, double slice_height, double step
 class LambdaSliceSampler : public SliceSampler
 {
 public:
+	LambdaSliceSampler(double& alpha,
+					   double& beta,
+	                   boost::numeric::ublas::matrix<float>& mu,
+		               boost::numeric::ublas::matrix<float>& tss_usage,
+		               std::vector<unsigned int>& replicate_condition)
+		: SliceSampler(1e-4, INFINITY)
+		, alpha(alpha)
+		, beta(beta)
+		, mu(mu)
+		, tss_usage(tss_usage)
+		, replicate_condition(replicate_condition)
+	{}
+
 	virtual ~LambdaSliceSampler() {}
+
+
+	double sample(unsigned int tss_idx, double current_lambda)
+	{
+		this->tss_idx = tss_idx;
+		return SliceSampler::sample(current_lambda);
+	}
+
+protected:
 
 	double lpr(double lambda)
 	{
+		// prior
 		double p = gamma_lnpdf(alpha, beta, lambda);
-		for (std::vector<double>::iterator x = xs.begin(); x != xs.end(); ++x) {
-			p += gaussian_lnpdf(mu, lambda, *x);
+
+		// likelihood
+		for (unsigned int i = 0; i < tss_usage.size1(); ++i) {
+			double m = mu(replicate_condition[i], tss_idx);
+			double x = tss_usage(i, tss_idx);
+			double ll = gaussian_lnpdf(m, lambda, x);
+
+			p += gaussian_lnpdf(
+					mu(replicate_condition[i], tss_idx),
+					lambda,
+					tss_usage(i, tss_idx));
 		}
+
 		return p;
 	}
 
-	double alpha;
-	double beta;
-	double mu;
-	std::vector<double> xs;
+private:
+	unsigned tss_idx;
+
+	double& alpha;
+	double& beta;
+	boost::numeric::ublas::matrix<float>& mu;
+	boost::numeric::ublas::matrix<float>& tss_usage;
+    std::vector<unsigned int>& replicate_condition;
 };
 
+
+class AlphaSliceSampler : public SliceSampler
+{
+public:
+	AlphaSliceSampler(
+			double alpha_alpha_0,
+			double beta_alpha_0,
+			std::vector<float>& lambda)
+		: SliceSampler(1e-3, INFINITY)
+		, alpha_alpha_0(alpha_alpha_0)
+		, beta_alpha_0(beta_alpha_0)
+		, lambda(lambda)
+	{}
+
+	virtual ~AlphaSliceSampler() {}
+
+	double sample(double beta, double current_alpha)
+	{
+		this->beta = beta;
+		return SliceSampler::sample(current_alpha);
+	}
+
+protected:
+	double lpr(double alpha)
+	{
+		// prior
+		double p = gamma_lnpdf(alpha_alpha_0, beta_alpha_0, alpha);
+
+		// likelihood
+		BOOST_FOREACH (float& l, lambda) {
+			p += gamma_lnpdf(alpha, beta, l);
+		}
+
+		return p;
+	}
+
+private:
+	double beta;
+	double alpha_alpha_0, beta_alpha_0;
+	std::vector<float>& lambda;
+};
+
+
+class BetaSliceSampler : public SliceSampler
+{
+public:
+	BetaSliceSampler(
+			double alpha_beta_0,
+			double beta_beta_0,
+			std::vector<float>& lambda)
+		: SliceSampler(1e-8, INFINITY)
+		, alpha_beta_0(alpha_beta_0)
+		, beta_beta_0(beta_beta_0)
+		, lambda(lambda)
+	{}
+
+	virtual ~BetaSliceSampler() {}
+
+	double sample(double alpha, double current_beta)
+	{
+		this->alpha = alpha;
+		return SliceSampler::sample(current_beta);
+	}
+
+protected:
+	double lpr(double beta)
+	{
+		// prior
+		double p = gamma_lnpdf(alpha_beta_0, beta_beta_0, beta);
+
+		// likelihood
+		BOOST_FOREACH (float& l, lambda) {
+			double ll = gamma_lnpdf(alpha, beta, l);
+			p += gamma_lnpdf(alpha, beta, l);
+		}
+
+		return p;
+	}
+
+private:
+	double alpha;
+	double alpha_beta_0, beta_beta_0;
+	std::vector<float>& lambda;
+};
 
 
 SwitchTest::SwitchTest(TranscriptSet& ts)
 	: ts(ts)
+	, alpha_alpha_0(5)
+	, beta_alpha_0(2.5)
+	, alpha_beta_0(5)
+	, beta_beta_0(2.5)
 	, mu0(-10.0)
 	, lambda0(0.1)
 {
@@ -152,10 +307,10 @@ SwitchTest::SwitchTest(TranscriptSet& ts)
 		tss_tts_group[tss_tts].push_back(t->id);
 	}
 
-	Logger::info("%u transcription start sites", (unsigned int) tss_group.size());
+	n_tss = tss_group.size();
+	Logger::info("%u transcription start sites", n_tss);
 
-	m = ts.size();
-	tss_index.resize(m);
+	tss_index.resize(ts.size());
 	unsigned int tss_id = 0;
 	BOOST_FOREACH (const TSMapItem& i, tss_group) {
 		BOOST_FOREACH (const unsigned int& j, i.second) {
@@ -164,7 +319,10 @@ SwitchTest::SwitchTest(TranscriptSet& ts)
 		++tss_id;
 	}
 
-	lambda_sampler = new LambdaSliceSampler();
+	lambda_sampler = new LambdaSliceSampler(alpha, beta, mu,
+		                                    tss_usage, replicate_condition);
+	alpha_sampler = new AlphaSliceSampler(alpha_alpha_0, beta_alpha_0, lambda);
+	beta_sampler = new BetaSliceSampler(alpha_beta_0, beta_beta_0, lambda);
     rng = gsl_rng_alloc(gsl_rng_mt19937);
 }
 
@@ -172,6 +330,7 @@ SwitchTest::SwitchTest(TranscriptSet& ts)
 SwitchTest::~SwitchTest()
 {
 	delete lambda_sampler;
+	delete alpha_sampler;
 	gsl_rng_free(rng);
 }
 
@@ -184,56 +343,70 @@ void SwitchTest::add_replicate(const char* condition_name, SampleDB& replicate_d
 
 void SwitchTest::run(unsigned int num_samples)
 {
-	n = 0;
-	BOOST_FOREACH (CondMapItem& i, data) n += i.second.size();
+	m = 0;
+	BOOST_FOREACH (CondMapItem& i, data) m += i.second.size();
 
 	build_sample_matrix();
 
-	mu.resize(data.size(), tss_group.size());
+	const char* task_name = "Sampling";
+	Logger::push_task(task_name, num_samples);
+
+	mu.resize(data.size(), n_tss);
 	std::fill(mu.data().begin(), mu.data().end(), mu0);
 
-	lambda.resize(data.size(), tss_group.size());
-	std::fill(lambda.data().begin(), lambda.data().end(), lambda0);
+	// TODO: tinker with these. Move them to constants
+	alpha_alpha_0 = 5.0;
+	beta_alpha_0  = 2.5;
+	alpha_beta_0  = 5.0;
+	beta_beta_0   = 2.5;
 
-	alpha.resize(tss_group.size());
-	std::fill(alpha.begin(), alpha.end(), 1.0);
+	alpha = alpha_alpha_0 / beta_alpha_0;
+	beta  = alpha_beta_0 / beta_beta_0;
 
-	beta.resize(tss_group.size());
-	std::fill(beta.begin(), beta.end(), 0.5);
+	lambda.resize(n_tss);
+	std::fill(lambda.begin(), lambda.end(), alpha / beta);
 
-	tss_usage.resize(n, tss_group.size());
-	repl_sample_idx.resize(n);
+	tss_usage.resize(m, n_tss);
+	repl_sample_idx.resize(m);
 	std::fill(repl_sample_idx.begin(), repl_sample_idx.end(), 0);
-
 
 	// TODO burnin
 	for (unsigned int sample_num = 0; sample_num < num_samples; ++sample_num) {
 		sample_replicate_transcript_abundance();
 		sample_condition_tss_usage();
+		Logger::get_task(task_name).inc();
+		Logger::info("alpha = %e, beta = %e", alpha, beta);
 	}
 
 
-	// XXX: Dump condition tss means and variances
+	// Debugging output
+	FILE* out;
+	out = fopen("switchtest.tsv", "w");
+	fprintf(out, "condition\ttss_id\tmu\tlambda\n");
 	for (unsigned int i = 0; i < data.size(); ++i) {
-		char fn[100];
-		snprintf(fn, sizeof(fn), "%s.tsv", condition_name[i].c_str());
-		FILE* out = fopen(fn, "w");
-		fprintf(out, "mu\tlambda\n");
-		for (unsigned int j = 0; j < tss_group.size(); ++j) {
-			fprintf(out, "%e\t%e\n", mu(i, j), lambda(i, j));
+		for (unsigned int j = 0; j < n_tss; ++j) {
+			fprintf(out, "%u\t%u\t%e\t%e\n", i, j, (double) mu(i, j), (double) lambda[j]);
 		}
-		fclose(out);
 	}
+	fclose(out);
 
+	out = fopen("samples.tsv", "w");
+	fprintf(out, "condition\ttss_id\tx\n");
+	for (unsigned int i = 0; i < tss_usage.size1(); ++i) {
+		for (unsigned int j = 0; j < tss_usage.size2(); ++j) {
+			fprintf(out, "%u\t%u\t%e\n", replicate_condition[i], j, (double) tss_usage(i, j));
+		}
+	}
+	fclose(out);
 
-	samples.clear();
+	Logger::pop_task(task_name);
 }
 
 
 void SwitchTest::build_sample_matrix()
 {
 	const char* task_name = "Loading quantification data";
-	Logger::push_task(task_name, n);
+	Logger::push_task(task_name, m);
 
 	if (data.size() == 0) {
 		Logger::abort("No data to test.");
@@ -244,7 +417,7 @@ void SwitchTest::build_sample_matrix()
 
 	condition_name.clear();
 	condition_replicates.clear();
-	replicate_condition.resize(n);
+	replicate_condition.resize(m);
 
 	std::map<TranscriptID, unsigned int> tids;
 	for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
@@ -294,8 +467,12 @@ void SwitchTest::compute_tss_usage(unsigned int i, unsigned int k)
 {
 	matrix_row<matrix<float> > row(tss_usage, i);
 	std::fill(row.begin(), row.end(), 0.0);
-	for (unsigned int j = 0; j < m; ++j) {
+	for (unsigned int j = 0; j < ts.size(); ++j) {
 		tss_usage(i, tss_index[j]) += samples[i](j, k);
+	}
+
+	BOOST_FOREACH (float& x, row) {
+		x = log(std::max<float>(x, constants::zero_eps));
 	}
 }
 
@@ -307,10 +484,8 @@ double SwitchTest::sample_log_likelihood(unsigned int i, unsigned int k)
 	// tss usage log-probabilities
 	compute_tss_usage(i, k);
 	for (unsigned int j = 0; j < tss_usage.size2(); ++j)  {
-		double x = std::max<double>(tss_usage(i, j), constants::zero_eps);
 		p += gaussian_lnpdf(mu(replicate_condition[i], j),
-			                lambda(replicate_condition[i], j),
-		                	log(x));
+			                lambda[j], tss_usage(i, j));
 	}
 
 	// TODO: tts usage and splicing probabilities
@@ -344,26 +519,19 @@ void SwitchTest::sample_replicate_transcript_abundance()
 
 void SwitchTest::sample_condition_tss_usage()
 {
+	// sample mu
 	for (unsigned int i = 0; i < data.size(); ++i) {
 		for (unsigned int k = 0; k < tss_usage.size2(); ++k) {
-			// sample from lambda given mu and transcript abundance
-			lambda_sampler->alpha = alpha[k];
-			lambda_sampler->beta = beta[k];
-			lambda_sampler->mu = mu(i, k);
-			lambda_sampler->xs.resize(condition_replicates[i].size());
-			matrix_column<matrix<float> > col(tss_usage, k);
-			std::copy(col.begin(), col.end(), lambda_sampler->xs.begin());
-			lambda(i, k) = lambda_sampler->sample(lambda(i, k));
+			unsigned num_cond_replicates = condition_replicates[i].size();
 
 			// sample from mu given lambda and transcript abundance
-			unsigned num_cond_replicates = condition_replicates[i].size();
 			double sample_mu = 0.0;
-			BOOST_FOREACH(float& x, col) {
-				sample_mu += x;
+			BOOST_FOREACH (unsigned int& j, condition_replicates[i]) {
+				sample_mu += tss_usage(j, k);
 			}
 			sample_mu /= (double) num_cond_replicates;
 
-			double weighted_lambda_ik = num_cond_replicates * lambda(i, k);
+			double weighted_lambda_ik = num_cond_replicates * lambda[k];
 			double numer = sample_mu * weighted_lambda_ik + mu0 * lambda0;
 			double denom = lambda0 + weighted_lambda_ik;
 			double posterior_mu = numer / denom;
@@ -371,4 +539,56 @@ void SwitchTest::sample_condition_tss_usage()
 			mu(i, k) = posterior_mu + gsl_ran_gaussian(rng, posterior_sigma);
 		}
 	}
+
+	// sample lambda
+	for (unsigned int i = 0; i < n_tss; ++i) {
+		lambda[i] = lambda_sampler->sample(i, lambda[i]);
+	}
+
+
+	// sample alpha
+	alpha = alpha_sampler->sample(beta, alpha);
+
+	double lambda_sum = 0.0;
+	unsigned int num_nonzero_tss = 0;
+	double log_zero_eps = log(constants::zero_eps);
+	for (unsigned int j = 0; j < n_tss; ++j) {
+		// If I allow larger values, beta shrinks to a tiny tiny number.
+		// I would think it work the other way arround.
+		if (lambda[j] < 1e3) {
+			num_nonzero_tss++;
+			lambda_sum += lambda[j];
+		}
+
+		// unsigned int i;
+		// for (i = 0; i < m; ++i) {
+		// 	if (tss_usage(i, j) > -20.0) break;
+		// }
+		// if (i < m) {
+		// 	num_nonzero_tss++;
+		// 	lambda_sum += lambda[j];
+		// }
+	}
+
+	Logger::info("num_nonzero_tss: %u", num_nonzero_tss);
+	Logger::info("a_post = %e, b_post = %e",
+		                 (alpha_beta_0 + num_nonzero_tss * alpha),
+		                 (beta_beta_0 + lambda_sum));
+	// Logger::info("E[beta] = %e",
+	// 	                 (alpha_beta_0 + n_tss * alpha) /
+	// 	                 (beta_beta_0 + lambda_sum));
+	beta = gsl_ran_gamma(rng,
+		                 alpha_beta_0 + num_nonzero_tss * alpha,
+		                 1.0 / (beta_beta_0 + lambda_sum));
+	// Fuck. This is correctly sampling but beta is still shrinking to 0. Why the fuck.
+
+	// Ok, the problem now is some lambdas get very very large so that
+	// likelihood goes no infinity for genes that are stuck at zero.
+
+	// How do we deal with this? I think we need to figure
+
+	// What I want to do is just compute these values for genes that are
+	// expressed beyond some cutoff. But that isn't right because then we
+	// could increase the likelihood just by forcing things to zero expression
+
 }
