@@ -89,6 +89,10 @@ class SwitchTest
 		// replicate index -> tss index
 		boost::numeric::ublas::matrix<float> tss_usage;
 
+        // factor by which a replicate's tss_expression should be normalized
+        std::vector<double> tss_usage_norm_factor;
+        std::vector<double> tss_usage_norm_factor_work;
+
 		// matrices containing sampled transcript abundances from 'isolator quantify'
 		// Indexed by: replicate -> transcript -> sample_num
 		std::vector<boost::numeric::ublas::matrix<float> > samples;

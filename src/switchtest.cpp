@@ -373,6 +373,9 @@ void SwitchTest::run(unsigned int num_samples, const std::vector<double>& quanti
 	repl_sample_idx.resize(m);
 	std::fill(repl_sample_idx.begin(), repl_sample_idx.end(), 0);
 
+    tss_usage_norm_factor.resize(m);
+    tss_usage_norm_factor_work.resize(n_tss);
+
 	FILE* samples_out = fopen("samples.tsv", "w");
 	fprintf(samples_out, "sample_num\tcondition\ttss_id\tx\n");
 
@@ -502,11 +505,23 @@ void SwitchTest::compute_tss_usage(unsigned int i, unsigned int k)
 	matrix_row<matrix<float> > row(tss_usage, i);
 	std::fill(row.begin(), row.end(), 0.0);
 	for (unsigned int j = 0; j < ts.size(); ++j) {
-		tss_usage(i, tss_index[j]) += samples[i](j, k);
+        row[tss_index[j]] += samples[i](j, k);
 	}
 
 	BOOST_FOREACH (float& x, row) {
-		x = log2(std::max<float>(x, constants::zero_eps));
+		x = std::max<float>(x, constants::zero_eps);
+	}
+
+    std::copy(row.begin(), row.end(), tss_usage_norm_factor_work.begin());
+    std::sort(tss_usage_norm_factor_work.begin(), tss_usage_norm_factor_work.end());
+    tss_usage_norm_factor[i] =
+        gsl_stats_quantile_from_sorted_data(&tss_usage_norm_factor_work.at(0), 1,
+                                            n_tss, 0.75);
+
+    double z = tss_usage_norm_factor[0] / tss_usage_norm_factor[i];
+
+	BOOST_FOREACH (float& x, row) {
+        x = log2(z * x);
 	}
 }
 
@@ -534,6 +549,7 @@ double SwitchTest::sample_log_likelihood(unsigned int i, unsigned int k)
 void SwitchTest::sample_replicate_transcript_abundance()
 {
 	for (unsigned int i = 0; i < samples.size(); ++i) {
+        sample_log_likelihood(i, gsl_rng_uniform_int(rng, samples[i].size2()));
         // This is an approximation as it is not conditioning on mu or lambda.
 		repl_sample_idx[i] = gsl_rng_uniform_int(rng, samples[i].size2());
 	}
@@ -624,7 +640,7 @@ void SwitchTest::output_mu_samples(FILE* out, const std::vector<double>& quantil
     fprintf(out, "gene_ids\ttranscript_ids");
     BOOST_FOREACH (const double& quantile, quantiles) {
         snprintf(name, 100, "%0.0f", 100.0 * quantile);
-        fprintf(out, "\tcond1_low_%s\tcond1_high_%s\tcond1_low_%s\tcond1_high_%s\tlog2fc_low_%s\tlog2fc_high%s",
+        fprintf(out, "\tcond1_low_%s\tcond1_high_%s\tcond2_low_%s\tcond2_high_%s\tlog2fc_low_%s\tlog2fc_high_%s",
                 name, name, name, name, name, name);
     }
     fprintf(out, "\n");
@@ -648,9 +664,9 @@ void SwitchTest::output_mu_samples(FILE* out, const std::vector<double>& quantil
         BOOST_FOREACH (const GeneID& gene_id, tss_gene_ids[i]) {
             if (!first) {
                 fprintf(out, ",");
-                first = false;
             }
             fprintf(out, "%s", gene_id.get().c_str());
+            first = false;
         }
         fprintf(out, "\t");
 
@@ -658,9 +674,9 @@ void SwitchTest::output_mu_samples(FILE* out, const std::vector<double>& quantil
         BOOST_FOREACH (const TranscriptID& transcript_id, tss_transcript_ids[i]) {
             if (!first) {
                 fprintf(out, ",");
-                first = false;
             }
             fprintf(out, "%s", transcript_id.get().c_str());
+            first = false;
         }
 
         BOOST_FOREACH (const double& quantile, quantiles) {
