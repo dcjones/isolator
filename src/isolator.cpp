@@ -448,7 +448,10 @@ int isolator_test(int argc, char* argv[])
         ++condition_num;
     }
 
-    switchtest.run(num_samples);
+    std::vector<double> quantiles;
+    quantiles.push_back(0.95);
+
+    switchtest.run(num_samples, quantiles);
 
     BOOST_FOREACH (SampleDB*& sample_db, sample_dbs) {
         delete sample_db;

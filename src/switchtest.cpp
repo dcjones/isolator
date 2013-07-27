@@ -2,6 +2,7 @@
 #include <set>
 #include <gsl/gsl_randist.h>
 #include <gsl/gsl_sf_gamma.h>
+#include <gsl/gsl_statistics_double.h>
 #include <boost/foreach.hpp>
 #include <boost/numeric/ublas/matrix_proxy.hpp>
 #include "constants.hpp"
@@ -179,10 +180,6 @@ protected:
 
 		// likelihood
 		for (unsigned int i = 0; i < tss_usage.size1(); ++i) {
-			double m = mu(replicate_condition[i], tss_idx);
-			double x = tss_usage(i, tss_idx);
-			double ll = gaussian_lnpdf(m, lambda, x);
-
 			p += gaussian_lnpdf(
 					mu(replicate_condition[i], tss_idx),
 					lambda,
@@ -274,7 +271,6 @@ protected:
 
 		// likelihood
 		BOOST_FOREACH (float& l, lambda) {
-			double ll = gamma_lnpdf(alpha, beta, l);
 			p += gamma_lnpdf(alpha, beta, l);
 		}
 
@@ -305,15 +301,22 @@ SwitchTest::SwitchTest(TranscriptSet& ts)
 
 		Interval tss_tts(t->seqname, t->min_start, t->max_end, t->strand);
 		tss_tts_group[tss_tts].push_back(t->id);
+
+        transcript_ids.push_back(t->transcript_id);
+        gene_ids.push_back(t->gene_id);
 	}
 
 	n_tss = tss_group.size();
 	Logger::info("%u transcription start sites", n_tss);
 
 	tss_index.resize(ts.size());
+    tss_gene_ids.resize(tss_group.size());
+    tss_transcript_ids.resize(tss_group.size());
 	unsigned int tss_id = 0;
 	BOOST_FOREACH (const TSMapItem& i, tss_group) {
 		BOOST_FOREACH (const unsigned int& j, i.second) {
+            tss_gene_ids[tss_id].insert(gene_ids[j]);
+            tss_transcript_ids[tss_id].insert(transcript_ids[j]);
 			tss_index[j] = tss_id;
 		}
 		++tss_id;
@@ -341,7 +344,7 @@ void SwitchTest::add_replicate(const char* condition_name, SampleDB& replicate_d
 }
 
 
-void SwitchTest::run(unsigned int num_samples)
+void SwitchTest::run(unsigned int num_samples, const std::vector<double>& quantiles)
 {
 	m = 0;
 	BOOST_FOREACH (CondMapItem& i, data) m += i.second.size();
@@ -370,36 +373,67 @@ void SwitchTest::run(unsigned int num_samples)
 	repl_sample_idx.resize(m);
 	std::fill(repl_sample_idx.begin(), repl_sample_idx.end(), 0);
 
+	FILE* samples_out = fopen("samples.tsv", "w");
+	fprintf(samples_out, "sample_num\tcondition\ttss_id\tx\n");
+
+	FILE* switchtest_out = fopen("switchtest.tsv", "w");
+	fprintf(switchtest_out, "sample_num\tcondition\ttss_id\tmu\tlambda\n");
+
 	// TODO burnin
 	for (unsigned int sample_num = 0; sample_num < num_samples; ++sample_num) {
 		sample_replicate_transcript_abundance();
 		sample_condition_tss_usage();
 		Logger::get_task(task_name).inc();
 		Logger::info("alpha = %e, beta = %e", alpha, beta);
-	}
 
-
-	// Debugging output
-	FILE* out;
-	out = fopen("switchtest.tsv", "w");
-	fprintf(out, "condition\ttss_id\tmu\tlambda\n");
-	for (unsigned int i = 0; i < data.size(); ++i) {
-		for (unsigned int j = 0; j < n_tss; ++j) {
-			fprintf(out, "%u\t%u\t%e\t%e\n", i, j, (double) mu(i, j), (double) lambda[j]);
+		// Debugging output
+		unsigned int debug_n_tss = 100;
+		for (unsigned int i = 0; i < data.size(); ++i) {
+			for (unsigned int j = 0; j < debug_n_tss; ++j) {
+				fprintf(switchtest_out, "%u\t%u\t%u\t%e\t%e\n",
+					sample_num, i, j, (double) mu(i, j), (double) lambda[j]);
+			}
 		}
-	}
-	fclose(out);
 
-	out = fopen("samples.tsv", "w");
-	fprintf(out, "condition\ttss_id\tx\n");
-	for (unsigned int i = 0; i < tss_usage.size1(); ++i) {
-		for (unsigned int j = 0; j < tss_usage.size2(); ++j) {
-			fprintf(out, "%u\t%u\t%e\n", replicate_condition[i], j, (double) tss_usage(i, j));
+		for (unsigned int i = 0; i < tss_usage.size1(); ++i) {
+			for (unsigned int j = 0; j < debug_n_tss; ++j) {
+				fprintf(samples_out, "%u\t%u\t%u\t%e\n",
+					sample_num, replicate_condition[i], j, (double) tss_usage(i, j));
+			}
 		}
-	}
-	fclose(out);
 
+        mu_samples.push_back(mu);
+	}
+
+	fclose(samples_out);
+	fclose(switchtest_out);
+
+    for (unsigned int cond1 = 0; cond1 < data.size() - 1; ++cond1) {
+        for (unsigned cond2 = cond1 + 1; cond2 < data.size(); ++cond2) {
+            size_t fnlen = condition_name[cond1].size() +
+                           condition_name[cond2].size() +
+                           strlen("transcription__.tsv") + 1;
+            char* fn = new char[fnlen];
+            snprintf(fn, fnlen, "transcription_%s_%s.tsv",
+                     condition_name[cond1].c_str(),
+                     condition_name[cond2].c_str());
+            FILE* out = fopen(fn, "w");
+            output_mu_samples(out, quantiles, cond1, cond2);
+            fclose(out);
+            delete [] fn;
+        }
+    }
 	Logger::pop_task(task_name);
+
+    /* What is this going to return? A table?
+     *
+     * The relevent information is
+     *  mu/lambda samples
+     *
+     * If we output another goddamn database, we need to figure out a way to
+     * query it in a reasonable way.
+     *
+     */
 }
 
 
@@ -472,7 +506,7 @@ void SwitchTest::compute_tss_usage(unsigned int i, unsigned int k)
 	}
 
 	BOOST_FOREACH (float& x, row) {
-		x = log(std::max<float>(x, constants::zero_eps));
+		x = log2(std::max<float>(x, constants::zero_eps));
 	}
 }
 
@@ -500,19 +534,8 @@ double SwitchTest::sample_log_likelihood(unsigned int i, unsigned int k)
 void SwitchTest::sample_replicate_transcript_abundance()
 {
 	for (unsigned int i = 0; i < samples.size(); ++i) {
-		// current sample log probability
-		double q = sample_log_likelihood(i, repl_sample_idx[i]);
-
-		unsigned int proposal = gsl_rng_uniform_int(rng, samples[i].size2());
-		double p = sample_log_likelihood(i, proposal);
-
-		// metropolis accept/reject
-		if (log(gsl_rng_uniform(rng)) < p - q) {
-			repl_sample_idx[i] = proposal;
-		}
-		else {
-			compute_tss_usage(i, repl_sample_idx[i]);
-		}
+        // This is an approximation as it is not conditioning on mu or lambda.
+		repl_sample_idx[i] = gsl_rng_uniform_int(rng, samples[i].size2());
 	}
 }
 
@@ -551,7 +574,6 @@ void SwitchTest::sample_condition_tss_usage()
 
 	double lambda_sum = 0.0;
 	unsigned int num_nonzero_tss = 0;
-	double log_zero_eps = log(constants::zero_eps);
 	for (unsigned int j = 0; j < n_tss; ++j) {
 		// If I allow larger values, beta shrinks to a tiny tiny number.
 		// I would think it work the other way arround.
@@ -592,3 +614,75 @@ void SwitchTest::sample_condition_tss_usage()
 	// could increase the likelihood just by forcing things to zero expression
 
 }
+
+
+void SwitchTest::output_mu_samples(FILE* out, const std::vector<double>& quantiles,
+                                   unsigned int cond1, unsigned int cond2)
+{
+    // header
+    char name[100];
+    fprintf(out, "gene_ids\ttranscript_ids");
+    BOOST_FOREACH (const double& quantile, quantiles) {
+        snprintf(name, 100, "%0.0f", 100.0 * quantile);
+        fprintf(out, "\tcond1_low_%s\tcond1_high_%s\tcond1_low_%s\tcond1_high_%s\tlog2fc_low_%s\tlog2fc_high%s",
+                name, name, name, name, name, name);
+    }
+    fprintf(out, "\n");
+
+    const unsigned int num_samples = mu_samples.size();
+    std::vector<double> cond1_samples(num_samples), cond2_samples(num_samples),
+                        log2fc_samples(num_samples);
+
+    for (unsigned int i = 0; i < n_tss; ++i) {
+        for (unsigned int j = 0; j < num_samples; ++j) {
+            cond1_samples[j] = mu_samples[j](cond1, i);
+            cond2_samples[j] = mu_samples[j](cond2, i);
+            log2fc_samples[j] = cond1_samples[j] - cond2_samples[j];
+        }
+
+        std::sort(log2fc_samples.begin(), log2fc_samples.end());
+        std::sort(cond1_samples.begin(), cond1_samples.end());
+        std::sort(cond2_samples.begin(), cond2_samples.end());
+
+        bool first = true;
+        BOOST_FOREACH (const GeneID& gene_id, tss_gene_ids[i]) {
+            if (!first) {
+                fprintf(out, ",");
+                first = false;
+            }
+            fprintf(out, "%s", gene_id.get().c_str());
+        }
+        fprintf(out, "\t");
+
+        first = true;
+        BOOST_FOREACH (const TranscriptID& transcript_id, tss_transcript_ids[i]) {
+            if (!first) {
+                fprintf(out, ",");
+                first = false;
+            }
+            fprintf(out, "%s", transcript_id.get().c_str());
+        }
+
+        BOOST_FOREACH (const double& quantile, quantiles) {
+            fprintf(out, "\t%e\t%e\t%e\t%e\t%e\t%e",
+                    gsl_stats_quantile_from_sorted_data(&cond1_samples.at(0),
+                                                        1, num_samples, quantile),
+                    gsl_stats_quantile_from_sorted_data(&cond1_samples.at(0),
+                                                        1, num_samples, 1.0 - quantile),
+                    gsl_stats_quantile_from_sorted_data(&cond2_samples.at(0),
+                                                        1, num_samples, quantile),
+                    gsl_stats_quantile_from_sorted_data(&cond2_samples.at(0),
+                                                        1, num_samples, 1.0 - quantile),
+                    gsl_stats_quantile_from_sorted_data(&log2fc_samples.at(0),
+                                                        1, num_samples, quantile),
+                    gsl_stats_quantile_from_sorted_data(&log2fc_samples.at(0),
+                                                        1, num_samples, 1.0 - quantile));
+        }
+        fprintf(out, "\n");
+    }
+}
+
+
+
+
+

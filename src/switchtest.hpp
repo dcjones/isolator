@@ -5,6 +5,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <set>
 #include <boost/numeric/ublas/matrix.hpp>
 #include <gsl/gsl_rng.h>
 #include "intervals.hpp"
@@ -27,7 +28,7 @@ class SwitchTest
 		void add_replicate(const char* condition_name, SampleDB& replicate_data);
 
 		// Run the sampler.
-		void run(unsigned int num_samples);
+		void run(unsigned int num_samples, const std::vector<double>& quantiles);
 
 	private:
 		void check_data();
@@ -43,12 +44,14 @@ class SwitchTest
 		void sample_replicate_transcript_abundance();
 		void sample_condition_tss_usage();
 
+        void output_mu_samples(FILE* out, const std::vector<double>& quantiles,
+                               unsigned int cond1, unsigned int cond2);
+
 		// number of replicates
 		unsigned int m;
 
 		// number of transcription start sites
 		unsigned int n_tss;
-
 
 		typedef std::map<Interval, std::vector<unsigned int> > TSMap;
 		typedef std::pair<const Interval, std::vector<unsigned int> > TSMapItem;
@@ -58,7 +61,15 @@ class SwitchTest
 		// map each transcript index to it's tss index
 		std::vector<unsigned int> tss_index;
 
+        // Transcript and gene IDs indexd by tss index.
+        std::vector<std::set<GeneID> > tss_gene_ids;
+        std::vector<std::set<TranscriptID> > tss_transcript_ids;
+
 		TranscriptSet& ts;
+
+        // tid to transcript_ids and gene_ids
+        std::vector<TranscriptID> transcript_ids;
+        std::vector<GeneID> gene_ids;
 
 		// map a condition name to data from some number of replicates
 		typedef std::map<std::string, std::vector<SampleDB*> > CondMap;
@@ -107,6 +118,10 @@ class SwitchTest
 		LambdaSliceSampler* lambda_sampler;
 		AlphaSliceSampler* alpha_sampler;
 		BetaSliceSampler* beta_sampler;
+
+        // collected samples indexed by:
+        // sample_num -> condition -> tss
+        std::vector<boost::numeric::ublas::matrix<float> > mu_samples;
 
 		gsl_rng* rng;
 };
