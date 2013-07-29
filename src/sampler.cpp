@@ -1533,14 +1533,9 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
 
 void AbundanceSamplerThread::run_component(unsigned int u)
 {
-    if (S.frag_count_sums[u] == 0.0) {
-        S.cmix[u] = 0.0;
-    }
-    else {
-        float prec = S.frag_count_sums[u] +
-                     S.component_num_transcripts[u] * constants::tmix_prior_prec;
-        S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
-    }
+    float prec = S.frag_count_sums[u] +
+                 S.component_num_transcripts[u] * constants::tmix_prior_prec;
+    S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
 }
 
 

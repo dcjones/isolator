@@ -109,9 +109,6 @@ namespace constants
      * after optimization. */
     extern float zero_eps;
 
-    /* Any sample recorded less that this number gets rounded down to zero. */
-    extern float round_down_eps;
-
     /* To account for imprecision in the transcription start and terminotation
      * sites, we extent the 5p and 3p ends of each transcript. */
     extern pos_t transcript_5p_extension;
