@@ -943,7 +943,6 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
             continue;
         }
 
-
         for (MultireadSet::iterator r = multiread_set.begin();
              r != multiread_set.end(); ++r) {
             unsigned int alignment_num = 0;
@@ -1978,8 +1977,9 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
         double total_weight = 0.0;
         for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
             samples[i][sample_num] =
-                transcript_weights[i] == 0.0 ?
-                tmix[i] : tmix[i] * cmix[transcript_component[i]] / transcript_weights[i];
+                cmix[transcript_component[i]] *
+                (transcript_weights[i] == 0.0 ?
+                    tmix[i] : tmix[i] / transcript_weights[i]);
             total_weight += samples[i][sample_num];
         }
 
