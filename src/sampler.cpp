@@ -1979,7 +1979,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
         for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
             samples[i][sample_num] =
                 transcript_weights[i] == 0.0 ?
-                0.0 : tmix[i] * cmix[transcript_component[i]] / transcript_weights[i];
+                tmix[i] : tmix[i] * cmix[transcript_component[i]] / transcript_weights[i];
             total_weight += samples[i][sample_num];
         }
 
