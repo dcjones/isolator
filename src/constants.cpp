@@ -27,6 +27,7 @@ float                constants::zero_eps                     = 1e-10;
 pos_t                constants::transcript_5p_extension      = 0;
 pos_t                constants::transcript_3p_extension      = 0;
 float                constants::min_transcript_weight        = 1.0;
+float                constants::min_transcript_fraglen_acceptance = 0.5;
 float                constants::tmix_prior_prec              = 0.1;
 unsigned int         constants::sampler_component_block_size = 50;
 unsigned int         constants::sampler_multiread_block_size = 10000;

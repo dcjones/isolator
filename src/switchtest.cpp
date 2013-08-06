@@ -77,7 +77,6 @@ double SliceSampler::sample(double x0)
 {
     double y0 = lpr(x0);
 
-    // XXX: optimization, not sampling
     double slice_height = log(gsl_rng_uniform(rng)) + y0;
 
     // find slice extents
@@ -290,8 +289,8 @@ SwitchTest::SwitchTest(TranscriptSet& ts)
     , beta_alpha_0(2.5)
     , alpha_beta_0(5)
     , beta_beta_0(2.5)
-    , mu0(-10.0)
-    , lambda0(0.1)
+    , mu0(-20.0)
+    , lambda0(0.01)
 {
     // organize transcripts by TSS and TTS
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
@@ -387,7 +386,7 @@ void SwitchTest::run(unsigned int num_samples, const std::vector<double>& quanti
         sample_replicate_transcript_abundance();
         sample_condition_tss_usage();
         Logger::get_task(task_name).inc();
-        Logger::info("alpha = %e, beta = %e", alpha, beta);
+        //Logger::info("alpha = %e, beta = %e", alpha, beta);
 
         // Debugging output
         unsigned int debug_n_tss = 100;
@@ -518,7 +517,10 @@ void SwitchTest::compute_tss_usage(unsigned int i, unsigned int k)
         gsl_stats_quantile_from_sorted_data(&tss_usage_norm_factor_work.at(0), 1,
                                             n_tss, 0.75);
 
+
     double z = tss_usage_norm_factor[0] / tss_usage_norm_factor[i];
+
+    Logger::info("tss_usage_norm_factor[%d] = %f", i, z);
 
     BOOST_FOREACH (float& x, row) {
         x = log2(z * x);
@@ -597,21 +599,12 @@ void SwitchTest::sample_condition_tss_usage()
             num_nonzero_tss++;
             lambda_sum += lambda[j];
         }
-
-        // unsigned int i;
-        // for (i = 0; i < m; ++i) {
-        //     if (tss_usage(i, j) > -20.0) break;
-        // }
-        // if (i < m) {
-        //     num_nonzero_tss++;
-        //     lambda_sum += lambda[j];
-        // }
     }
 
-    Logger::info("num_nonzero_tss: %u", num_nonzero_tss);
-    Logger::info("a_post = %e, b_post = %e",
-                         (alpha_beta_0 + num_nonzero_tss * alpha),
-                         (beta_beta_0 + lambda_sum));
+    //Logger::info("num_nonzero_tss: %u", num_nonzero_tss);
+    //Logger::info("a_post = %e, b_post = %e",
+                         //(alpha_beta_0 + num_nonzero_tss * alpha),
+                         //(beta_beta_0 + lambda_sum));
     // Logger::info("E[beta] = %e",
     //                      (alpha_beta_0 + n_tss * alpha) /
     //                      (beta_beta_0 + lambda_sum));

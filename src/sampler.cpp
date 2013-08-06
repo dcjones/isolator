@@ -1111,7 +1111,9 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
         tw += frag_len_pr * ws[frag_len];
     }
 
-    if (!finite(tw) || tw <= constants::min_transcript_weight) {
+    if (!finite(tw) ||
+        frag_len_c(trans_len) <= constants::min_transcript_fraglen_acceptance ||
+        tw <= constants::min_transcript_weight) {
         tw = 0.0;
     }
 

@@ -122,6 +122,10 @@ namespace constants
      * minimum transcript weight that is applied to avoid these situations. */
     extern float min_transcript_weight;
 
+    /* As an extra precation, don't quantify transcripts where more than this
+     * percentage of the reads would be rejected by size selection. */
+    extern float min_transcript_fraglen_acceptance;
+
     /* Symmetric-dirchlet prior precision for transcript mixtures. */
     extern float tmix_prior_prec;
 
