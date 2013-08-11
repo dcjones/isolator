@@ -35,6 +35,7 @@ class SampleDB
                                    size_t num_samples);
 
         unsigned int get_num_samples();
+        unsigned long get_num_reads();
 
     private:
         void exec(const char* stmt);

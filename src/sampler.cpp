@@ -2019,6 +2019,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
     task_name = "Recording samples";
     Logger::push_task(task_name);
     out.begin_transaction();
+    out.insert_param("num_reads", weight_matrix->ncol);
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         out.insert_sampler_result(
                 t->transcript_id, t->gene_id,

@@ -92,6 +92,25 @@ unsigned int SampleDB::get_num_samples()
 }
 
 
+unsigned long SampleDB::get_num_reads()
+{
+    sqlite3_stmt* s;
+    int result = sqlite3_prepare_v2(db,
+            "select value from parameters where name = \"num_reads\"", -1, &s, NULL);
+    if (result != SQLITE_OK) {
+        Logger::abort("Sqlite3 error: '%s'.", sqlite3_errmsg(db));
+    }
+
+    result = sqlite3_step(s);
+    if (result != SQLITE_ROW) {
+        Logger::abort("Malformed sampler results.");
+    }
+    unsigned long num_reads = sqlite3_column_double(s, 0);
+    sqlite3_finalize(s);
+    return num_reads;
+}
+
+
 void SampleDB::insert_param(const char* key, double val)
 {
     sqlite3_bind_text(param_ins_stmt, 1, key, -1, SQLITE_STATIC);

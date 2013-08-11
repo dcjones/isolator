@@ -152,6 +152,15 @@ namespace constants
 
     /* Number of hillclimbing iterations. */
     extern unsigned int sampler_hillclimb_samples;
+
+    /* When looking for changes in splicing, a pooled precision prior is
+     * conditioned on the number of isoforms in the group. We don't want this
+     * conditioning to make things too sparse for groups with many isoforms, so
+     * at least this many group with k isoforms must exist to condition on k,
+     * otherwise we just group it with k - 1. Yeah, so this is a little hard to
+     * explain tersely....
+     */
+    extern unsigned int min_tss_group_isoforms_conditioning;
 }
 
 #endif

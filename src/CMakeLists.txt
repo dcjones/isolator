@@ -12,6 +12,7 @@ add_executable(isolator
                common.cpp
                constants.cpp
                cpuid.cpp
+               dirichlet.c
                emp_dist.cpp
                fragment_model.cpp
                intervals.cpp
@@ -39,6 +40,7 @@ target_link_libraries(isolator
                       samtools
                       seqbias
                       sqlite3
+                      nlopt
                       ${Boost_SYSTEM_LIBRARY}
                       ${Boost_THREAD_LIBRARY}
                       ${Boost_TIMER_LIBRARY}

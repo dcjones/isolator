@@ -34,15 +34,19 @@ class SwitchTest
 		void check_data();
 		void build_sample_matrix();
 
-		// compute tss usage for replicate i, sample k and store it in the appropriate
-		// row in 'tss_usage'
-		void compute_tss_usage(unsigned int i, unsigned int k);
+        // initialize the splicing_alpha and splicing beta arrays
+        void init_splicing_lambda_priors();
+
+        // compute tss usage for replicate i, sample k and store it in the
+        // appropriate row in 'tss_usage'
+		void compute_tss_usage_splicing(unsigned int i, unsigned int k);
 
 		// compute the log-likelihood of sample k within replicate i, given mu and sigma.
 		double sample_log_likelihood(unsigned int i, unsigned int k);
 
 		void sample_replicate_transcript_abundance();
 		void sample_condition_tss_usage();
+        void sample_condition_splicing();
 
         void output_mu_samples(FILE* out, const std::vector<double>& quantiles,
                                unsigned int cond1, unsigned int cond2);
@@ -64,6 +68,7 @@ class SwitchTest
         // Transcript and gene IDs indexd by tss index.
         std::vector<std::set<GeneID> > tss_gene_ids;
         std::vector<std::set<TranscriptID> > tss_transcript_ids;
+        std::vector<std::vector<unsigned int> > tss_tids;
 
 		TranscriptSet& ts;
 
@@ -89,6 +94,10 @@ class SwitchTest
 		// replicate index -> tss index
 		boost::numeric::ublas::matrix<float> tss_usage;
 
+        // base precision for tss_usage accounted for by poisson sampling
+		// indexed by: replicate index -> tss index
+        boost::numeric::ublas::matrix<float> tss_base_precision;
+
         // factor by which a replicate's tss_expression should be normalized
         std::vector<double> tss_usage_norm_factor;
         std::vector<double> tss_usage_norm_factor_work;
@@ -96,6 +105,12 @@ class SwitchTest
 		// matrices containing sampled transcript abundances from 'isolator quantify'
 		// Indexed by: replicate -> transcript -> sample_num
 		std::vector<boost::numeric::ublas::matrix<float> > samples;
+
+        // effective lengths, indexed by: replicate -> tid
+        boost::numeric::ublas::matrix<float> effective_lengths;
+
+        // numbers of reads, conditioned by replicate
+        std::vector<float> read_counts;
 
 		// replicate transcript abundance (index into samples)
 		std::vector<unsigned int> repl_sample_idx;
@@ -118,6 +133,29 @@ class SwitchTest
 		// parameters for the normal prior on mu, indexd by
 		// replicate index -> tss index
 		double mu0, lambda0;
+
+        // tts and splicing, given tss usage.
+        // indexed by replicate index -> transcript id
+        boost::numeric::ublas::matrix<float> splicing;
+
+        // condition splicing means, indexd by condition
+        boost::numeric::ublas::matrix<float> splicing_mu;
+
+        // tss-wise splicing precisions, indexd by tss index
+        std::vector<float> splicing_lambda;
+
+        // pooled gamma prior on splicing precision, conditioned on the number of
+        // isoforms in the group.
+        // Indexed by: simplex degree (isoforms per gene)
+        std::vector<float> splicing_alpha;
+        std::vector<float> splicing_beta;
+
+        // symetric dirichlet prior on splicing means
+        double splicing_mu0;
+
+        // splicing "hyper-priors"
+        double splicing_alpha_alpha_0, splicing_beta_alpha_0;
+        double splicing_alpha_beta_0, splicing_beta_beta_0;
 
 		LambdaSliceSampler* lambda_sampler;
 		AlphaSliceSampler* alpha_sampler;
