@@ -41,6 +41,10 @@ class SwitchTest
         // appropriate row in 'tss_usage'
 		void compute_tss_usage_splicing(unsigned int i, unsigned int k);
 
+        // mark those tss groups that show an very large degree of within
+        // condition variance.
+        void censor_erradic_tss();
+
 		// compute the log-likelihood of sample k within replicate i, given mu and sigma.
 		double sample_log_likelihood(unsigned int i, unsigned int k);
 
@@ -94,6 +98,10 @@ class SwitchTest
 		// replicate index -> tss index
 		boost::numeric::ublas::matrix<float> tss_usage;
 
+        // count the number of samples in which a TSS shows a much larger than expected
+        // variance within a condition.
+        std::vector<unsigned int> tss_erratic;
+
         // base precision for tss_usage accounted for by poisson sampling
 		// indexed by: replicate index -> tss index
         boost::numeric::ublas::matrix<float> tss_base_precision;
@@ -109,6 +117,11 @@ class SwitchTest
         // effective lengths, indexed by: replicate -> tid
         boost::numeric::ublas::matrix<float> effective_lengths;
 
+        // samples are normalized to get an estimate of the probability of
+        // observining transcript t. This factors denormalize to get the
+        // probability of observing a fragment from transcript t.
+        std::vector<float> sample_denorm;
+
         // numbers of reads, conditioned by replicate
         std::vector<float> read_counts;
 
@@ -117,6 +130,9 @@ class SwitchTest
 
 		// condition tss abundance mean. Indexed by: condition -> tss.
 		boost::numeric::ublas::matrix<float> mu;
+
+        // degrees of freedom parameter for the t-distribution
+        const double mu_dof;
 
 		// tss abundance precision. Indexed by: tss.
 		std::vector<float> lambda;

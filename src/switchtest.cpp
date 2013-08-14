@@ -1,6 +1,7 @@
 
 #include <set>
 #include <gsl/gsl_randist.h>
+#include <gsl/gsl_cdf.h>
 #include <gsl/gsl_sf_gamma.h>
 #include <gsl/gsl_statistics_double.h>
 #include <boost/foreach.hpp>
@@ -34,6 +35,38 @@ static double gamma_lnpdf(double alpha, double beta, double x)
            (alpha - 1) * log(x) -
            beta * x;
 }
+
+
+static double ran_scaled_inv_chisq(gsl_rng* rng, double v, double var)
+{
+    return (var * v) / gsl_ran_chisq(rng, v);
+}
+
+
+// Log-pdf for student's t-distribution, avoiding some expensive recomputation.
+class StudentsTLogPdf
+{
+    public:
+        // v: degrees of freedom
+        StudentsTLogPdf(double v)
+            : v(v)
+        {
+            base = gsl_sf_lngamma((v + 1)/2)
+                 - gsl_sf_lngamma(v/2)
+                 - log(sqrt(M_PI * v));
+        }
+
+        double operator()(double mu, double lambda, double x) const
+        {
+            return base
+                 - log(mu)
+                 - ((v + 1) / 2) * log1p(sq(x - mu) * lambda / v);
+        }
+
+    private:
+        double base;
+        double v;
+};
 
 
 // A generic slice one dimensional sampler.
@@ -150,13 +183,15 @@ double SliceSampler::find_slice_edge(double x0, double slice_height, double step
 class LambdaSliceSampler : public SliceSampler
 {
 public:
-    LambdaSliceSampler(double& alpha,
+    LambdaSliceSampler(double mu_dof,
+                       double& alpha,
                        double& beta,
                        boost::numeric::ublas::matrix<float>& mu,
                        boost::numeric::ublas::matrix<float>& tss_usage,
                        boost::numeric::ublas::matrix<float>& tss_base_precision,
                        std::vector<unsigned int>& replicate_condition)
         : SliceSampler(1e-4, INFINITY)
+        , tpdf(mu_dof)
         , alpha(alpha)
         , beta(beta)
         , mu(mu)
@@ -184,12 +219,12 @@ protected:
         // prior
         double p = gamma_lnpdf(alpha, beta, lambda);
 
-
         // likelihood
         for (unsigned int i = 0; i < tss_usage.size1(); ++i) {
             p += gaussian_lnpdf(
                     mu(replicate_condition[i], tss_idx),
-                    lambda + tss_base_precision(i, tss_idx),
+                    (lambda * tss_base_precision(i, tss_idx)) /
+                    (lambda + tss_base_precision(i, tss_idx)),
                     tss_usage(i, tss_idx));
         }
 
@@ -198,6 +233,8 @@ protected:
 
 private:
     unsigned tss_idx;
+
+    StudentsTLogPdf tpdf;
 
     double& alpha;
     double& beta;
@@ -406,6 +443,7 @@ class SplicingLambdaSliceSampler : public SliceSampler
 
 SwitchTest::SwitchTest(TranscriptSet& ts)
     : ts(ts)
+    , mu_dof(2.0)
     , alpha_alpha_0(5)
     , beta_alpha_0(2.5)
     , alpha_beta_0(5)
@@ -450,7 +488,7 @@ SwitchTest::SwitchTest(TranscriptSet& ts)
         ++tss_id;
     }
 
-    lambda_sampler = new LambdaSliceSampler(alpha, beta, mu,
+    lambda_sampler = new LambdaSliceSampler(mu_dof, alpha, beta, mu,
                                             tss_usage, tss_base_precision,
                                             replicate_condition);
     alpha_sampler = new AlphaSliceSampler(alpha_alpha_0, beta_alpha_0, lambda);
@@ -479,6 +517,7 @@ void SwitchTest::run(unsigned int num_samples, const std::vector<double>& quanti
     BOOST_FOREACH (CondMapItem& i, data) m += i.second.size();
 
     build_sample_matrix();
+    sample_denorm.resize(m);
 
     const char* task_name = "Sampling";
     Logger::push_task(task_name, num_samples);
@@ -493,6 +532,7 @@ void SwitchTest::run(unsigned int num_samples, const std::vector<double>& quanti
     std::fill(lambda.begin(), lambda.end(), alpha / beta);
 
     tss_usage.resize(m, n_tss);
+    tss_erratic.resize(n_tss, 0);
     tss_base_precision.resize(m, n_tss);
     repl_sample_idx.resize(m);
     std::fill(repl_sample_idx.begin(), repl_sample_idx.end(), 0);
@@ -523,7 +563,7 @@ void SwitchTest::run(unsigned int num_samples, const std::vector<double>& quanti
         sample_condition_tss_usage();
         sample_condition_splicing();
         Logger::get_task(task_name).inc();
-        //Logger::info("alpha = %e, beta = %e", alpha, beta);
+        Logger::info("alpha = %e, beta = %e", alpha, beta);
 
         // Debugging output
         unsigned int debug_n_tss = 100;
@@ -584,7 +624,6 @@ void SwitchTest::run(unsigned int num_samples, const std::vector<double>& quanti
         }
     }
 
-
     // TSS usage diagnostics
     FILE* tss_diag_file = fopen("tss_usage_diagnostics.tsv", "w");
     fprintf(tss_diag_file, "mu\tlambda\n");
@@ -594,16 +633,22 @@ void SwitchTest::run(unsigned int num_samples, const std::vector<double>& quanti
             BOOST_FOREACH (unsigned int rep, reps) {
                 x += tss_usage(rep, i);
             }
-            fprintf(tss_diag_file, "%e\t%e\n", x, lambda[i]);
+            fprintf(tss_diag_file, "%e\t%e\n", x / reps.size(), lambda[i]);
         }
     }
     fclose(tss_diag_file);
 
-    /*
-     * Ok, the effect is obvious, but what do I do about it?
-     *
-     * 1. 
-     */
+    FILE* base_prec_file = fopen("base_precision_diagnostics.tsv", "w");
+    fprintf(base_prec_file, "x\tlambda\n");
+    for (unsigned int i = 0; i < m; ++i) {
+        for (unsigned int j = 0; j < n_tss; ++j) {
+            fprintf(tss_diag_file,
+                    "%e\t%e\n",
+                    tss_usage(i, j),
+                    tss_base_precision(i, j));
+        }
+    }
+    fclose(base_prec_file);
 
 
     Logger::pop_task(task_name);
@@ -642,8 +687,8 @@ void SwitchTest::build_sample_matrix()
         tids[t->transcript_id] = t->id;
     }
 
-    effective_lengths.resize(data.size(), tids.size());
-    read_counts.resize(data.size());
+    effective_lengths.resize(m, tids.size());
+    read_counts.resize(m);
 
     // for each replicate build a sample matrix in which rows are indexed by transcript
     // and columns by sample number.
@@ -709,15 +754,53 @@ void SwitchTest::init_splicing_lambda_priors()
     splicing_beta.resize(max_group_size, prior_beta_mean);
 
     double init_prec = exp(prior_alpha_mean / prior_beta_mean);
-    Logger::info("Initializisg precision to: %e", init_prec);
+    Logger::info("Initializing precision to: %e", init_prec);
     std::fill(splicing_lambda.begin(), splicing_lambda.end(), init_prec);
+}
+
+
+void SwitchTest::censor_erradic_tss()
+{
+    // TODO: This is probably all bullshit.
+#if 0
+    for (unsigned int j = 0; j < tss_usage.size2(); ++j) {
+        for (unsigned int cond = 0; cond < condition_replicates.size(); ++cond) {
+            if (condition_replicates.size() <= 1) continue;
+
+            double sample_mean = 0.0;
+            BOOST_FOREACH (unsigned int i, condition_replicates[cond]) {
+                sample_mean += tss_usage(i, j);
+            }
+            sample_mean /= condition_replicates[cond].size();
+
+            double sample_var = 0.0;
+            BOOST_FOREACH (unsigned int i, condition_replicates[cond]) {
+                sample_var += sq(tss_usage(i, j) - sample_mean);
+            }
+            sample_var /= condition_replicates[cond].size() - 1;
+
+            double sample_prec = 1.0 / sample_var;
+
+            // TODO: constant: 0.01
+            // Fuck. We are computing base_precision on a replicate-by-repcilate
+            // basis. How do we use it here?
+
+            if (gsl_cdf_gamma_P(
+                    std::max<double>(0.0, sample_prec - tss_base_precision[j]),
+                    aplha, beta) < 0.01) {
+                tss_erratic[j]++;
+                break;
+            }
+        }
+    }
+#endif
 }
 
 
 void SwitchTest::compute_tss_usage_splicing(unsigned int i, unsigned int k)
 {
     matrix_row<matrix<float> > tss_usage_row(tss_usage, i);
-    matrix_row<matrix<float> > tss_base_precision_row(tss_usage, i);
+    matrix_row<matrix<float> > tss_base_precision_row(tss_base_precision, i);
     matrix_column<matrix<float> > samples_col(samples[i], k);
 
     std::fill(tss_usage_row.begin(), tss_usage_row.end(), 0.0);
@@ -725,10 +808,19 @@ void SwitchTest::compute_tss_usage_splicing(unsigned int i, unsigned int k)
     for (unsigned int j = 0; j < ts.size(); ++j) {
         tss_usage_row[tss_index[j]] += constants::zero_eps + samples_col[j];
 
-        tss_base_precision_row[tss_index[j]] +=
-            (constants::zero_eps + samples_col[j]) *
-            effective_lengths(i, j) *
-            read_counts[i];
+        // TODO: Is this really additive like this?
+        //       Or should I be averaging?
+
+        double a = constants::zero_eps + samples_col[j];
+        double b = effective_lengths(i, j);
+        double c = read_counts[i];
+        double l = a * b * c / sample_denorm[i];
+        tss_base_precision_row[tss_index[j]] += l;
+        //tss_base_precision_row[tss_index[j]] +=
+            //(constants::zero_eps + samples_col[j]) *
+            //effective_lengths(i, j) *
+            //read_counts[i];
+            //
     }
 
     // precision explained by poisson sampling
@@ -781,7 +873,8 @@ double SwitchTest::sample_log_likelihood(unsigned int i, unsigned int k)
     compute_tss_usage_splicing(i, k);
     for (unsigned int j = 0; j < tss_usage.size2(); ++j)  {
         p += gaussian_lnpdf(mu(replicate_condition[i], j),
-                            tss_base_precision(i, j) + lambda[j],
+                            (tss_base_precision(i, j) * lambda[j]) /
+                            (tss_base_precision(i, j) + lambda[j]),
                             tss_usage(i, j));
     }
 
@@ -799,6 +892,13 @@ void SwitchTest::sample_replicate_transcript_abundance()
     for (unsigned int i = 0; i < samples.size(); ++i) {
         // This is an approximation as it is not conditioning on mu or lambda.
         repl_sample_idx[i] = gsl_rng_uniform_int(rng, samples[i].size2());
+
+        sample_denorm[i] = 0.0;
+        for (unsigned int j = 0; j < ts.size(); ++j) {
+            sample_denorm[i] +=
+                effective_lengths(i, j) * samples[i](j, repl_sample_idx[i]);
+        }
+
         compute_tss_usage_splicing(i, repl_sample_idx[i]);
     }
 }
@@ -819,33 +919,29 @@ void SwitchTest::sample_condition_tss_usage()
             sample_mu /= (double) num_cond_replicates;
 
 
-            double weighted_lambda_ik = num_cond_replicates * lambda[k];
+            double weighted_lambda_ik = 0.0;
             BOOST_FOREACH (unsigned int& j, condition_replicates[i]) {
-                weighted_lambda_ik += tss_base_precision(j, k);
+                weighted_lambda_ik +=
+                        (lambda[k] * tss_base_precision(j, k)) /
+                        (lambda[k] + tss_base_precision(j, k));
             }
 
 
+            //double weighted_lambda_ik = num_cond_replicates * lambda[k];
+            //BOOST_FOREACH (unsigned int& j, condition_replicates[i]) {
+                //weighted_lambda_ik += tss_base_precision(j, k);
+
+            //}
 
             double numer = sample_mu * weighted_lambda_ik + mu0 * lambda0;
             double denom = lambda0 + weighted_lambda_ik;
             double posterior_mu = numer / denom;
             double posterior_sigma = sqrt(1.0 / denom);
 
-#if 0
-            if (tss_transcript_ids[k].size() == 1 &&
-                *tss_transcript_ids[k].begin() == "ENSMUST00000168362") {
-                std::vector<double> temp(num_cond_replicates);
-                unsigned int idx = 0;
-                BOOST_FOREACH (unsigned int& j, condition_replicates[i]) {
-                    temp[idx] = tss_usage(j, k);
-                    ++idx;
-                }
-                double* temp_ptr = &temp.at(0);
-                Logger::info("here");
-            }
-#endif
 
-            mu(i, k) = posterior_mu + gsl_ran_gaussian(rng, posterior_sigma);
+            // sampling from a student's t under the mixture interpretation
+            double V = ran_scaled_inv_chisq(rng, mu_dof, sq(posterior_sigma));
+            mu(i, k) = posterior_mu + gsl_ran_gaussian(rng, sqrt(V));
         }
     }
 
@@ -909,7 +1005,7 @@ void SwitchTest::output_mu_samples(FILE* out, const std::vector<double>& quantil
 {
     // header
     char name[100];
-    fprintf(out, "gene_ids\ttranscript_ids");
+    fprintf(out, "gene_ids\ttranscript_ids\tlow_prec_pr");
     BOOST_FOREACH (const double& quantile, quantiles) {
         snprintf(name, 100, "%0.0f", 100.0 * quantile);
         fprintf(out, "\tcond1_low_%s\tcond1_high_%s\tcond2_low_%s\tcond2_high_%s\tlog2fc_low_%s\tlog2fc_high_%s",
@@ -949,6 +1045,38 @@ void SwitchTest::output_mu_samples(FILE* out, const std::vector<double>& quantil
             }
             fprintf(out, "%s", transcript_id.get().c_str());
             first = false;
+        }
+
+        fprintf(out, "\t%e", gsl_cdf_gamma_P(lambda[i], alpha, beta));
+
+        /* Ok, how should I be handling this?
+         *
+         * Let's censor this shit. Here's the plan:
+         *
+         *    Count how many times the observed sample-variance is at
+         *    the extreme of that predicted by the prior on lambda.
+         */
+
+        // XXX: debugging
+        if (gsl_stats_quantile_from_sorted_data(&log2fc_samples.at(0),
+                              1, num_samples, 0.05) > 2.0)
+        {
+            // means
+            std::string tids;
+            BOOST_FOREACH (const TranscriptID& transcript_id, tss_transcript_ids[i]) {
+                tids += transcript_id.get();
+                tids += " ";
+            }
+            const char* tids_cstr = tids.c_str();
+
+            // precisions
+            std::vector<float> tss_base_prec_i(n_tss);
+            matrix_column<matrix<float> > col(tss_base_precision, i);
+            std::copy(col.begin(), col.end(), tss_base_prec_i.begin());
+            float* bl = &tss_base_prec_i.at(0);
+            float l = lambda[i];
+
+            Logger::info("here");
         }
 
         BOOST_FOREACH (const double& quantile, quantiles) {
