@@ -41,10 +41,6 @@ class SwitchTest
         // appropriate row in 'tss_usage'
 		void compute_tss_usage_splicing(unsigned int i, unsigned int k);
 
-        // mark those tss groups that show an very large degree of within
-        // condition variance.
-        void censor_erradic_tss();
-
 		// compute the log-likelihood of sample k within replicate i, given mu and sigma.
 		double sample_log_likelihood(unsigned int i, unsigned int k);
 
@@ -97,10 +93,6 @@ class SwitchTest
 		// temporary space used to marginalize tss abundance, indexed by
 		// replicate index -> tss index
 		boost::numeric::ublas::matrix<float> tss_usage;
-
-        // count the number of samples in which a TSS shows a much larger than expected
-        // variance within a condition.
-        std::vector<unsigned int> tss_erratic;
 
         // base precision for tss_usage accounted for by poisson sampling
 		// indexed by: replicate index -> tss index
