@@ -8,6 +8,7 @@
 #include <set>
 #include <boost/numeric/ublas/matrix.hpp>
 #include <gsl/gsl_rng.h>
+#include "analysis.hpp"
 #include "intervals.hpp"
 #include "sample_db.hpp"
 #include "transcripts.hpp"
@@ -26,6 +27,9 @@ class SwitchTest
 
 		// Add a replicate under a particular condition
 		void add_replicate(const char* condition_name, SampleDB& replicate_data);
+
+        // Add an analysis to run on the collected samples
+        void add_analysis(Analysis*);
 
 		// Run the sampler.
 		void run(unsigned int num_samples, const std::vector<double>& quantiles);
@@ -50,6 +54,8 @@ class SwitchTest
 
         void output_mu_samples(FILE* out, const std::vector<double>& quantiles,
                                unsigned int cond1, unsigned int cond2);
+
+        std::vector<Analysis*> analysis;
 
 		// number of replicates
 		unsigned int m;

@@ -501,6 +501,12 @@ void SwitchTest::add_replicate(const char* condition_name, SampleDB& replicate_d
 }
 
 
+void SwitchTest::add_analysis(Analysis* a)
+{
+    analysis.push_back(a);
+}
+
+
 void SwitchTest::run(unsigned int num_samples, const std::vector<double>& quantiles)
 {
     m = 0;
@@ -547,6 +553,12 @@ void SwitchTest::run(unsigned int num_samples, const std::vector<double>& quanti
         Logger::get_task(task_name).inc();
     }
 
+
+    BOOST_FOREACH (Analysis* a, analysis) {
+        a->run(mu_samples, tss_gene_ids, tss_transcript_ids);
+    }
+
+#if 0
     for (unsigned int cond1 = 0; cond1 < data.size() - 1; ++cond1) {
         for (unsigned cond2 = cond1 + 1; cond2 < data.size(); ++cond2) {
             size_t fnlen = condition_name[cond1].size() +
@@ -562,7 +574,7 @@ void SwitchTest::run(unsigned int num_samples, const std::vector<double>& quanti
             delete [] fn;
         }
     }
-
+#endif
 
     Logger::pop_task(task_name);
 }

@@ -9,6 +9,7 @@ add_subdirectory(seqbias)
 add_subdirectory(sqlite3)
 
 add_executable(isolator
+               analysis.cpp
                common.cpp
                constants.cpp
                cpuid.cpp

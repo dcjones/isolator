@@ -448,6 +448,10 @@ int isolator_test(int argc, char* argv[])
         ++condition_num;
     }
 
+    // TODO: make this cotrollable from the command line
+    AvgPairwiseAbsLog2Fc avg_pairwise_abs_log2fc;
+    switchtest.add_analysis(&avg_pairwise_abs_log2fc);
+
     std::vector<double> quantiles;
     quantiles.push_back(0.95);
 
