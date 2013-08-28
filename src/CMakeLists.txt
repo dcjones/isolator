@@ -7,9 +7,11 @@ add_subdirectory(loess)
 add_subdirectory(samtools)
 add_subdirectory(seqbias)
 add_subdirectory(sqlite3)
+add_subdirectory(stan)
 
 add_executable(isolator
                analysis.cpp
+               analyze_model.cpp
                common.cpp
                constants.cpp
                cpuid.cpp
@@ -41,6 +43,7 @@ target_link_libraries(isolator
                       samtools
                       seqbias
                       sqlite3
+                      stan
                       nlopt
                       ${Boost_SYSTEM_LIBRARY}
                       ${Boost_THREAD_LIBRARY}
@@ -49,3 +52,12 @@ target_link_libraries(isolator
                       ${GSL_LIBRARIES}
                       ${CMAKE_THREAD_LIBS_INIT})
 
+add_custom_command(
+    OUTPUT analyze_model.cpp
+    COMMAND stanc --no_main --o=${CMAKE_BINARY_DIR}/src/analyze_model.cpp analyze.stan
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src"
+    DEPENDS analyze.stan)
+
+set_source_files_properties(analyze_model.cpp PROPERTIES COMPILE_FLAGS "-w")
+
+include_directories("eigen")
