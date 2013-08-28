@@ -29,7 +29,7 @@ data {
     real bandwidth[N, K];
 
     // the condition of each sample
-    int<lower=1, upper=C> cond[K];
+    int<lower=1, upper=C> condition[K];
 
     // the transcription group of each transcripts
     int<lower=1, upper=T> tss[N];
@@ -81,7 +81,10 @@ model {
 
     for (i in 1:T) {
         for (j in 1:K) {
-            ts[i, j] / depth[j] ~ lognormal(mu[i, cond[j]], sigma[i, cond[j]]);
+            ts[i, j] / depth[j] ~ lognormal(mu[i, condition[j]], sigma[i, condition[j]]);
+
+            // log determinant of the jacobian for the depth transformation
+            increment_log_prob(-K * log(depth[j]));
         }
     }
 

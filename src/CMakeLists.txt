@@ -11,7 +11,7 @@ add_subdirectory(stan)
 
 add_executable(isolator
                analysis.cpp
-               analyze_model.cpp
+               analyze.cpp
                common.cpp
                constants.cpp
                cpuid.cpp
@@ -53,11 +53,12 @@ target_link_libraries(isolator
                       ${CMAKE_THREAD_LIBS_INIT})
 
 add_custom_command(
-    OUTPUT analyze_model.cpp
-    COMMAND stanc --no_main --o=${CMAKE_BINARY_DIR}/src/analyze_model.cpp analyze.stan
+    OUTPUT "${CMAKE_SOURCE_DIR}/analyze_model.hpp"
+    COMMAND stanc --no_main --o=${CMAKE_SOURCE_DIR}/src/analyze_model.hpp analyze.stan
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src"
     DEPENDS analyze.stan)
 
-set_source_files_properties(analyze_model.cpp PROPERTIES COMPILE_FLAGS "-w")
+#set_source_files_properties(analyze.cpp
+                            #PROPERTIES OBJECT_DEPENDS analyze_model.cpp)
 
 include_directories("eigen")
