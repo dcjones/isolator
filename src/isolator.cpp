@@ -10,6 +10,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include "analyze.hpp"
 #include "config.h"
 #include "constants.hpp"
 #include "fragment_model.hpp"
@@ -368,6 +369,7 @@ void print_test_help(FILE* fout)
 }
 
 
+// TODO: rename this "isolator analyze"
 int isolator_test(int argc, char* argv[])
 {
     static struct option long_options[] =
@@ -430,8 +432,8 @@ int isolator_test(int argc, char* argv[])
     ts.read_gtf(gtf_f);
     fclose(gtf_f);
 
-    // initialize switch test
-    SwitchTest switchtest(ts);
+    // initialize
+    Analyze analyze(ts);
     int condition_num = 1;
     std::vector<SampleDB*> sample_dbs;
     for (; optind < argc; ++optind) {
@@ -441,13 +443,16 @@ int isolator_test(int argc, char* argv[])
         const char* fn;
         for (fn = strtok(argv[optind], ","); fn; fn = strtok(NULL, ",")) {
             sample_dbs.push_back(new SampleDB(fn, false));
-            switchtest.add_replicate(condition_name, *sample_dbs.back());
+            analyze.add_sample(condition_name, *sample_dbs.back());
             Logger::debug("Adding '%s' to condition '%s'", fn, condition_name);
         }
 
         ++condition_num;
     }
 
+    analyze.run();
+
+#if 0
     // TODO: make this cotrollable from the command line
     AvgPairwiseAbsLog2Fc avg_pairwise_abs_log2fc;
     switchtest.add_analysis(&avg_pairwise_abs_log2fc);
@@ -460,6 +465,7 @@ int isolator_test(int argc, char* argv[])
     BOOST_FOREACH (SampleDB*& sample_db, sample_dbs) {
         delete sample_db;
     }
+#endif
 
     Logger::info("Finished. Have a nice day!");
     Logger::end();

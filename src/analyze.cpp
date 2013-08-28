@@ -1,6 +1,7 @@
 
 #include <boost/foreach.hpp>
 #include <boost/numeric/ublas/matrix_proxy.hpp>
+#include <boost/random/additive_combine.hpp> // L'Ecuyer RNG
 #include <gsl/gsl_statistics_double.h>
 
 #include "analyze.hpp"
@@ -63,11 +64,16 @@ class AnalyzeSamplerData : public stan::io::var_context
             else if (name == "depth") {
                 return parent.depth;
             }
+            else if (contains_i(name)) {
+                std::vector<int> ivals = vals_i(name);
+                std::vector<double> rvals(ivals.size());
+                std::copy(ivals.begin(), ivals.end(), rvals.begin());
+                return rvals;
+            }
 
             Logger::abort("Unknown var context: %s", name.c_str());
             return std::vector<double>();
         }
-
 
 
         bool contains_i(const std::string& name) const
@@ -114,13 +120,17 @@ class AnalyzeSamplerData : public stan::io::var_context
                 std::vector<int> condition(parent.K);
                 for (unsigned int c = 0; c < parent.condition_samples.size(); ++c) {
                     BOOST_FOREACH (unsigned int s, parent.condition_samples[c]) {
-                        condition[s] = c;
+                        condition[s] = c + 1; // stan is 1-based
                     }
                 }
                 return condition;
             }
             else if (name == "tss") {
-                return parent.tss_index;
+                std::vector<int> tss(parent.N);
+                for (unsigned int i = 0; i < parent.N; ++i) {
+                    tss[i] = parent.tss_index[i] + 1; // stan is 1-based
+                }
+                return tss;
             }
 
             Logger::abort("Unknown var context: %s", name.c_str());
@@ -128,22 +138,54 @@ class AnalyzeSamplerData : public stan::io::var_context
         }
 
 
-        // Don't bother doing anything meaningful with these. They don't seem to
-        // be needed.
-
         std::vector<size_t> dims_r(const std::string& name) const
         {
-            UNUSED(name);
-            return to_vec();
+            if (name == "quantification") {
+                return to_vec(parent.M, parent.N, parent.K);
+            }
+            else if (name == "bandwidth") {
+                return to_vec(parent.N, parent.K);
+            }
+            else if (name == "depth") {
+                return to_vec(parent.K);
+            }
+            else {
+                return dims_i(name);
+            }
         }
 
 
         std::vector<size_t> dims_i(const std::string& name) const
         {
-            UNUSED(name);
-            return to_vec();
+            if (name == "K") {
+                return to_vec();
+            }
+            else if (name == "C") {
+                return to_vec();
+            }
+            else if (name == "N") {
+                return to_vec();
+            }
+            else if (name == "M") {
+                return to_vec();
+            }
+            else if (name == "T") {
+                return to_vec();
+            }
+            else if (name == "condition") {
+                return to_vec(parent.K);
+            }
+            else if (name == "tss") {
+                return to_vec(parent.N);
+            }
+            else {
+                return to_vec();
+            }
         }
 
+
+        // Don't bother doing anything meaningful with these. They don't seem to
+        // be needed.
 
         void names_r(std::vector<std::string>& names) const
         {
@@ -205,6 +247,12 @@ Analyze::Analyze(TranscriptSet& ts)
 }
 
 
+Analyze::~Analyze()
+{
+
+}
+
+
 void Analyze::add_sample(const char* condition_name, SampleDB& sample_data)
 {
     data[condition_name].push_back(&sample_data);
@@ -219,10 +267,64 @@ void Analyze::run()
     compute_depth();
     choose_kde_bandwidth();
 
-    AnalyzeSamplerData sampler_data(*this);
-    analyze_model_namespace::analyze_model model(sampler_data, &std::cout);
+    typedef analyze_model_namespace::analyze_model model_t;
+    typedef boost::ecuyer1988 rng_t;
+    typedef stan::mcmc::adapt_diag_e_nuts<model_t, rng_t> sampler_t;
 
-    // TODO: figure out how to initialize and run the model.
+    AnalyzeSamplerData sampler_data(*this);
+    model_t model(sampler_data, &std::cout);
+
+    std::vector<double> cont_params(model.num_params_r());
+    std::vector<int> disc_params(model.num_params_i());
+
+    // TODO: pass these numbers in
+    unsigned int seed = 0;
+    unsigned int num_iterations = 1000;
+    unsigned int num_warmup = 500;
+    unsigned int num_thin = 1;
+    double epsilon_pm = 0.0;
+    int max_treedepth = 10;
+    double delta = 0.5;
+    double gamma = 0.05;
+
+    const char* task_name = "Sampling";
+    Logger::push_task(task_name, num_iterations);
+
+    rng_t base_rng(seed);
+    stan::mcmc::sample s(cont_params, disc_params, 0, 0);
+    sampler_t sampler(model, base_rng, num_warmup);
+    sampler.seed(cont_params, disc_params);
+
+    // warmup
+    try {
+        sampler.init_stepsize();
+    } catch (std::runtime_error e) {
+        Logger::abort("Error setting sampler step size: %s", e.what());
+    }
+
+    sampler.set_stepsize_jitter(epsilon_pm);
+    sampler.set_max_depth(max_treedepth);
+    sampler.get_stepsize_adaptation().set_delta(delta);
+    sampler.get_stepsize_adaptation().set_gamma(gamma);
+    sampler.get_stepsize_adaptation().set_mu(log(10 * sampler.get_nominal_stepsize()));
+    sampler.engage_adaptation();
+
+    for (unsigned int i = 0; i < num_warmup; ++i) {
+        s = sampler.transition(s);
+        Logger::get_task(task_name).inc();
+    }
+
+    sampler.disengage_adaptation();
+
+    // sampling
+
+    for (unsigned int i = 0; i < num_iterations - num_warmup; ++i) {
+        // TODO: do something with the samples
+        s = sampler.transition(s);
+        Logger::get_task(task_name).inc();
+    }
+
+    Logger::pop_task(task_name);
 }
 
 
@@ -251,8 +353,9 @@ void Analyze::load_quantification_data()
             Logger::abort("Condition %s has no replicates.", i.first.c_str());
         }
 
-        condition_samples.back().push_back(repl_idx);
+        condition_samples.push_back(std::vector<unsigned int>());
         BOOST_FOREACH (SampleDB*& j, i.second) {
+            condition_samples.back().push_back(repl_idx);
             quantification.push_back(matrix<float>());
             quantification.back().resize(tids.size(), j->get_num_samples());
             if (num_samples == -1) {
@@ -290,24 +393,33 @@ void Analyze::load_quantification_data()
 // Compute normalization constants for each sample.
 void Analyze::compute_depth()
 {
+    const char* task_name = "Computing sample normalization constants";
+    Logger::push_task(task_name, quantification.size() * (M/10));
+
     std::vector<double> sortedcol(N);
     depth.resize(K);
 
     // This is a posterior mean upper-quartile, normalized to the first sample
     // so depth tends to be close to 1.
+    unsigned int i = 0;
     BOOST_FOREACH (matrix<float>& Q, quantification) {
-        for (unsigned int i = 0; i < M; ++i) {
+        for (unsigned int j = 0; j < M; ++j) {
             matrix_column<matrix<float> > col(Q, i);
             std::copy(col.begin(), col.end(), sortedcol.begin());
             std::sort(sortedcol.begin(), sortedcol.end());
-            depth[i] = gsl_stats_quantile_from_sorted_data(&sortedcol.at(0), 1, N, 0.75);
+            depth[i] += gsl_stats_quantile_from_sorted_data(&sortedcol.at(0), 1, N, 0.75);
+            if (j % 10 == 0) Logger::get_task(task_name).inc();
         }
+        depth[i] /= M;
+        ++i;
     }
 
-    for (unsigned int i = 1; i < M; ++i) {
+    for (unsigned int i = 1; i < K; ++i) {
         depth[i] = depth[i] / depth[0];
     }
     depth[0] = 1.0;
+
+    Logger::pop_task(task_name);
 }
 
 
