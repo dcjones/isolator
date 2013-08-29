@@ -25,6 +25,8 @@ class Analyze
         void load_quantification_data();
         void compute_depth();
         void choose_kde_bandwidth();
+        void choose_initial_values(std::vector<double>& cont_params,
+                                   std::vector<int>& disc_params);
 
 		TranscriptSet& ts;
 

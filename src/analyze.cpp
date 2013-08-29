@@ -46,6 +46,9 @@ class AnalyzeSamplerData : public stan::io::var_context
                         for (unsigned int i1 = 0; i1 < parent.M; ++i1) {
                             quantification[k++] =
                                 parent.quantification[i3](i2, i1);
+                            if (!finite(quantification[k-1])) {
+                                Logger::abort("Non finite quantification value.");
+                            }
                         }
                     }
                 }
@@ -277,6 +280,22 @@ void Analyze::run()
     std::vector<double> cont_params(model.num_params_r());
     std::vector<int> disc_params(model.num_params_i());
 
+    choose_initial_values(cont_params, disc_params);
+    double init_log_prob;
+    std::vector<double> init_grad;
+    init_log_prob = stan::model::log_prob_grad<true, true>(model, cont_params, disc_params,
+                                                           init_grad, &std::cout);
+
+    if (!boost::math::isfinite(init_log_prob)) {
+        Logger::abort("Non-finite initial log-probability: %f", init_log_prob);
+    }
+
+    BOOST_FOREACH (double d, init_grad) {
+        if (!boost::math::isfinite(d)) {
+            Logger::abort("Initial gradient contains a non-finite value: %f", d);
+        }
+    }
+
     // TODO: pass these numbers in
     unsigned int seed = 0;
     unsigned int num_iterations = 1000;
@@ -318,11 +337,23 @@ void Analyze::run()
 
     // sampling
 
+    // TODO: more coherent output
+    std::fstream diagnostic_stream("isolator_analyze_diagnostics.csv",
+                                    std::fstream::out);
+    std::fstream sample_stream("isolator_analyze_samples.csv",
+                                std::fstream::out);
+    stan::io::mcmc_writer<model_t> writer(&sample_stream, &diagnostic_stream);
+
     for (unsigned int i = 0; i < num_iterations - num_warmup; ++i) {
         // TODO: do something with the samples
         s = sampler.transition(s);
+        writer.print_sample_params(base_rng, s, sampler, model);
+        //writer.print_diagnostic_params(s, sampler);
         Logger::get_task(task_name).inc();
     }
+
+    diagnostic_stream.close();
+    sample_stream.close();
 
     Logger::pop_task(task_name);
 }
@@ -377,6 +408,9 @@ void Analyze::load_quantification_data()
 
                 matrix_row<matrix<float> > row(quantification.back(), tid->second);
                 std::copy(k->samples.begin(), k->samples.end(), row.begin());
+                for (unsigned int l = 0; l < row.size(); ++l) {
+                    row[l] = std::max<double>(1e-20, row[l]);
+                }
             }
             Logger::get_task(task_name).inc();
             ++repl_idx;
@@ -436,11 +470,38 @@ void Analyze::choose_kde_bandwidth()
             std::copy(row.begin(), row.end(), workrow.begin());
             double sigma = gsl_stats_sd(&workrow.at(0), 1, M);
             // silverman's rule of thumb
-            bandwidth(i, j) = 1.06 * sigma * pow(M, -1.0/5.0);
+            bandwidth(i, j) = std::max<double>(0.01, 1.06 * sigma * pow(M, -1.0/5.0));
         }
 
         ++j;
     }
 }
 
+void Analyze::choose_initial_values(std::vector<double>& cont_params,
+                                    std::vector<int>& disc_params)
+{
+    size_t off = 0;
+
+    // initialize xs
+    for (size_t j = 0; j < K; ++j) {
+        for (size_t i = 0; i < N; ++i) {
+            cont_params[off++] = std::max<double>(1e-20, quantification[j](i, 0));
+        }
+    }
+
+    // initialize mu
+    // TODO: smarter initialization
+    for (size_t j = 0; j < C; ++j) {
+        for (size_t i = 0; i < T; ++i) {
+            cont_params[off++] = -10;
+        }
+    }
+
+    // initialize sigma
+    for (size_t j = 0; j < C; ++j) {
+        for (size_t i = 0; i < T; ++i) {
+            cont_params[off++] = 0.1;
+        }
+    }
+}
 
