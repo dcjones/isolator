@@ -102,8 +102,11 @@ class Sampler
         std::vector<AbundanceSamplerThread*> abundance_threads;
         Queue<ComponentBlock> component_queue;
 
-        /* Transcript mixture coefficients. */
+        /* Transcript mixture coefficients. Within-component relative abundance. */
         double* tmix;
+
+        /* Transcription group within-component relative abundance. */
+        double* tgroupmix;
 
         /* Component mixture coefficients. */
         double* cmix;
@@ -116,6 +119,12 @@ class Sampler
 
         /* transcript_component[i] gives the component number of transcript i */
         unsigned int* transcript_component;
+
+        /* map tgroup i to a vector of its constituent tids. */
+        std::vector<std::vector<unsigned int> > tgroup_tids;
+
+        /* map component i to a vector of its constituent tgroups */
+        std::vector<std::set<unsigned int> > component_tgroups;
 
         /* Number of connected components in the fragment/transcript overlap
          * graph. */
@@ -152,6 +161,9 @@ class Sampler
         /* Row sums of frag_counts, used to compute gradients when optimizing
          * over component mixtures. */
         float* frag_count_sums;
+
+        /* Total number of fragments beign considered  */
+        double total_frag_count;
 
         /* frag_probs[i][j] holds the probability of the jth fragment in
          * component i, given the component and transcript mixtures. */

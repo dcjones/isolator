@@ -318,69 +318,65 @@ void TranscriptSet::read_gtf(FILE* f)
     typedef std::pair<const Interval, std::vector<unsigned int> > TSMapItem;
     TSMap tss_group;
 
-    unsigned int next_id = 0;
+    std::vector<Transcript> sorted_transcripts;
+    sorted_transcripts.reserve(ts.size());
+
     for (TrieMapIterator<Transcript> t(ts);
          t != TrieMapIterator<Transcript>();
          ++t) {
-        t->second->id = next_id++;
+        sorted_transcripts.push_back(*t->second);
+    }
+    std::sort(sorted_transcripts.begin(), sorted_transcripts.end());
 
-        pos_t tss_pos = t->second->strand == strand_pos ?
-            t->second->min_start : t->second->max_end;
-        Interval tss(t->second->seqname, tss_pos, tss_pos, t->second->strand);
-        tss_group[tss].push_back(t->second->id);
+    unsigned int next_id = 0;
+    BOOST_FOREACH (Transcript& t, sorted_transcripts) {
+        t.id = next_id++;
+        pos_t tss_pos = t.strand == strand_pos ?  t.min_start : t.max_end;
+        Interval tss(t.seqname, tss_pos, tss_pos, t.strand);
+        tss_group[tss].push_back(t.id);
     }
 
-    std::vector<unsigned int> tgroups; // tgroup by transcript id
     unsigned int tgroup = 0;
     BOOST_FOREACH (const TSMapItem& i, tss_group) {
         BOOST_FOREACH (const unsigned int& j, i.second) {
-            tgroups[j] = tgroup;
+            sorted_transcripts[j].tgroup = tgroup;
         }
         ++tgroup;
     }
     num_tgroups = tgroup;
 
-    for (TrieMapIterator<Transcript> t(ts);
-         t != TrieMapIterator<Transcript>();
-         ++t) {
-        t->second->tgroup = tgroups[t->second->id];
-    }
-
     // optionally extend the ends of transcripts before inserting them into the
     // set
-    for (TrieMapIterator<Transcript> t(ts);
-         t != TrieMapIterator<Transcript>();
-         ++t) {
-
+    BOOST_FOREACH (Transcript& t, sorted_transcripts) {
         /* Extend each transcript 3' and 5' end by some fixed ammount. */
         pos_t u, v;
-        Transcript::iterator e1 = t->second->begin();
+        Transcript::iterator e1 = t.begin();
         u = e1->start;
         v = e1->end;
-        if (t->second->strand == strand_pos) {
+        if (t.strand == strand_pos) {
             u = std::max<pos_t>(0, u - constants::transcript_5p_extension);
         }
         else {
             u = std::max<pos_t>(0, u - constants::transcript_3p_extension);
         }
-        t->second->erase(e1);
-        t->second->insert(Exon(u, v));
-        t->second->min_start = u;
+        t.erase(e1);
+        t.insert(Exon(u, v));
+        t.min_start = u;
 
-        Transcript::reverse_iterator e2 = t->second->rbegin();
+        Transcript::reverse_iterator e2 = t.rbegin();
         u = e2->start;
         v = e2->end;
-        if (t->second->strand == strand_pos) {
+        if (t.strand == strand_pos) {
             v += constants::transcript_3p_extension;
         }
         else {
             v += constants::transcript_5p_extension;
         }
-        t->second->erase(--e2.base());
-        t->second->insert(Exon(u, v));
-        t->second->max_end = v;
+        t.erase(--e2.base());
+        t.insert(Exon(u, v));
+        t.max_end = v;
 
-        transcripts.insert(*t->second);
+        transcripts.insert(t);
     }
 
     Logger::pop_task(task_name);

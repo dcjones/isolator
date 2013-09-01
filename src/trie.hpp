@@ -113,6 +113,11 @@ class TrieMap
             return hattrie_tryget(t, key, strlen(key)) != NULL;
         }
 
+        size_t size() const
+        {
+            return hattrie_size(t);
+        }
+
         T& operator [] (const char* key)
         {
             T** slot = reinterpret_cast<T**>(

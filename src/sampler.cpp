@@ -2,10 +2,11 @@
 #include <boost/foreach.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
-#include <gsl/gsl_statistics.h>
+#include <gsl/gsl_multifit.h>
 #include <gsl/gsl_randist.h>
 #include <gsl/gsl_rng.h>
-#include <gsl/gsl_multifit.h>
+#include <gsl/gsl_sf_gamma.h>
+#include <gsl/gsl_statistics.h>
 
 #include "constants.hpp"
 #include "hat-trie/hat-trie.h"
@@ -21,6 +22,47 @@
 extern "C" {
 #include "samtools/khash.h"
 KHASH_MAP_INIT_STR(s, int)
+}
+
+
+static double sq(double x)
+{
+    return x * x;
+}
+
+
+// Log-pdf for student's t-distribution, avoiding some expensive recomputation.
+class StudentsTLogPdf
+{
+    public:
+        // v: degrees of freedom
+        StudentsTLogPdf(double v)
+            : v(v)
+        {
+            base = gsl_sf_lngamma((v + 1)/2)
+                 - gsl_sf_lngamma(v/2)
+                 - log(sqrt(M_PI * v));
+        }
+
+        double operator()(double mu, double lambda, double x) const
+        {
+            return base
+                 - log(mu)
+                 - ((v + 1) / 2) * log1p(sq(x - mu) * lambda / v);
+        }
+
+    private:
+        double base;
+        double v;
+};
+
+
+static double gamma_lnpdf(double alpha, double beta, double x)
+{
+    return alpha * log(beta) -
+           gsl_sf_lngamma(alpha) +
+           (alpha - 1) * log(x) -
+           beta * x;
 }
 
 
@@ -1252,8 +1294,8 @@ class AbundanceSamplerThread
         // Sample relative expression of two transcripts u and v.
         void run_inter_transcript(unsigned int u, unsigned int v);
 
-        // Sample expression of component u
-        void run_component(unsigned int u);
+        // Sample expression of component c
+        void run_component(unsigned int c);
 
         // Sample transcript mixtures within component c
         void run_intra_component(unsigned int c);
@@ -1287,7 +1329,11 @@ class AbundanceSamplerThread
 
 
     private:
-        float recompute_component_probability(unsigned int u, unsigned int v,
+        float find_component_slice_edge(unsigned int c, float x0, float slice_height, float step);
+
+        float compute_component_probability(unsigned int c, float x);
+
+        float recompute_intra_component_probability(unsigned int u, unsigned int v,
                                               float tmixu, float tmixv,
                                               unsigned int f0, unsigned int f1,
                                               float pf01, float p0, float *d);
@@ -1304,7 +1350,57 @@ class AbundanceSamplerThread
 };
 
 
-float AbundanceSamplerThread::recompute_component_probability(
+float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
+                                                         float x0, float slice_height,
+                                                         float step)
+{
+    const float eps = 1e-2 * x0;
+    float x, y;
+    do {
+        x = std::max(constants::zero_eps, x0 + step);
+        y = compute_component_probability(c, x);
+        step *= 2;
+    } while (y > slice_height && x > constants::zero_eps);
+    step /= 2;
+
+    // binary search to find the edge
+    float a, b;
+    if (step < 0.0) {
+        a = std::max(constants::zero_eps, x0 + step);
+        b = x0;
+    }
+    else {
+        a = x0;
+        b = std::max(constants::zero_eps, x0 + step);
+    }
+
+    while (fabs(b - a) > eps) {
+        double mid = (a + b) / 2;
+        double w = compute_component_probability(c, mid);
+
+        if (step < 0) {
+            if (w > slice_height) b = mid;
+            else                  a = mid;
+        }
+        else {
+            if (w > slice_height) a = mid;
+            else                  b = mid;
+        }
+    }
+
+    return (a + b) / 2;
+}
+
+
+
+float AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
+{
+    // TODO: prior over tgroupmix
+    return gamma_lnpdf(cmixc, S.frag_count_sums[c], 1.0);
+}
+
+
+float AbundanceSamplerThread::recompute_intra_component_probability(
                                                   unsigned int u, unsigned int v,
                                                   float tmixu, float tmixv,
                                                   unsigned int f0, unsigned int f1,
@@ -1395,7 +1491,7 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
     float d;
 
     z = z0;
-    p = recompute_component_probability(
+    p = recompute_intra_component_probability(
             u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
     p -= slice_height;
 
@@ -1443,7 +1539,7 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
             else z = z1;
         }
 
-        p = recompute_component_probability(
+        p = recompute_intra_component_probability(
                 u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
         p -= slice_height;
 
@@ -1541,21 +1637,29 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
 }
 
 
-void AbundanceSamplerThread::run_component(unsigned int u)
+void AbundanceSamplerThread::run_component(unsigned int c)
 {
-    /* TODO:
-     * Components will contain one or more tss groups, so we can't simply draw
-     * from a dirichlet like we are now. Not unless we choose nice conjugate
-     * priors.
-     *
-     * In which case we could simply replace the constants::tmix_prior_prec
-     * thing with whatever the actual prior is. That would be great if we could
-     * make it work.
-     */
+    BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
+        S.tgroupmix[tgroup] = 0.0;
+        BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
+            S.tgroupmix[tgroup] += S.tmix[tid];
+        }
 
-    float prec = S.frag_count_sums[u] +
-                 S.component_num_transcripts[u] * constants::tmix_prior_prec;
-    S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
+        // Or, do I need to compute:
+        //  log(cmix[u] / total_reads * tgroupmix[tgroup])
+        // Something like that, anyway.
+    }
+
+    float x0 = S.cmix[c] * S.total_frag_count;
+
+    float lp0 = compute_component_probability(c, x0);
+    float slice_height = lp0 + log(gsl_rng_uniform(rng));
+    float step = 0.1 * x0;
+
+    float x_min = find_component_slice_edge(c, x0, slice_height, -step);
+    float x_max = find_component_slice_edge(c, x0, slice_height, +step);
+
+    S.cmix[c] = x_min + (x_max - x_min) * gsl_rng_uniform(rng);
 }
 
 
@@ -1738,7 +1842,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     }
 
     /* Trancription groups cannot be split across components. */
-    std::vector<std::vector<unsigned int> > tgroup_tids = ts.tgroup_tids();
+    tgroup_tids = ts.tgroup_tids();
     BOOST_FOREACH (std::vector<unsigned int>& tids, tgroup_tids) {
         if (tids.empty()) continue;
         BOOST_FOREACH (unsigned int tid, tids) {
@@ -1768,15 +1872,17 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     Logger::info("Components: %lu", (unsigned long) num_components);
 
     /* Label transcript components */
+    component_tgroups.resize(num_components);
     component_num_transcripts = new unsigned int [num_components];
     std::fill(component_num_transcripts,
               component_num_transcripts + num_components,
               0);
     transcript_component = new unsigned int [ts.size()];
-    for (size_t i = 0; i < ts.size(); ++i) {
-        unsigned int c = ds[weight_matrix->ncol + i];
-        transcript_component[i] = c;
+    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        unsigned int c = ds[weight_matrix->ncol + t->id];
+        transcript_component[t->id] = c;
         component_num_transcripts[c]++;
+        component_tgroups[c].insert(t->id);
     }
 
     component_transcripts = new unsigned int* [num_components];
@@ -1907,8 +2013,9 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     delete [] idxmap;
 
     frag_count_sums = new float [num_components];
-    tmix = new double [weight_matrix->nrow];
-    cmix = new double [num_components];
+    tmix            = new double [weight_matrix->nrow];
+    tgroupmix       = new double [tgroup_tids.size()];
+    cmix            = new double [num_components];
 
     // Allocate sample threads
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -1922,6 +2029,7 @@ Sampler::~Sampler()
 {
     delete [] tmix;
     delete [] cmix;
+    delete [] tgroupmix;
     delete [] transcript_component;
     for (size_t i = 0; i < num_components; ++i) {
         afree(frag_counts[i]);
@@ -2099,11 +2207,13 @@ void Sampler::update_frag_count_sums()
 {
     // Recompute total fragments in each component
     std::fill(frag_count_sums, frag_count_sums + num_components, 0.0f);
+    total_frag_count = 0;
     for (size_t i = 0; i < num_components; ++i) {
         unsigned int component_size = component_frag[i + 1] - component_frag[i];
         for (unsigned int j = 0; j < component_size; ++j) {
             frag_count_sums[i] += frag_counts[i][j];
         }
+        total_frag_count += frag_count_sums[i];
     }
 }
 
