@@ -22,11 +22,10 @@ data {
     // number of transcription groups (typically, transcription start sites)
     int<lower=1> T;
 
+    
+
     // samples generated during quantification
     matrix[N, K] quantification[M];
-
-    // kde bandwidth for using quantification samples as a density estimate
-    matrix[N, K]  bandwidth;
 
     // the condition of each sample
     int<lower=1, upper=C> condition[K];
@@ -50,6 +49,42 @@ parameters  {
 
 
 model {
+    /*
+        A number of problems with this model.
+
+        1. The variable xs does not work. We need to generate tss usage samples.
+
+        2. This thing uses way too much memory and takes way to long to run.
+
+           I think having a gazillion normal_log terms just breaks the bank when
+           computing the gradient. Possible solutions.
+
+           a. Try to manually sample over xs
+           b. Fit a normal distribution to the samples.
+
+            Honostly, b seems like the best bet even though it disgusts me.
+            The whole point of this exercise was to take into account complex
+            variance inherent in these models. I guess that is intractable
+            though. Fuck.
+
+            How will we do the same for splicing?
+
+
+
+        Another possibility is to actually do the quantification across all
+        samples at the same time.
+
+        That way we can actually add in a term for the mean condition
+        expression.
+
+        That's kind of a nice idea, but I still really want to try to use stan
+        for the complex heirarchical stuff. Is it at all feasable to switch back
+        and forth between the two?
+
+        I guess so, since parameters are stored in the sample structure.
+
+
+    */
 
     // transcription group usage
     real ts[T, K];

@@ -1,4 +1,5 @@
 
+#include <boost/foreach.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
 #include <gsl/gsl_statistics.h>
@@ -1482,6 +1483,14 @@ void AbundanceSamplerThread::run_intra_component(unsigned int c)
 
 void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v)
 {
+    /* TODO: The really tricky part with adding priors will be here.
+     *
+     * We are changing the expression of two transcripts. They are either (a) in
+     * the same tss group, in which case the prior on tss usage plays no role,
+     * but the prior on splicing does, or (b) in two different tss groups, in
+     * which case both priors apply.
+     */
+
     unsigned int c = S.transcript_component[u];
     assert(c == S.transcript_component[v]);
 
@@ -1534,6 +1543,16 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
 
 void AbundanceSamplerThread::run_component(unsigned int u)
 {
+    /* TODO:
+     * Components will contain one or more tss groups, so we can't simply draw
+     * from a dirichlet like we are now. Not unless we choose nice conjugate
+     * priors.
+     *
+     * In which case we could simply replace the constants::tmix_prior_prec
+     * thing with whatever the actual prior is. That would be great if we could
+     * make it work.
+     */
+
     float prec = S.frag_count_sums[u] +
                  S.component_num_transcripts[u] * constants::tmix_prior_prec;
     S.cmix[u] = hillclimb ? prec : gsl_ran_gamma(rng, prec, 1.0);
@@ -1716,6 +1735,17 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     for (WeightMatrixIterator entry(*weight_matrix);
             entry != WeightMatrixIterator(); ++entry) {
         disjset_union(ds, weight_matrix->ncol + entry->i, entry->j);
+    }
+
+    /* Trancription groups cannot be split across components. */
+    std::vector<std::vector<unsigned int> > tgroup_tids = ts.tgroup_tids();
+    BOOST_FOREACH (std::vector<unsigned int>& tids, tgroup_tids) {
+        if (tids.empty()) continue;
+        BOOST_FOREACH (unsigned int tid, tids) {
+            disjset_union(ds,
+                          weight_matrix->ncol + tids[0],
+                          weight_matrix->ncol + tid);
+        }
     }
 
     for (size_t i = 0; i < N; ++i) disjset_find(ds, i);

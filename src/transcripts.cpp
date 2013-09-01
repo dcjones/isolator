@@ -1,4 +1,5 @@
 
+#include <boost/foreach.hpp>
 #include <deque>
 
 #include "constants.hpp"
@@ -52,6 +53,7 @@ Transcript::Transcript(const Transcript& other)
     , stop_codon(other.stop_codon)
     , biotype(other.biotype)
     , source(other.source)
+    , tgroup(other.tgroup)
     , id(other.id)
 {
 }
@@ -221,6 +223,17 @@ size_t TranscriptSet::size() const
 }
 
 
+std::vector<std::vector<unsigned int> > TranscriptSet::tgroup_tids() const
+{
+    std::vector<std::vector<unsigned int> > tgroup_tids(num_tgroups);
+    BOOST_FOREACH (const Transcript& t, transcripts) {
+        tgroup_tids[t.tgroup].push_back(t.id);
+    }
+
+    return tgroup_tids;
+}
+
+
 void TranscriptSet::read_gtf(FILE* f)
 {
     const char* task_name = "Parsing GTF";
@@ -300,11 +313,44 @@ void TranscriptSet::read_gtf(FILE* f)
     gtf_file_free(gtf_file);
 
 
+    // set transcripts ids and default transcription groups
+    typedef std::map<Interval, std::vector<unsigned int> > TSMap;
+    typedef std::pair<const Interval, std::vector<unsigned int> > TSMapItem;
+    TSMap tss_group;
+
     unsigned int next_id = 0;
     for (TrieMapIterator<Transcript> t(ts);
          t != TrieMapIterator<Transcript>();
          ++t) {
         t->second->id = next_id++;
+
+        pos_t tss_pos = t->second->strand == strand_pos ?
+            t->second->min_start : t->second->max_end;
+        Interval tss(t->second->seqname, tss_pos, tss_pos, t->second->strand);
+        tss_group[tss].push_back(t->second->id);
+    }
+
+    std::vector<unsigned int> tgroups; // tgroup by transcript id
+    unsigned int tgroup = 0;
+    BOOST_FOREACH (const TSMapItem& i, tss_group) {
+        BOOST_FOREACH (const unsigned int& j, i.second) {
+            tgroups[j] = tgroup;
+        }
+        ++tgroup;
+    }
+    num_tgroups = tgroup;
+
+    for (TrieMapIterator<Transcript> t(ts);
+         t != TrieMapIterator<Transcript>();
+         ++t) {
+        t->second->tgroup = tgroups[t->second->id];
+    }
+
+    // optionally extend the ends of transcripts before inserting them into the
+    // set
+    for (TrieMapIterator<Transcript> t(ts);
+         t != TrieMapIterator<Transcript>();
+         ++t) {
 
         /* Extend each transcript 3' and 5' end by some fixed ammount. */
         pos_t u, v;

@@ -87,6 +87,11 @@ class Transcript : public std::set<Exon>
         GeneBiotype biotype;
         GeneSource source;
 
+        /* Transcription group, grouping transcripts whose transcription rate is
+         * presumed to be similarly regulated. By default, transcripts with the
+         * same transcription start site have the some tgroup number. */
+        unsigned int tgroup;
+
         /* A sequential identifier, unique within the container TranscriptSet. */
         unsigned int id;
 
@@ -142,6 +147,9 @@ class TranscriptSet
         /* Number of transcripts held in the set. */
         size_t size() const;
 
+        /* Return a vector for each tgroup containing its constituent tids. */
+        std::vector<std::vector<unsigned int> > tgroup_tids() const;
+
         /* Fill a vector with the union of all exonic regions, with strand considered. */
         void get_exonic(std::vector<Interval>&);
 
@@ -159,6 +167,7 @@ class TranscriptSet
                                       std::vector<Interval>& consensus_5p_exons,
                                       std::vector<Interval>& consensus_3p_exons);
 
+
         /* Acess to std::set::iterator */
         typedef std::set<Transcript>::const_iterator iterator;
         iterator begin();
@@ -167,6 +176,9 @@ class TranscriptSet
     private:
         /* Transcripts ordered by position. */
         std::set<Transcript> transcripts;
+
+        /* Number of transcription groups. */
+        size_t num_tgroups;
 
         friend class TranscriptSetIterator;
         friend class TranscriptSetLocusIterator;
