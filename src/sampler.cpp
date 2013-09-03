@@ -1354,24 +1354,25 @@ float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
                                                          float x0, float slice_height,
                                                          float step)
 {
-    const float eps = 1e-2 * x0;
+    const float zero_eps = 1e-12;
+    const float eps = 1e-2;
     float x, y;
     do {
-        x = std::max(constants::zero_eps, x0 + step);
+        x = std::max<float>(zero_eps, x0 + step);
         y = compute_component_probability(c, x);
         step *= 2;
-    } while (y > slice_height && x > constants::zero_eps);
+    } while (y > slice_height && x > zero_eps);
     step /= 2;
 
     // binary search to find the edge
-    float a, b;
+    double a, b;
     if (step < 0.0) {
-        a = std::max(constants::zero_eps, x0 + step);
+        a = std::max<float>(zero_eps, x0 + step);
         b = x0;
     }
     else {
         a = x0;
-        b = std::max(constants::zero_eps, x0 + step);
+        b = std::max<float>(zero_eps, x0 + step);
     }
 
     while (fabs(b - a) > eps) {
@@ -1396,7 +1397,10 @@ float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 float AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
 {
     // TODO: prior over tgroupmix
-    return gamma_lnpdf(cmixc, S.frag_count_sums[c], 1.0);
+    return gamma_lnpdf(
+              S.frag_count_sums[c] + S.component_num_transcripts[c] * constants::tmix_prior_prec,
+              1.0,
+              cmixc);
 }
 
 
@@ -1650,16 +1654,30 @@ void AbundanceSamplerThread::run_component(unsigned int c)
         // Something like that, anyway.
     }
 
-    float x0 = S.cmix[c] * S.total_frag_count;
+    float x0 = S.cmix_unscaled[c];
+
+    // Why does this not work just as well?
+    //float x0 = S.cmix[c] * S.total_frag_count +
+               //S.component_num_transcripts[c] * constants::tmix_prior_prec;
 
     float lp0 = compute_component_probability(c, x0);
     float slice_height = lp0 + log(gsl_rng_uniform(rng));
-    float step = 0.1 * x0;
+    float step = 1.0;
 
     float x_min = find_component_slice_edge(c, x0, slice_height, -step);
     float x_max = find_component_slice_edge(c, x0, slice_height, +step);
 
-    S.cmix[c] = x_min + (x_max - x_min) * gsl_rng_uniform(rng);
+    float x;
+    while (true) {
+         x = x_min + (x_max - x_min) * gsl_rng_uniform(rng);
+         float lp = compute_component_probability(c, x);
+
+         if (lp >= slice_height) break;
+         else if (x > x0) x_max = x0;
+         else             x_min = x0;
+    }
+
+    S.cmix[c] = S.cmix_unscaled[c] = x;
 }
 
 
@@ -1667,17 +1685,17 @@ class MultireadSamplerThread
 {
     public:
         MultireadSamplerThread(Sampler& S,
-                               Queue<MultireadBlock>& q)
+                Queue<MultireadBlock>& q)
             : hillclimb(false)
-            , S(S)
-            , q(q)
-            , thread(NULL)
-        {
-            rng = gsl_rng_alloc(gsl_rng_mt19937);
-            unsigned long seed = reinterpret_cast<unsigned long>(this) *
-                                 (unsigned long) time(NULL);
-            gsl_rng_set(rng, seed);
-        }
+              , S(S)
+              , q(q)
+              , thread(NULL)
+    {
+        rng = gsl_rng_alloc(gsl_rng_mt19937);
+        unsigned long seed = reinterpret_cast<unsigned long>(this) *
+            (unsigned long) time(NULL);
+        gsl_rng_set(rng, seed);
+    }
 
         ~MultireadSamplerThread()
         {
@@ -1761,10 +1779,10 @@ class MultireadSamplerThread
 
 
 Sampler::Sampler(const char* bam_fn, const char* fa_fn,
-                 TranscriptSet& ts,
-                 FragmentModel& fm)
+        TranscriptSet& ts,
+        FragmentModel& fm)
     : ts(ts)
-    , fm(fm)
+      , fm(fm)
 {
     /* Producer/consumer queue of intervals containing indexed reads to be
      * processed. */
@@ -1847,8 +1865,8 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
         if (tids.empty()) continue;
         BOOST_FOREACH (unsigned int tid, tids) {
             disjset_union(ds,
-                          weight_matrix->ncol + tids[0],
-                          weight_matrix->ncol + tid);
+                    weight_matrix->ncol + tids[0],
+                    weight_matrix->ncol + tid);
         }
     }
 
@@ -1875,14 +1893,14 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     component_tgroups.resize(num_components);
     component_num_transcripts = new unsigned int [num_components];
     std::fill(component_num_transcripts,
-              component_num_transcripts + num_components,
-              0);
+            component_num_transcripts + num_components,
+            0);
     transcript_component = new unsigned int [ts.size()];
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         unsigned int c = ds[weight_matrix->ncol + t->id];
         transcript_component[t->id] = c;
         component_num_transcripts[c]++;
-        component_tgroups[c].insert(t->id);
+        component_tgroups[c].insert(t->tgroup);
     }
 
     component_transcripts = new unsigned int* [num_components];
@@ -1891,8 +1909,8 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     }
 
     std::fill(component_num_transcripts,
-              component_num_transcripts + num_components,
-              0);
+            component_num_transcripts + num_components,
+            0);
 
     for (size_t i = 0; i < ts.size(); ++i) {
         unsigned int c = ds[weight_matrix->ncol + i];
@@ -1978,7 +1996,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
 
     multiread_num_alignments = new unsigned int [num_multireads];
     std::fill(multiread_num_alignments,
-              multiread_num_alignments + num_multireads, 0);
+            multiread_num_alignments + num_multireads, 0);
     multiread_alignments = new MultireadAlignment* [num_multireads];
     multiread_alignment_pool = new MultireadAlignment [num_alignments];
 
@@ -2016,6 +2034,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     tmix            = new double [weight_matrix->nrow];
     tgroupmix       = new double [tgroup_tids.size()];
     cmix            = new double [num_components];
+    cmix_unscaled   = new double [num_components];
 
     // Allocate sample threads
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -2029,6 +2048,7 @@ Sampler::~Sampler()
 {
     delete [] tmix;
     delete [] cmix;
+    delete [] cmix_unscaled;
     delete [] tgroupmix;
     delete [] transcript_component;
     for (size_t i = 0; i < num_components; ++i) {
@@ -2092,6 +2112,13 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
     init_multireads();
     init_frag_probs();
     update_frag_count_sums();
+
+    /* Initial cmix */
+    for (unsigned int c = 0; c < num_components; ++c) {
+        cmix_unscaled[c] =
+            component_num_transcripts[c] * constants::tmix_prior_prec +
+            frag_count_sums[c];
+    }
 
     const char* task_name = "Sampling";
     Logger::push_task(task_name, num_samples + constants::sampler_burnin_samples);
