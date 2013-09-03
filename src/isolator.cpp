@@ -195,9 +195,9 @@ int isolator_quantify(int argc, char* argv[])
     fm->estimate(ts, bam_fn, fa_fn);
 
     /* Initialize the sampler. */
-    Sampler sampler(bam_fn, fa_fn, ts, *fm);
+    Sampler sampler(bam_fn, fa_fn, ts, *fm, run_gc_correction);
     delete fm; /* free a little memory */
-    sampler.run(num_samples, db, run_gc_correction);
+    sampler.run(num_samples, db);
 
     gettimeofday(&t1, NULL);
     long tdiff = (t1.tv_usec + 1000000 * t1.tv_sec) -

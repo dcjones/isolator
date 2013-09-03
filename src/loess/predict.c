@@ -1,6 +1,46 @@
 #include "S.h"
 #include "loess.h"
 
+
+void pred_(double* x, double* x_, double* new_x, long* size_info, double* s,
+           double* weights, double* robust, double* span, long* degree,
+           long* normalize, long* parametric, long* drop_sequare,
+           char** surface, double* cell, char** family, long* parameter,
+           long* a, double *xi, double* vert, double* vval, double* divisor,
+           long* se, double* fit, double* se_fit);
+
+
+void predict2(struct loess_struct* lo, double* eval,
+              double* fit, double* se_fit, long m, long se)
+{
+	long size_info[3];
+	size_info[0] = lo->in.p;
+	size_info[1] = lo->in.n;
+	size_info[2] = m;
+
+    pred_(lo->in.y, lo->in.x, eval, size_info, &lo->out.s,
+		lo->in.weights,
+		lo->out.robust,
+		&lo->model.span,
+		&lo->model.degree,
+		&lo->model.normalize,
+		lo->model.parametric,
+		lo->model.drop_square,
+		&lo->control.surface,
+		&lo->control.cell,
+		&lo->model.family,
+		lo->kd_tree.parameter,
+		lo->kd_tree.a,
+		lo->kd_tree.xi,
+		lo->kd_tree.vert,
+		lo->kd_tree.vval,
+		lo->out.divisor,
+		&se,
+		fit,
+		se_fit);
+}
+
+
 void
 predict(eval, m, lo, pre, se)
 double  *eval;
@@ -9,7 +49,6 @@ struct	loess_struct	*lo;
 struct	pred_struct	*pre;
 {
 	long	size_info[3];
-	void    pred_();
 
         pre->fit = (double *) malloc(m * sizeof(double));
         pre->se_fit = (double *) malloc(m * sizeof(double));

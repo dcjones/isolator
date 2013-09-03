@@ -36,7 +36,7 @@ class StudentsTLogPdf
 {
     public:
         // v: degrees of freedom
-        StudentsTLogPdf(double v)
+        StudentsTLogPdf(double v = 4.0)
             : v(v)
         {
             base = gsl_sf_lngamma((v + 1)/2)
@@ -1342,6 +1342,7 @@ class AbundanceSamplerThread
                                              unsigned int u, unsigned int v,
                                              float z0, float p0, bool left);
 
+        StudentsTLogPdf cmix_prior;
         gsl_rng* rng;
         Sampler& S;
         Queue<ComponentBlock>& q;
@@ -1397,10 +1398,22 @@ float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 float AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
 {
     // TODO: prior over tgroupmix
-    return gamma_lnpdf(
-              S.frag_count_sums[c] + S.component_num_transcripts[c] * constants::tmix_prior_prec,
-              1.0,
-              cmixc);
+    /*
+     *
+     * What does the prior look like? We are doing log t-distribution to account
+     * for outlier replicates.
+     *
+     * The problem is that cmixc is not normalized. It's something on the same
+     * scale as "number of reads". We can't apply a prior to that shit.
+     *
+     *
+     */
+
+    float lp = gamma_lnpdf(S.frag_count_sums[c] + S.component_num_transcripts[c] * constants::tmix_prior_prec,
+                           1.0, cmixc);
+
+
+    return lp;
 }
 
 
@@ -1779,10 +1792,10 @@ class MultireadSamplerThread
 
 
 Sampler::Sampler(const char* bam_fn, const char* fa_fn,
-        TranscriptSet& ts,
-        FragmentModel& fm)
+                 TranscriptSet& ts, FragmentModel& fm, bool run_gc_correction)
     : ts(ts)
-      , fm(fm)
+    , fm(fm)
+    , gc_correct(NULL)
 {
     /* Producer/consumer queue of intervals containing indexed reads to be
      * processed. */
@@ -2032,9 +2045,14 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
 
     frag_count_sums = new float [num_components];
     tmix            = new double [weight_matrix->nrow];
+    expr            = new double [weight_matrix->nrow];
     tgroupmix       = new double [tgroup_tids.size()];
     cmix            = new double [num_components];
     cmix_unscaled   = new double [num_components];
+
+    if (fm.sb && run_gc_correction) {
+        gc_correct = new GCCorrection(ts, transcript_gc);
+    }
 
     // Allocate sample threads
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -2068,6 +2086,8 @@ Sampler::~Sampler()
     delete weight_matrix;
     delete [] transcript_weights;
     delete [] transcript_gc;
+    delete gc_correct;
+    delete [] expr;
 
     for (std::vector<MultireadSamplerThread*>::iterator i = multiread_threads.begin();
          i != multiread_threads.end(); ++i) {
@@ -2082,7 +2102,7 @@ Sampler::~Sampler()
 
 
 
-void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correction)
+void Sampler::run(unsigned int num_samples, SampleDB& out)
 {
     /* Initial mixtures */
     for (unsigned int i = 0; i < num_components; ++i) {
@@ -2143,20 +2163,28 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
 
         double total_weight = 0.0;
         for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-            samples[i][sample_num] =
-                cmix[transcript_component[i]] *
+            expr[i] = cmix[transcript_component[i]] *
                 (transcript_weights[i] == 0.0 ?
                     tmix[i] : tmix[i] / transcript_weights[i]);
-            total_weight += samples[i][sample_num];
+            total_weight += expr[i];
         }
 
         for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-            samples[i][sample_num] /= total_weight;
+            expr[i] /= total_weight;
+        }
+
+        if (gc_correct) {
+            gc_correct->correct(expr);
+        }
+
+        for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+            samples[i][sample_num] = expr[i];
         }
 
         Logger::get_task(task_name).inc();
     }
 
+#if 0
     // compute gc correction
     if (fm.sb[0] && run_gc_correction) {
         // compute the posterior mean, for use with gc correction
@@ -2177,6 +2205,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out, bool run_gc_correctio
 
         gc_correction(postmean, num_samples);
     }
+#endif
 
     // record samples
     Logger::pop_task(task_name);

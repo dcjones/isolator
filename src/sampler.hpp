@@ -2,12 +2,14 @@
 #ifndef ISOLATOR_SAMPLER_HPP
 #define ISOLATOR_SAMPLER_HPP
 
+#include <vector>
+
 #include "fragment_model.hpp"
+#include "gc.hpp"
 #include "queue.hpp"
 #include "sample_db.hpp"
 #include "sparse_mat.hpp"
 #include "transcripts.hpp"
-#include <vector>
 
 class WeightMatrix;
 class AbundanceSamplerThread;
@@ -66,10 +68,18 @@ class Sampler
 {
     public:
         Sampler(const char* bam_fn, const char* ref_fn,
-                TranscriptSet& ts, FragmentModel& fm);
+                TranscriptSet& ts, FragmentModel& fm,
+                bool run_gc_correction);
         ~Sampler();
 
-        void run(unsigned int num_samples, SampleDB& out, bool run_gc_correction);
+
+        /* TODO:
+         * We need to reorganize this to not generate all the samples at once.
+         * We also need to able to update hyperparameters between samples.
+         */
+
+        void run(unsigned int num_samples, SampleDB& out);
+
 
     private:
         // Run a single multiread sampler round.
@@ -93,6 +103,7 @@ class Sampler
 
         TranscriptSet& ts;
         FragmentModel& fm;
+        GCCorrection* gc_correct;
 
         // Multiread sampling
         std::vector<MultireadSamplerThread*> multiread_threads;
@@ -177,6 +188,10 @@ class Sampler
         /* component_frag[i] given the index of the first fragment in component
          * i */
         unsigned int* component_frag;
+
+        /* Temporary space to do normalization on expression before copying to
+         * samples */
+        double* expr;
 
         /* Samples indexed by transcript id */
         float** samples;

@@ -18,6 +18,7 @@ add_executable(isolator
                dirichlet.c
                emp_dist.cpp
                fragment_model.cpp
+               gc.cpp
                intervals.cpp
                isolator.cpp
                linalg.cpp

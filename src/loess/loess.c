@@ -50,6 +50,52 @@ struct  loess_struct	*lo;
 	lo->kd_tree.vval = (double *) malloc((p + 1) * max_kd * sizeof(double));
 }
 
+
+void loess_setup2(double* x, double* y, long n, long p, struct loess_struct* lo)
+{
+	int	i, max_kd;
+
+	max_kd = n > 200 ? n : 200;
+
+    lo->in.y = y;
+    lo->in.x = x;
+
+	lo->in.weights = (double *) malloc(n * sizeof(double));
+	for(i = 0; i < (n * p); i++)
+	        lo->in.x[i] = x[i];
+	for(i = 0; i < n; i++) {
+        lo->in.weights[i] = 1;
+	}
+
+	lo->in.n = n;
+	lo->in.p = p;
+        lo->model.span = 0.75;
+	lo->model.degree = 2;
+	lo->model.normalize = TRUE;
+	for(i = 0; i < 8; i++)
+	        lo->model.parametric[i] = lo->model.drop_square[i] = FALSE;
+	lo->model.family = "gaussian";
+        lo->control.surface = "interpolate";
+        lo->control.statistics = "approximate";
+	lo->control.cell = 0.2;
+	lo->control.trace_hat = "wait.to.decide";
+ 	lo->control.iterations = 4;
+
+	lo->out.fitted_values = (double *) malloc(n * sizeof(double));
+	lo->out.fitted_residuals = (double *) malloc(n * sizeof(double));
+	lo->out.pseudovalues = (double *) malloc(n * sizeof(double));
+	lo->out.diagonal = (double *) malloc(n * sizeof(double));
+	lo->out.robust = (double *) malloc(n * sizeof(double));
+	lo->out.divisor = (double *) malloc(p * sizeof(double));
+
+	lo->kd_tree.parameter = (long *) malloc(7 * sizeof(long));
+	lo->kd_tree.a = (long *) malloc(max_kd * sizeof(long));
+	lo->kd_tree.xi = (double *) malloc(max_kd * sizeof(double));
+	lo->kd_tree.vert = (double *) malloc(p * 2 * sizeof(double));
+	lo->kd_tree.vval = (double *) malloc((p + 1) * max_kd * sizeof(double));
+}
+
+
 void
 loess(lo)
 struct	loess_struct	*lo;
@@ -260,6 +306,23 @@ struct	loess_struct	*lo;
 {
         free(lo->in.x);
 	free(lo->in.y);
+	free(lo->in.weights);
+	free(lo->out.fitted_values);
+	free(lo->out.fitted_residuals);
+	free(lo->out.pseudovalues);
+	free(lo->out.diagonal);
+	free(lo->out.robust);
+	free(lo->out.divisor);
+	free(lo->kd_tree.parameter);
+	free(lo->kd_tree.a);
+	free(lo->kd_tree.xi);
+	free(lo->kd_tree.vert);
+	free(lo->kd_tree.vval);
+}
+
+
+void loess_free_mem2(struct loess_struct* lo)
+{
 	free(lo->in.weights);
 	free(lo->out.fitted_values);
 	free(lo->out.fitted_residuals);
