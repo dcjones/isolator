@@ -24,6 +24,9 @@ class GCCorrection
         // number of entrie (tgroups) in xs, ys
         size_t n;
 
+        // work vectors for computing gene expression and weighted gc content
+        std::vector<double> gene_expr, gene_gc;
+
         // input: weighted gc content
         std::vector<double> xs;
 

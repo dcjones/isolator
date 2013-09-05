@@ -2050,7 +2050,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     cmix            = new double [num_components];
     cmix_unscaled   = new double [num_components];
 
-    if (fm.sb && run_gc_correction) {
+    if (fm.sb[0] && run_gc_correction) {
         gc_correct = new GCCorrection(ts, transcript_gc);
     }
 
@@ -2363,7 +2363,7 @@ void Sampler::gc_correction(float* maxpost, size_t num_samples)
         if (i == gene_expr.end()) {
             gene_expr.insert(std::make_pair(t->gene_id, maxpost[t->id]));
             gene_gc.insert(std::make_pair(t->gene_id,
-                            maxpost[t->id] * transcript_gc[t->id]));
+                           maxpost[t->id] * transcript_gc[t->id]));
         }
         else {
             gene_expr[t->gene_id] += maxpost[t->id];

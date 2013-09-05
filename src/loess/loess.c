@@ -61,8 +61,6 @@ void loess_setup2(double* x, double* y, long n, long p, struct loess_struct* lo)
     lo->in.x = x;
 
 	lo->in.weights = (double *) malloc(n * sizeof(double));
-	for(i = 0; i < (n * p); i++)
-	        lo->in.x[i] = x[i];
 	for(i = 0; i < n; i++) {
         lo->in.weights[i] = 1;
 	}

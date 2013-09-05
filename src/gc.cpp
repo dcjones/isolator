@@ -14,53 +14,60 @@ GCCorrection::GCCorrection(TranscriptSet& ts, const float* transcript_gc)
         n = std::max<size_t>(n, t->tgroup + 1);
     }
 
+    gene_expr.resize(n);
+    gene_gc.resize(n);
     xs.resize(n);
     ys.resize(n);
     fit.resize(ts.size());
     se_fit.resize(ts.size());
     tgc.resize(ts.size());
 
-    loess_setup2(&xs.at(0), &ys.at(0), n, 1, &lo);
+    //loess_setup2(&xs.at(0), &ys.at(0), n, 1, &lo);
     lo.model.span = constants::gc_loess_smoothing;
     lo.model.family = "symmetric";
-    lo.model.degree = 2;
+    lo.model.degree = 1;
 }
 
 
 GCCorrection::~GCCorrection()
 {
-    loess_free_mem2(&lo);
+    //loess_free_mem2(&lo);
 }
 
 
 void GCCorrection::correct(double* expr)
 {
-    std::fill(xs.begin(), xs.end(), 0.0);
-    std::fill(xs.begin(), xs.end(), 0.0);
+    std::fill(gene_gc.begin(), gene_gc.end(), 0.0);
+    std::fill(gene_expr.begin(), gene_expr.end(), 0.0);
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         if (expr[t->id] == 0.0 ||
-            t->exonic_length() < 200 ||
-            transcript_gc[t->id] < 0.20 ||
-            transcript_gc[t->id] > 0.70) {
+            t->exonic_length() < 500 ||
+            transcript_gc[t->id] < 0.10 ||
+            transcript_gc[t->id] > 0.90) {
             continue;
         }
 
-        xs[t->id] += expr[t->id] * transcript_gc[t->id];
-        ys[t->id] += expr[t->id];
+        gene_gc[t->tgroup] += expr[t->id] * transcript_gc[t->id];
+        gene_expr[t->tgroup] += expr[t->id];
     }
 
     double max_gc = 0.0, min_gc = 1.0;
+    size_t j = 0;
     for (size_t i = 0; i < n; ++i) {
-        if (ys[i] > 0.0) {
-            xs[i] /= ys[i];
-            ys[i] = log(ys[i]);
+        if (gene_expr[i] > 0.0) {
+            xs[j] = gene_gc[i] / gene_expr[i];
+            ys[j] = log(gene_expr[i]);
+            max_gc = std::max<double>(max_gc, xs[j]);
+            min_gc = std::min<double>(min_gc, xs[j]);
+            ++j;
         }
-        else {
-            ys[i] = log(constants::zero_eps);
-        }
-        max_gc = std::max<double>(max_gc, xs[i]);
-        min_gc = std::min<double>(min_gc, xs[i]);
     }
+
+    loess_setup(&xs.at(0), &ys.at(0), j, 1, &lo);
+    lo.model.span = constants::gc_loess_smoothing;
+    lo.model.family = "symmetric";
+    lo.model.degree = 1;
+    loess(&lo);
 
     // normalize to a arbitary point in the loess curve
     double ref_gc = 0.5;
@@ -84,6 +91,8 @@ void GCCorrection::correct(double* expr)
     for (size_t i = 0; i < ts.size(); ++i) {
         expr[i] /= z;
     }
+
+    loess_free_mem(&lo);
 }
 
 
