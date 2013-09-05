@@ -147,6 +147,9 @@ class TranscriptSet
         /* Number of transcripts held in the set. */
         size_t size() const;
 
+        /* Return the number of tgroups */
+        size_t num_tgroups() const;
+
         /* Return a vector for each tgroup containing its constituent tids. */
         std::vector<std::vector<unsigned int> > tgroup_tids() const;
 
@@ -178,7 +181,7 @@ class TranscriptSet
         std::set<Transcript> transcripts;
 
         /* Number of transcription groups. */
-        size_t num_tgroups;
+        size_t _num_tgroups;
 
         friend class TranscriptSetIterator;
         friend class TranscriptSetLocusIterator;

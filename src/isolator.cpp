@@ -195,7 +195,7 @@ int isolator_quantify(int argc, char* argv[])
     fm->estimate(ts, bam_fn, fa_fn);
 
     /* Initialize the sampler. */
-    Sampler sampler(bam_fn, fa_fn, ts, *fm, run_gc_correction);
+    Sampler sampler(bam_fn, fa_fn, ts, *fm, run_gc_correction, false);
     delete fm; /* free a little memory */
     sampler.run(num_samples, db);
 
@@ -352,59 +352,83 @@ int isolator_summarize(int argc, char* argv[])
 }
 
 
-void print_test_usage(FILE* fout)
+void print_analyze_usage(FILE* fout)
 {
-    fprintf(fout, "Usage: isolator test [options] genes.gtf a1.db[,a2.db...] [b1.db[,b2.db...]]\n");
+    fprintf(fout, "Usage: isolator analyze [options] genes.gtf a1.bam[,a2.bam...] [b1.bam[,b2.bam...]]\n");
 }
 
-void print_test_help(FILE* fout)
+void print_analyze_help(FILE* fout)
 {
-    print_test_usage(fout);
+    print_analyze_usage(fout);
     fprintf(fout,
         "\nOptions:\n"
-        "-h, --help          Print this help message\n"
-        "-v, --verbose       Print a bunch of information useful mainly for debugging\n"
-        "-N, --num-samples   Generate this many samples (by default: 100)\n\n"
+        "-h, --help                Print this help message\n"
+        "-v, --verbose             Print a bunch of information useful mainly for debugging\n"
+        "-g, --genomic-seq=FILE    Correct for sequence bias, given the a the sequence\n"
+        "                          against which the reads are aligned, in FAST format.\n"
+        "-p, --threads=N           number of threads to use.\n"
+        "    --no-gc-correction    disable post-hoc GC-content adjustments.\n"
+        "-N, --num-samples   Generate this many samples (by default: 250)\n\n"
         "See 'isolator help teste' for more.\n");
 }
 
 
-// TODO: rename this "isolator analyze"
-int isolator_test(int argc, char* argv[])
+int isolator_analyze(int argc, char* argv[])
 {
     static struct option long_options[] =
     {
-        {"help", no_argument, NULL, 'h'},
-        {"verbose",     no_argument,       NULL, 'v'},
+        {"help",             no_argument,       NULL, 'h'},
+        {"verbose",          no_argument,       NULL, 'v'},
+        {"genomic-seq",      required_argument, NULL, 'g'},
+        {"threads",          required_argument, NULL, 'p'},
+        {"no-gc-correction", no_argument,       NULL, 0},
+        {"num-samples",      required_argument, NULL, 'N'},
         {0, 0, 0, 0}
     };
 
     Logger::level logger_level = Logger::INFO;
-    unsigned int num_samples = 100;
+    unsigned int num_samples = 250;
+    bool run_gc_correction = true;
+    constants::num_threads = boost::thread::hardware_concurrency();
+    const char* fa_fn  = NULL;
 
     int opt;
-    int opt_idx;
+    int optidx;
     while (true) {
-        opt = getopt_long(argc, argv, "hvo:", long_options, &opt_idx);
+        opt = getopt_long(argc, argv, "hvg:p:N:", long_options, &optidx);
 
         if (opt == -1) break;
 
         switch (opt) {
             case 'h':
-                print_summarize_help(stdout);
+                print_analyze_help(stdout);
                 return 0;
 
             case 'v':
                 logger_level = Logger::DEBUG;
                 break;
 
+            case 'p':
+                constants::num_threads = std::max(1, atoi(optarg));
+                break;
+
+            case 'g':
+                fa_fn = optarg;
+                break;
+
             case 'N':
                 num_samples = strtoul(optarg, NULL, 10);
                 break;
 
+            case 0:
+                if (strcmp(long_options[optidx].name, "no-gc-correction") == 0) {
+                    run_gc_correction = false;
+                }
+                break;
+
             case '?':
                 fprintf(stderr, "\n");
-                print_test_help(stderr);
+                print_analyze_help(stderr);
                 return 1;
 
             default:
@@ -414,7 +438,7 @@ int isolator_test(int argc, char* argv[])
 
     // no positional argumens
     if (optind + 1 >= argc) {
-        print_test_usage(stdout);
+        print_analyze_usage(stdout);
         return 0;
     }
 
@@ -433,39 +457,22 @@ int isolator_test(int argc, char* argv[])
     fclose(gtf_f);
 
     // initialize
-    Analyze analyze(ts);
+    Analyze analyze(ts, fa_fn, run_gc_correction);
     int condition_num = 1;
-    std::vector<SampleDB*> sample_dbs;
     for (; optind < argc; ++optind) {
         char condition_name[100];
-        snprintf(condition_name, sizeof(condition_name), "condition%d", condition_num);
+        snprintf(condition_name, sizeof(condition_name), "condition_%d", condition_num);
 
         const char* fn;
         for (fn = strtok(argv[optind], ","); fn; fn = strtok(NULL, ",")) {
-            sample_dbs.push_back(new SampleDB(fn, false));
-            analyze.add_sample(condition_name, *sample_dbs.back());
-            Logger::debug("Adding '%s' to condition '%s'", fn, condition_name);
+            analyze.add_sample(condition_name, fn);
+            Logger::info("Adding '%s' to condition '%s'", fn, condition_name);
         }
 
         ++condition_num;
     }
 
     analyze.run();
-
-#if 0
-    // TODO: make this cotrollable from the command line
-    AvgPairwiseAbsLog2Fc avg_pairwise_abs_log2fc;
-    switchtest.add_analysis(&avg_pairwise_abs_log2fc);
-
-    std::vector<double> quantiles;
-    quantiles.push_back(0.95);
-
-    switchtest.run(num_samples, quantiles);
-
-    BOOST_FOREACH (SampleDB*& sample_db, sample_dbs) {
-        delete sample_db;
-    }
-#endif
 
     Logger::info("Finished. Have a nice day!");
     Logger::end();
@@ -481,11 +488,11 @@ void print_usage(FILE* fout)
             "Isolator version %s\n"
             "Instruction set: %s\n\n"
             "Where <command> is one of:\n"
+            "    analyze           Quantify and test for differential expression\n"
+            "                      and splicing, among other things.\n"
             "    quantify          Quantify transcript abundance.\n"
             "    summarize         Summarize a sampler run.\n"
             "    report            Generate useful output from an quantify run.\n"
-            "    test              Test for differential expression and\n"
-            "                      isoform switching.\n"
             "    help              Become enlightened.\n",
             VERSION, LINALG_INSTR_SET);
 }
@@ -532,8 +539,8 @@ int main(int argc, char* argv[])
     else if (strcmp(argv[0], "summarize") == 0) {
         return isolator_summarize(argc, argv);
     }
-    else if (strcmp(argv[0], "test") == 0) {
-        return isolator_test(argc, argv);
+    else if (strcmp(argv[0], "analyze") == 0) {
+        return isolator_analyze(argc, argv);
     }
     else if (strcmp(argv[0], "help") == 0) {
         return isolator_help(argc, argv);

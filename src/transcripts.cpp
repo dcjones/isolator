@@ -223,9 +223,15 @@ size_t TranscriptSet::size() const
 }
 
 
+size_t TranscriptSet::num_tgroups() const
+{
+    return _num_tgroups;
+}
+
+
 std::vector<std::vector<unsigned int> > TranscriptSet::tgroup_tids() const
 {
-    std::vector<std::vector<unsigned int> > tgroup_tids(num_tgroups);
+    std::vector<std::vector<unsigned int> > tgroup_tids(_num_tgroups);
     BOOST_FOREACH (const Transcript& t, transcripts) {
         tgroup_tids[t.tgroup].push_back(t.id);
     }
@@ -343,7 +349,7 @@ void TranscriptSet::read_gtf(FILE* f)
         }
         ++tgroup;
     }
-    num_tgroups = tgroup;
+    _num_tgroups = tgroup;
 
     // optionally extend the ends of transcripts before inserting them into the
     // set

@@ -69,17 +69,39 @@ class Sampler
     public:
         Sampler(const char* bam_fn, const char* ref_fn,
                 TranscriptSet& ts, FragmentModel& fm,
-                bool run_gc_correction);
+                bool run_gc_correction, bool use_priors);
         ~Sampler();
-
-
-        /* TODO:
-         * We need to reorganize this to not generate all the samples at once.
-         * We also need to able to update hyperparameters between samples.
-         */
 
         void run(unsigned int num_samples, SampleDB& out);
 
+        // Called prior to any calls to iterate
+        void start();
+
+        // Generate a new sample. start() must be called prior to running an
+        // iterations.
+        void transition();
+
+        // Return the current sampler state: a vector containing the relative
+        // abundance of each transcript indexed by tid.
+        const std::vector<double>& state() const;
+
+        // Hyperparameters that this sampler is not responsible for updating.
+        // Public so they can be updated without a hassle.
+        struct {
+            // Normalization factor accounting for sequencing depth
+            double scale;
+
+            // Degrees-of-freedom parameter for tgroup abundance prior
+            double tgroup_nu;
+
+            // Location parameter for tgroup abundance prior
+            std::vector<double> tgroup_mu;
+
+            // Scale parameter for the tgroup abundance prior
+            std::vector<double> tgroup_sigma;
+
+            // TODO: Hyperparameters for splicing. Yikes.
+        } hp;
 
     private:
         // Run a single multiread sampler round.
@@ -98,9 +120,6 @@ class Sampler
         // Recompute frag_count_sums
         void update_frag_count_sums();
 
-        /* Perform post-hoc adjustment for transcript GC-content. */
-        void gc_correction(float* xs, size_t num_samples);
-
         TranscriptSet& ts;
         FragmentModel& fm;
         GCCorrection* gc_correct;
@@ -112,6 +131,10 @@ class Sampler
         // Abundance sampling
         std::vector<AbundanceSamplerThread*> abundance_threads;
         Queue<ComponentBlock> component_queue;
+
+        // True if priors on cmix and tmix are used. If false, hyperparameters
+        // (values in the hp structure) are ignored.
+        bool use_priors;
 
         /* Transcript mixture coefficients. Within-component relative abundance. */
         double* tmix;
@@ -191,7 +214,7 @@ class Sampler
 
         /* Temporary space to do normalization on expression before copying to
          * samples */
-        double* expr;
+        std::vector<double> expr;
 
         /* Samples indexed by transcript id */
         float** samples;

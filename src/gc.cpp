@@ -22,7 +22,6 @@ GCCorrection::GCCorrection(TranscriptSet& ts, const float* transcript_gc)
     se_fit.resize(ts.size());
     tgc.resize(ts.size());
 
-    //loess_setup2(&xs.at(0), &ys.at(0), n, 1, &lo);
     lo.model.span = constants::gc_loess_smoothing;
     lo.model.family = "symmetric";
     lo.model.degree = 1;
@@ -31,7 +30,6 @@ GCCorrection::GCCorrection(TranscriptSet& ts, const float* transcript_gc)
 
 GCCorrection::~GCCorrection()
 {
-    //loess_free_mem2(&lo);
 }
 
 

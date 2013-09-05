@@ -4,68 +4,62 @@
 
 #include <boost/numeric/ublas/matrix.hpp>
 #include <set>
+#include <string>
 #include <vector>
 
-#include "sample_db.hpp"
+#include "fragment_model.hpp"
+#include "sampler.hpp"
 #include "transcripts.hpp"
 
 
 class Analyze
 {
     public:
-		Analyze(TranscriptSet& ts);
+		Analyze(TranscriptSet& ts,
+                const char* genome_filename,
+                bool run_gc_correction);
 		~Analyze();
 
 		// Add a replicate under a particular condition
-		void add_sample(const char* condition_name, SampleDB& sample_data);
+		void add_sample(const char* condition_name,
+                        const char* filename);
 
         void run();
 
     private:
-        void load_quantification_data();
-        void compute_depth();
-        void choose_kde_bandwidth();
-        void choose_initial_values(std::vector<double>& cont_params,
-                                   std::vector<int>& disc_params);
+        void setup();
+        void cleanup();
+        //void compute_depth();
+        //void choose_initial_values(std::vector<double>& cont_params,
+                                   //std::vector<int>& disc_params);
 
 		TranscriptSet& ts;
 
-		// map a condition name to data from some number of replicates
-		typedef std::map<std::string, std::vector<SampleDB*> > CondMap;
-		typedef std::pair<const std::string, std::vector<SampleDB*> > CondMapItem;
-		CondMap data;
+        // File name of a fasta file containing the reference genome sequence
+        // against which the reads are aligned.
+        const char* genome_filename;
 
-        // tid to transcript_ids and gene_ids
-        std::vector<TranscriptID> transcript_ids;
-        std::vector<GeneID> gene_ids;
+        // True if post-hoc GC content correction should be used.
+        bool run_gc_correction;
 
-        // organize by tss
-		typedef std::map<Interval, std::vector<unsigned int> > TSMap;
-		typedef std::pair<const Interval, std::vector<unsigned int> > TSMapItem;
-		TSMap tss_group;
-		TSMap tss_tts_group;
-
-        // Transcript and gene IDs indexed by tss index.
-        std::vector<std::set<GeneID> > tss_gene_ids;
-        std::vector<std::set<TranscriptID> > tss_transcript_ids;
-        std::vector<std::vector<unsigned int> > tss_tids;
-
-		// map each transcript index to it's tss index
-		std::vector<int> tss_index;
-
-        // Matrix containing sampled transcript abundances from
-        // 'isolator quantify'
-		// Indexed by: replicate -> transcript -> sample_num
-        std::vector<boost::numeric::ublas::matrix<float> > quantification;
+        // file names for the BAM/SAM file corresponding to each
+        std::vector<std::string> filenames;
 
 		// condition index to sample indexes
 		std::vector<std::vector<unsigned int> > condition_samples;
 
-        // bandwidth for the kde estimator of each sample and transcript
-        boost::numeric::ublas::matrix<float> bandwidth;
+        // fragment models for each sample
+        std::vector<FragmentModel*> fms;
+
+        // quantification samplers for each sample
+        std::vector<Sampler*> qsamplers;
+
+        // matrix containing relative transcript abundance samples, indexed by:
+        //   replicate -> transcript (tid)
+        boost::numeric::ublas::matrix<float> Q;
 
         // normalization constant for each sample
-        std::vector<double> depth;
+        std::vector<double> scale;
 
         // number of sequenced samples
         unsigned int K;
@@ -75,9 +69,6 @@ class Analyze
 
         // number of transcripts
         unsigned int N;
-
-        // number of samples generated in the quantification phase
-        unsigned int M;
 
         // number of transcription groups (TSS groups, typicall)
         unsigned int T;

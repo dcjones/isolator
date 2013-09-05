@@ -35,25 +35,36 @@ static double sq(double x)
 class StudentsTLogPdf
 {
     public:
-        // v: degrees of freedom
-        StudentsTLogPdf(double v = 4.0)
-            : v(v)
+        // nu: degrees of freedom
+        StudentsTLogPdf(double nu = 4.0)
+            : nu(nu)
         {
-            base = gsl_sf_lngamma((v + 1)/2)
-                 - gsl_sf_lngamma(v/2)
-                 - log(sqrt(M_PI * v));
+            base = gsl_sf_lngamma((nu + 1)/2)
+                 - gsl_sf_lngamma(nu/2)
+                 - log(sqrt(M_PI * nu));
         }
 
-        double operator()(double mu, double lambda, double x) const
+        double operator()(double nu, double mu, double lambda, double x)
         {
+            set_nu(nu);
             return base
                  - log(mu)
-                 - ((v + 1) / 2) * log1p(sq(x - mu) * lambda / v);
+                 - ((nu + 1) / 2) * log1p(sq(x - mu) * lambda / nu);
+        }
+
+        void set_nu(double nu)
+        {
+            if (this->nu != nu) {
+                this->nu = nu;
+                base = gsl_sf_lngamma((nu + 1)/2)
+                     - gsl_sf_lngamma(nu/2)
+                     - log(sqrt(M_PI * nu));
+            }
         }
 
     private:
         double base;
-        double v;
+        double nu;
 };
 
 
@@ -1412,6 +1423,17 @@ float AbundanceSamplerThread::compute_component_probability(unsigned int c, floa
     float lp = gamma_lnpdf(S.frag_count_sums[c] + S.component_num_transcripts[c] * constants::tmix_prior_prec,
                            1.0, cmixc);
 
+    if (S.use_priors) {
+        // approximane the scaled cmix
+        double cmixc_scaled = cmixc / S.total_frag_count;
+
+        // prior
+        BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
+            lp += cmix_prior(S.hp.tgroup_nu, S.hp.tgroup_mu[tgroup],
+                             S.hp.tgroup_sigma[tgroup],
+                             log(S.tgroupmix[tgroup] * cmixc_scaled * S.hp.scale));
+        }
+    }
 
     return lp;
 }
@@ -1792,10 +1814,12 @@ class MultireadSamplerThread
 
 
 Sampler::Sampler(const char* bam_fn, const char* fa_fn,
-                 TranscriptSet& ts, FragmentModel& fm, bool run_gc_correction)
+                 TranscriptSet& ts, FragmentModel& fm, bool run_gc_correction,
+                 bool use_priors)
     : ts(ts)
     , fm(fm)
     , gc_correct(NULL)
+    , use_priors(use_priors)
 {
     /* Producer/consumer queue of intervals containing indexed reads to be
      * processed. */
@@ -2045,10 +2069,17 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
 
     frag_count_sums = new float [num_components];
     tmix            = new double [weight_matrix->nrow];
-    expr            = new double [weight_matrix->nrow];
     tgroupmix       = new double [tgroup_tids.size()];
     cmix            = new double [num_components];
     cmix_unscaled   = new double [num_components];
+
+    // initialize hyperparameters
+    hp.scale = 1.0;
+    hp.tgroup_nu = 0.0;
+    hp.tgroup_mu.resize(ts.num_tgroups(), 0.0);
+    hp.tgroup_sigma.resize(ts.num_tgroups(), 0.0);
+
+    expr.resize(weight_matrix->nrow);
 
     if (fm.sb[0] && run_gc_correction) {
         gc_correct = new GCCorrection(ts, transcript_gc);
@@ -2087,7 +2118,6 @@ Sampler::~Sampler()
     delete [] transcript_weights;
     delete [] transcript_gc;
     delete gc_correct;
-    delete [] expr;
 
     for (std::vector<MultireadSamplerThread*>::iterator i = multiread_threads.begin();
          i != multiread_threads.end(); ++i) {
@@ -2173,8 +2203,8 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
             expr[i] /= total_weight;
         }
 
-        if (gc_correct) {
-            gc_correct->correct(expr);
+        if (fm.sb[0] && gc_correct) {
+            gc_correct->correct(&expr.at(0));
         }
 
         for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
@@ -2183,29 +2213,6 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
         Logger::get_task(task_name).inc();
     }
-
-#if 0
-    // compute gc correction
-    if (fm.sb[0] && run_gc_correction) {
-        // compute the posterior mean, for use with gc correction
-        float* postmean = new float[weight_matrix->nrow];
-        std::fill(postmean, postmean + weight_matrix->nrow, 0.0);
-        float z = 0.0;
-        for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-            for (unsigned int j = 0; j < num_samples; ++j){
-                postmean[i] += samples[i][j];
-            }
-            postmean[i] /= (double) weight_matrix->nrow;
-            z += postmean[i];
-        }
-
-        for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-            postmean[i] /= z;
-        }
-
-        gc_correction(postmean, num_samples);
-    }
-#endif
 
     // record samples
     Logger::pop_task(task_name);
@@ -2228,6 +2235,75 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
         delete [] samples[i];
     }
     delete [] samples;
+}
+
+
+void Sampler::start()
+{
+    /* Initial mixtures */
+    for (unsigned int i = 0; i < num_components; ++i) {
+        unsigned int j_max = 0;
+        unsigned int max_frags = 0;
+        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
+            unsigned int u = component_transcripts[i][j];
+            if (weight_matrix->rowlens[u] > max_frags) {
+                j_max = j;
+                max_frags = weight_matrix->rowlens[u];
+            }
+        }
+
+        double eps = 1e-5;
+
+        tmix[component_transcripts[i][j_max]] =
+            1.0 - component_num_transcripts[i] * eps;
+
+        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
+            if (j != j_max) {
+                tmix[component_transcripts[i][j]] = eps;
+            }
+        }
+    }
+
+    std::fill(cmix, cmix + num_components, 1.0 / (float) num_components);
+    init_multireads();
+    init_frag_probs();
+    update_frag_count_sums();
+
+    /* Initial cmix */
+    for (unsigned int c = 0; c < num_components; ++c) {
+        cmix_unscaled[c] =
+            component_num_transcripts[c] * constants::tmix_prior_prec +
+            frag_count_sums[c];
+    }
+}
+
+
+void Sampler::transition()
+{
+    sample_multireads();
+    sample_abundance();
+
+    double total_weight = 0.0;
+    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+        expr[i] = cmix[transcript_component[i]] *
+            (transcript_weights[i] == 0.0 ?
+                tmix[i] : tmix[i] / transcript_weights[i]);
+        total_weight += expr[i];
+    }
+
+    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+        expr[i] /= total_weight;
+    }
+
+    if (fm.sb[0] && gc_correct) {
+        gc_correct->correct(&expr.at(0));
+    }
+}
+
+
+const std::vector<double>& Sampler::state() const
+{
+    return expr;
 }
 
 
@@ -2343,94 +2419,5 @@ void Sampler::init_frag_probs()
               component_frag[c],
               weight_matrix->rowlens[i]);
     }
-}
-
-
-void Sampler::gc_correction(float* maxpost, size_t num_samples)
-{
-    std::map<GeneID, double> gene_expr;
-    std::map<GeneID, double> gene_gc;
-
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        if (maxpost[t->id] == 0.0 ||
-            t->exonic_length() < 200 ||
-            transcript_gc[t->id] < 0.30 ||
-            transcript_gc[t->id] > 0.70) {
-            continue;
-        }
-
-        std::map<GeneID, double>::iterator i = gene_expr.find(t->gene_id);
-        if (i == gene_expr.end()) {
-            gene_expr.insert(std::make_pair(t->gene_id, maxpost[t->id]));
-            gene_gc.insert(std::make_pair(t->gene_id,
-                           maxpost[t->id] * transcript_gc[t->id]));
-        }
-        else {
-            gene_expr[t->gene_id] += maxpost[t->id];
-            gene_gc[t->gene_id] += maxpost[t->id] * transcript_gc[t->id];
-        }
-    }
-
-    for (std::map<GeneID, double>::iterator i = gene_gc.begin();
-            i != gene_gc.end(); ++i) {
-        i->second /= gene_expr[i->first];
-    }
-
-    size_t n = gene_gc.size();
-
-    std::vector<double> xs(n), ys(n);
-    size_t i = 0;
-    double max_gc = 0.0, min_gc = 1.0;
-
-    for (std::map<GeneID, double>::iterator g = gene_gc.begin();
-            g != gene_gc.end(); ++g, ++i) {
-        xs[i] = g->second;
-        max_gc = std::max<double>(max_gc, g->second);
-        min_gc = std::min<double>(min_gc, g->second);
-        ys[i] = log(gene_expr[g->first]);
-    }
-
-    loess_struct lo;
-    loess_setup(&xs.at(0), &ys.at(0), n, 1, &lo);
-    lo.model.span = constants::gc_loess_smoothing;
-    lo.model.family = "symmetric";
-    lo.model.degree = 2;
-    loess(&lo);
-
-    // normalize fit's to this point in the curve
-    pred_struct pre;
-    double ref_gc = 0.5;
-    predict(&ref_gc, 1, &lo, &pre, FALSE);
-    double ref = pre.fit[0];
-    pred_free_mem(&pre);
-
-    // normalize samples
-    std::vector<double> tgc(ts.size());
-    for (size_t i = 0; i < tgc.size(); ++i) {
-        tgc[i] = std::max<double>(min_gc,
-                 std::min<double>(max_gc, transcript_gc[i]));
-    }
-    predict(&tgc.at(0), ts.size(), &lo, &pre, FALSE);
-
-    for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        double p = ref / pre.fit[t->id];
-        for (size_t j = 0; j < num_samples; ++j) {
-            samples[t->id][j] = pow(samples[t->id][j], p);
-        }
-    }
-
-    // renormalize
-    for (size_t j = 0; j < num_samples; ++j) {
-        double z = 0.0;
-        for (size_t i = 0; i < ts.size(); ++i) {
-            z += samples[i][j];
-        }
-        for (size_t i = 0; i < ts.size(); ++i) {
-            samples[i][j] /= z;
-        }
-    }
-
-    pred_free_mem(&pre);
-    loess_free_mem(&lo);
 }
 
