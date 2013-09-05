@@ -3,6 +3,8 @@
 #ifndef ISOLATOR_FRAGMENT_MODEL_HPP
 #define ISOLATOR_FRAGMENT_MODEL_HPP
 
+#include <string>
+
 #include "hat-trie/hat-trie.h"
 #include "seqbias/sequencing_bias.hpp"
 #include "transcripts.hpp"

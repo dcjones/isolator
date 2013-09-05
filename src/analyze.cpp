@@ -15,7 +15,14 @@
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wsign-compare"
+
+// This is totally fucked up, but I'd rather avoid modifying stan, and I want to
+// be able to change the data out from under the sampler.
+#define private public
+
 #include "analyze_model.cpp"
+
+#undef private
 #pragma GCC diagnostic pop
 
 using namespace boost::numeric::ublas;
@@ -213,9 +220,14 @@ class AnalyzeSamplerData : public stan::io::var_context
 #endif
 
 
-Analyze::Analyze(TranscriptSet& ts, const char* genome_filename,
+Analyze::Analyze(size_t burnin,
+                 size_t num_samples,
+                 TranscriptSet& ts,
+                 const char* genome_filename,
                  bool run_gc_correction)
-    : ts(ts)
+    : burnin(burnin)
+    , num_samples(num_samples)
+    , ts(ts)
     , genome_filename(genome_filename)
     , run_gc_correction(run_gc_correction)
     , K(0)
@@ -240,61 +252,11 @@ Analyze::~Analyze()
 void Analyze::add_sample(const char* condition_name, const char* filename)
 {
     filenames.push_back(filename);
+    ++K;
 }
 
 
-// Thread used to initialize fragment models
-class FragmentModelInitThread
-{
-    public:
-        FragmentModelInitThread(TranscriptSet& ts, const char* fa_fn,
-                                const std::vector<std::string>& filenames,
-                                std::vector<FragmentModel*>& fms,
-                                Queue<int>& indexes)
-            : ts(ts)
-            , fa_fn(fa_fn)
-            , filenames(filenames)
-            , fms(fms)
-            , indexes(indexes)
-            , thread(NULL)
-        {
-        }
-
-        void run()
-        {
-            int index;
-            while (true) {
-                if ((index = indexes.pop()) == -1) break;
-                fms[index] = new FragmentModel();
-                fms[index]->estimate(ts, filenames[index].c_str(), fa_fn);
-            }
-        }
-
-        void start()
-        {
-            if (thread != NULL) return;
-            thread = new boost::thread(boost::bind(&FragmentModelInitThread::run, this));
-        }
-
-        void join()
-        {
-            thread->join();
-            delete thread;
-            thread = NULL;
-        }
-
-    private:
-        TranscriptSet& ts;
-        const char* fa_fn;
-        const std::vector<std::string>& filenames;
-        std::vector<FragmentModel*>& fms;
-        Queue<int>& indexes;
-
-        boost::thread* thread;
-};
-
-
-// Thread to initialize samplers
+// Thread to initialize samplers and fragment models
 class SamplerInitThread
 {
     public:
@@ -320,6 +282,10 @@ class SamplerInitThread
             int index;
             while (true) {
                 if ((index = indexes.pop()) == -1) break;
+
+                fms[index] = new FragmentModel();
+                fms[index]->estimate(ts, filenames[index].c_str(), fa_fn);
+
                 samplers[index] = new Sampler(filenames[index].c_str(), fa_fn,
                                               ts, *fms[index], run_gc_correction,
                                               true);
@@ -356,46 +322,23 @@ class SamplerInitThread
 
 void Analyze::setup()
 {
-    // build fragment models in parallel
-    {
-        fms.resize(K);
+    qsamplers.resize(K);
 
-        std::vector<FragmentModelInitThread*> threads(constants::num_threads);
-        Queue<int> indexes;
-        for (unsigned int i = 0; i < constants::num_threads; ++i) {
-            threads[i] = new FragmentModelInitThread(ts, genome_filename, filenames, fms, indexes);
-            threads[i]->start();
-        }
-
-        for (unsigned int i = 0; i < K; ++i) indexes.push(i);
-        for (unsigned int i = 0; i < constants::num_threads; ++i) indexes.push(-1);
-
-        for (unsigned int i = 0; i < constants::num_threads; ++i) {
-            threads[i]->join();
-            delete threads[i];
-        }
+    std::vector<SamplerInitThread*> threads(constants::num_threads);
+    Queue<int> indexes;
+    for (unsigned int i = 0; i < constants::num_threads; ++i) {
+        threads[i] = new SamplerInitThread(filenames, genome_filename, ts, fms,
+                                           run_gc_correction, qsamplers,
+                                           indexes);
+        threads[i]->start();
     }
 
-    // build samplers in parallel
-    {
-        qsamplers.resize(K);
+    for (unsigned int i = 0; i < K; ++i) indexes.push(i);
+    for (unsigned int i = 0; i < constants::num_threads; ++i) indexes.push(-1);
 
-        std::vector<SamplerInitThread*> threads(constants::num_threads);
-        Queue<int> indexes;
-        for (unsigned int i = 0; i < constants::num_threads; ++i) {
-            threads[i] = new SamplerInitThread(filenames, genome_filename, ts, fms,
-                                               run_gc_correction, qsamplers,
-                                               indexes);
-            threads[i]->start();
-        }
-
-        for (unsigned int i = 0; i < K; ++i) indexes.push(i);
-        for (unsigned int i = 0; i < constants::num_threads; ++i) indexes.push(-1);
-
-        for (unsigned int i = 0; i < constants::num_threads; ++i) {
-            threads[i]->join();
-            delete threads[i];
-        }
+    for (unsigned int i = 0; i < constants::num_threads; ++i) {
+        threads[i]->join();
+        delete threads[i];
     }
 }
 
@@ -417,6 +360,23 @@ void Analyze::cleanup()
 void Analyze::run()
 {
     setup();
+
+    typedef analyze_model_namespace::analyze_model model_t;
+    typedef boost::ecuyer1988 rng_t;
+    typedef stan::mcmc::adapt_diag_e_nuts<model_t, rng_t> sampler_t;
+
+    //AnalyzeSamplerData sampler_data(*this);
+    //model_t model(sampler_data, &std::cout);
+
+    /* How is this going to work?
+     *
+     * Shit. I think we need to make ts and xs parameters. Otherwise, is there
+     * any way to update them?
+     *
+     * Actually, maybe we maybe could if they weren't private.
+     */
+
+    cleanup();
 
 #if 0
     C = data.size();

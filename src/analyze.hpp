@@ -15,7 +15,9 @@
 class Analyze
 {
     public:
-		Analyze(TranscriptSet& ts,
+		Analyze(size_t burnin,
+                size_t num_samples,
+                TranscriptSet& ts,
                 const char* genome_filename,
                 bool run_gc_correction);
 		~Analyze();
@@ -33,6 +35,13 @@ class Analyze
         //void choose_initial_values(std::vector<double>& cont_params,
                                    //std::vector<int>& disc_params);
 
+        // number of burnin samples
+        size_t burnin;
+
+        // number of samples to generate
+        size_t num_samples;
+
+        // transcript set
 		TranscriptSet& ts;
 
         // File name of a fasta file containing the reference genome sequence

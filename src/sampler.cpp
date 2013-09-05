@@ -1856,7 +1856,11 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
 
     Logger::debug("Loci: %lu", (unsigned long) intervals.size());
 
-    sam_scan(intervals, bam_fn, fa_fn, "Estimating fragment weights");
+    std::string task_name = std::string("Estimating fragment weights (") +
+                            std::string(bam_fn) +
+                            std::string(")");
+
+    sam_scan(intervals, bam_fn, fa_fn, task_name.c_str());
 
     for (size_t i = 0; i < constants::num_threads; ++i) q.push(NULL);
     for (size_t i = 0; i < constants::num_threads; ++i) threads[i]->join();
@@ -1865,7 +1869,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     fm.multireads.clear();
 
     unsigned int* idxmap = weight_matrix->compact();
-    Logger::info("Weight-matrix dimensions: %lu x %lu",
+    Logger::debug("Weight-matrix dimensions: %lu x %lu",
             (unsigned long) weight_matrix->nrow,
             (unsigned long) weight_matrix->ncol);
 

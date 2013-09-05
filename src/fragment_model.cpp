@@ -590,9 +590,13 @@ void FragmentModel::estimate(TranscriptSet& ts,
     PosTable* seqbias_sense_pos = new PosTable();
     PosTable* seqbias_antisense_pos = new PosTable();
 
+    std::string task_name = std::string("Indexing reads (") +
+                            std::string(bam_fn) +
+                            std::string(")");
+
     sam_scan(intervals, *alncnt, q,
              seqbias_intervals, *seqbias_sense_pos, *seqbias_antisense_pos,
-             bam_fn, "Indexing reads");
+             bam_fn, task_name.c_str());
 
     // delete seqbias intervals
     for (std::vector<FragmentModelInterval*>::iterator i = seqbias_intervals.begin();
@@ -632,9 +636,9 @@ void FragmentModel::estimate(TranscriptSet& ts,
     }
     delete alncnt;
 
-    Logger::info("Reads: %lu, %0.1f%% with multiple alignments",
-                 total_reads,
-                 100.0 * (double) multireads.size() / (double) total_reads);
+    Logger::debug("Reads: %lu, %0.1f%% with multiple alignments",
+                  total_reads,
+                  100.0 * (double) multireads.size() / (double) total_reads);
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         q.push(NULL);
@@ -658,7 +662,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     double negentropy =
         strand_specificity * log2(strand_specificity) +
         (1.0 - strand_specificity) * log2(1.0 - strand_specificity);
-    Logger::info("Strand specificity: %0.1f%%", 100.0 * (1.0 + negentropy));
+    Logger::debug("Strand specificity: %0.1f%%", 100.0 * (1.0 + negentropy));
 
     /* Collect fragment length statistics. */
     std::map<unsigned int, unsigned int> frag_lens;

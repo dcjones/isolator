@@ -368,7 +368,8 @@ void print_analyze_help(FILE* fout)
         "                          against which the reads are aligned, in FAST format.\n"
         "-p, --threads=N           number of threads to use.\n"
         "    --no-gc-correction    disable post-hoc GC-content adjustments.\n"
-        "-N, --num-samples   Generate this many samples (by default: 250)\n\n"
+        "-N, --num-samples         generate this many samples (default: 250)\n"
+        "-B, --burnin              warmup for this many samples before collecting data (default: 100)\n\n"
         "See 'isolator help teste' for more.\n");
 }
 
@@ -383,10 +384,12 @@ int isolator_analyze(int argc, char* argv[])
         {"threads",          required_argument, NULL, 'p'},
         {"no-gc-correction", no_argument,       NULL, 0},
         {"num-samples",      required_argument, NULL, 'N'},
+        {"burnin",           required_argument, NULL, 'B'},
         {0, 0, 0, 0}
     };
 
     Logger::level logger_level = Logger::INFO;
+    unsigned int burnin = 100;
     unsigned int num_samples = 250;
     bool run_gc_correction = true;
     constants::num_threads = boost::thread::hardware_concurrency();
@@ -414,6 +417,10 @@ int isolator_analyze(int argc, char* argv[])
 
             case 'g':
                 fa_fn = optarg;
+                break;
+
+            case 'B':
+                burnin = strtoul(optarg, NULL, 10);
                 break;
 
             case 'N':
@@ -457,7 +464,7 @@ int isolator_analyze(int argc, char* argv[])
     fclose(gtf_f);
 
     // initialize
-    Analyze analyze(ts, fa_fn, run_gc_correction);
+    Analyze analyze(burnin, num_samples, ts, fa_fn, run_gc_correction);
     int condition_num = 1;
     for (; optind < argc; ++optind) {
         char condition_name[100];
