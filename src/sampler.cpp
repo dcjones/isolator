@@ -780,10 +780,10 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
 }
 
 
-class SamplerInitThread
+class FragWeightEstimationThread
 {
     public:
-        SamplerInitThread(
+        FragWeightEstimationThread(
                 FragmentModel& fm,
                 Indexer& read_indexer,
                 WeightMatrix& weight_matrix,
@@ -810,7 +810,7 @@ class SamplerInitThread
             }
         }
 
-        ~SamplerInitThread()
+        ~FragWeightEstimationThread()
         {
             delete frag_len_dist;
             /* Note: we are not free weight_matrix_entries and
@@ -832,7 +832,7 @@ class SamplerInitThread
         void start()
         {
             if (thread != NULL) return;
-            thread = new boost::thread(boost::bind(&SamplerInitThread::run, this));
+            thread = new boost::thread(boost::bind(&FragWeightEstimationThread::run, this));
         }
 
         void join()
@@ -910,7 +910,7 @@ class SamplerInitThread
 };
 
 
-void SamplerInitThread::process_locus(SamplerInitInterval* locus)
+void FragWeightEstimationThread::process_locus(SamplerInitInterval* locus)
 {
     /* A map of fragments onto sequential indices. */
     typedef std::map<AlignmentPair, FragIdxCount> Frags;
@@ -1079,7 +1079,7 @@ void SamplerInitThread::process_locus(SamplerInitInterval* locus)
 }
 
 
-void SamplerInitThread::transcript_sequence_bias(
+void FragWeightEstimationThread::transcript_sequence_bias(
                 const SamplerInitInterval& locus,
                 const Transcript& t)
 {
@@ -1124,7 +1124,7 @@ void SamplerInitThread::transcript_sequence_bias(
 
 
 
-float SamplerInitThread::transcript_weight(const Transcript& t)
+float FragWeightEstimationThread::transcript_weight(const Transcript& t)
 {
     pos_t trans_len = t.exonic_length();
     if ((size_t) trans_len + 1 > ws.size()) ws.resize(trans_len + 1);
@@ -1175,7 +1175,7 @@ float SamplerInitThread::transcript_weight(const Transcript& t)
 }
 
 
-float SamplerInitThread::fragment_weight(const Transcript& t,
+float FragWeightEstimationThread::fragment_weight(const Transcript& t,
                                          const AlignmentPair& a)
 {
     pos_t frag_len = a.frag_len(t);
@@ -1840,9 +1840,9 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     TSVec<FragIdxCount> nz_frag_counts;
     TSVec<MultireadFrag> multiread_frags;
 
-    std::vector<SamplerInitThread*> threads;
+    std::vector<FragWeightEstimationThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
-        threads.push_back(new SamplerInitThread(
+        threads.push_back(new FragWeightEstimationThread(
                     fm,
                     read_indexer,
                     *weight_matrix,

@@ -42,6 +42,7 @@ class AnalyzeSamplerData : public stan::io::var_context
         bool contains_r(const std::string& name) const
         {
             return name == "ts" ||
+                   name == "xs" ||
                    name == "tgroup_nu" ||
                    name == "tgroup_alpha_alpha" ||
                    name == "tgroup_beta_alpha" ||
@@ -178,6 +179,9 @@ class AnalyzeSamplerData : public stan::io::var_context
         {
             if (name == "ts") {
                 return to_vec(parent.K, parent.T);
+            }
+            else if (name == "xs") {
+                return to_vec(parent.K, parent.N);
             }
             else if (name == "tgroup_nu") {
                 return to_vec();
@@ -422,6 +426,7 @@ class SamplerTickThread
 
 void Analyze::setup()
 {
+    fms.resize(K);
     qsamplers.resize(K);
 
     std::vector<SamplerInitThread*> threads(constants::num_threads);
