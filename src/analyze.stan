@@ -19,9 +19,6 @@ data {
     // number of transcription groups (typically, transcription start sites)
     int<lower=1> T;
 
-    // samples generated during quantification
-    /*matrix[N, K] quantification[M];*/
-
     // the condition of each sample
     int<lower=1, upper=C> condition[K];
 
@@ -31,8 +28,8 @@ data {
     // log tgroup transcription rate
     real ts[K, T];
 
-    // relative abundance of transcript i, in sample j
-    matrix<lower=0>[N, K] xs;
+    // abundance of transcript i relative to other transcripts in its tgroup, in sample j
+    real xs[K, N];
 
     // degrees of freedom for condition tgroup splice rate
     real tgroup_nu;
