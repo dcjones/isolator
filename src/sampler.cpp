@@ -31,6 +31,9 @@ static double sq(double x)
 }
 
 
+// TODO: Fuck! I'm using standard deviation but this takes a precision function,
+// so it's totally fucked. Fix this first thing!
+
 // Log-pdf for student's t-distribution, avoiding some expensive recomputation.
 class StudentsTLogPdf
 {

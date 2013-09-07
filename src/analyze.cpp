@@ -314,7 +314,7 @@ class SamplerInitThread
                           TranscriptSet& transcripts,
                           std::vector<FragmentModel*>& fms,
                           bool run_gc_correction,
-                          std::vector<Sampler*> samplers,
+                          std::vector<Sampler*>& samplers,
                           Queue<int>& indexes)
             : filenames(filenames)
             , fa_fn(fa_fn)
@@ -338,7 +338,8 @@ class SamplerInitThread
 
                 samplers[index] = new Sampler(filenames[index].c_str(), fa_fn,
                                               transcripts, *fms[index], run_gc_correction,
-                                              true);
+                                              // XXX
+                                              false);
             }
         }
 
@@ -362,7 +363,7 @@ class SamplerInitThread
         std::vector<FragmentModel*>& fms;
         bool run_gc_correction;
 
-        std::vector<Sampler*> samplers;
+        std::vector<Sampler*>& samplers;
 
         Queue<int>& indexes;
 
@@ -393,8 +394,8 @@ class SamplerTickThread
                 samplers[index]->transition();
                 const std::vector<double>& state = samplers[index]->state();
 
-                matrix_column<matrix<double> > col(Q, index);
-                std::copy(state.begin(), state.end(), col.begin());
+                matrix_row<matrix<double> > row(Q, index);
+                std::copy(state.begin(), state.end(), row.begin());
 
                 // notify of completion
                 tock_queue.push(0);
@@ -574,9 +575,10 @@ void Analyze::run()
 
     // TODO: pass these numbers in
     unsigned int seed = 0;
-    double epsilon_pm = 0.0;
-    int max_treedepth = 10;
-    double delta = 0.5;
+    const double epsilon = 1.0;
+    const double epsilon_pm = 0.5;
+    int max_treedepth = 2;
+    double delta = 5.0;
     double gamma = 0.05;
 
     const char* task_name = "Sampling";
@@ -590,11 +592,14 @@ void Analyze::run()
     // Burnin
     // ------
 
+#if 0
     try {
         sampler.init_stepsize();
     } catch (std::runtime_error e) {
         Logger::abort("Error setting sampler step size: %s", e.what());
     }
+#endif
+    sampler.set_nominal_stepsize(epsilon);
 
     sampler.set_stepsize_jitter(epsilon_pm);
     sampler.set_max_depth(max_treedepth);
@@ -609,6 +614,12 @@ void Analyze::run()
 
         compute_ts(model.ts);
         compute_xs(model.xs);
+
+        const double* s_mu = &s.cont_params().at(0);
+        const double* s_sigma = &s.cont_params().at(C*T);
+        const double* s_alpha = &s.cont_params().at(C*T + C*T);
+        const double* s_beta = &s.cont_params().at(C*T + C*T + T);
+
         s = sampler.transition(s);
 
         Logger::get_task(task_name).inc();
@@ -634,6 +645,11 @@ void Analyze::run()
         compute_xs(model.xs);
         s = sampler.transition(s);
 
+        const double* s_mu = &s.cont_params().at(0);
+        const double* s_sigma = &s.cont_params().at(C*T);
+        const double* s_alpha = &s.cont_params().at(C*T + C*T);
+        const double* s_beta = &s.cont_params().at(C*T + C*T + T);
+
         Logger::get_task(task_name).inc();
     }
 
@@ -647,7 +663,7 @@ void Analyze::run()
     // -------
 
     // end the sampler threads
-    for (size_t i = 0; i < K; ++i) {
+    for (size_t i = 0; i < constants::num_threads; ++i) {
         qsampler_tick_queue.push(-1);
     }
 
@@ -798,7 +814,7 @@ void Analyze::choose_initial_values(std::vector<double>& cont_params,
     size_t off = 0;
 
     // tgroup_mu
-    const double tgroup_mu_0 = 10;
+    const double tgroup_mu_0 = -10;
     for (size_t j = 0; j < T; ++j) {
         for (size_t i = 0; i < C; ++i) {
             cont_params[off++] = tgroup_mu_0;
@@ -806,8 +822,9 @@ void Analyze::choose_initial_values(std::vector<double>& cont_params,
     }
 
     // tgroup_sigma
-    const double tgroup_sigma_0 =
-        (tgroup_alpha_alpha / tgroup_beta_alpha) / (tgroup_alpha_beta / tgroup_beta_beta);
+    const double tgroup_sigma_0 = 100.0;
+    //const double tgroup_sigma_0 =
+        //(tgroup_alpha_alpha / tgroup_beta_alpha) / (tgroup_alpha_beta / tgroup_beta_beta);
     for (size_t j = 0; j < T; ++j) {
         for (size_t i = 0; i < C; ++i) {
             cont_params[off++] = tgroup_sigma_0;
@@ -815,13 +832,15 @@ void Analyze::choose_initial_values(std::vector<double>& cont_params,
     }
 
     // tgroup_alpha
-    const double tgroup_alpha_0 = tgroup_alpha_alpha / tgroup_beta_alpha;
+    //const double tgroup_alpha_0 = tgroup_alpha_alpha / tgroup_beta_alpha;
+    const double tgroup_alpha_0 = tgroup_sigma_0;
     for (size_t i = 0; i < T; ++i) {
         cont_params[off++] = tgroup_alpha_0;
     }
 
     // tgroup_beta
-    const double tgroup_beta_0 = tgroup_alpha_beta / tgroup_beta_beta;
+    //const double tgroup_beta_0 = tgroup_alpha_beta / tgroup_beta_beta;
+    const double tgroup_beta_0 = 1.0;
     for (size_t i = 0; i < T; ++i) {
         cont_params[off++] = tgroup_beta_0;
     }
