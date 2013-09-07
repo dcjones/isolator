@@ -27,6 +27,7 @@ add_executable(isolator
                read_set.cpp
                sample_db.cpp
                sampler.cpp
+               shredder.cpp
                sparse_mat.cpp
                switchtest.cpp
                transcripts.cpp)
