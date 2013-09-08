@@ -15,6 +15,10 @@
 
 
 class SamplerTickThread;
+class TgroupMuSigmaSamplerThread;
+class TgroupAlphaSampler;
+class TgroupBetaSampler;
+
 
 class Analyze
 {
@@ -35,22 +39,14 @@ class Analyze
     private:
         void setup();
         void cleanup();
+        void sample();
 
-        void qsampler_tick();
-        void qsampler_update_hyperparameters(const std::vector<double>& params);
+        void qsampler_update_hyperparameters();
 
-        // XXX: Fuuuuck! I have two things named ts: tgroup expression and
-        // "transcript set".
-        //
-        // Options:
-        //   Rename the transcript set to "transcripts". I should really do this
-        //   everywhere if I'm going to do it.
+        void compute_ts();
+        void compute_xs();
 
-        void compute_ts(std::vector<std::vector<double> >& ts);
-        void compute_xs(std::vector<std::vector<double> >& xs);
-
-        void choose_initial_values(std::vector<double>& cont_params,
-                                   std::vector<int>& disc_params);
+        void choose_initial_values();
 
         // number of burnin samples
         size_t burnin;
@@ -72,7 +68,7 @@ class Analyze
         std::vector<std::string> filenames;
 
 		// condition index to sample indexes
-		std::vector<std::vector<unsigned int> > condition_samples;
+		std::vector<std::vector<int> > condition_samples;
 
         // fragment models for each sample
         std::vector<FragmentModel*> fms;
@@ -82,15 +78,34 @@ class Analyze
 
         // threads used for iterating samplers
         std::vector<SamplerTickThread*> qsampler_threads;
+        std::vector<TgroupMuSigmaSamplerThread*> musigma_sampler_threads;
+        TgroupAlphaSampler* alpha_sampler;
+        TgroupBetaSampler* beta_sampler;
 
         // queues to send work to sampler threads, and be notified on completion
         // of ticks.
-        Queue<int> qsampler_tick_queue;
-        Queue<int> qsampler_tock_queue;
+        Queue<int> qsampler_tick_queue, qsampler_notify_queue,
+                   musigma_sampler_tick_queue, musigma_sampler_notify_queue;
 
         // matrix containing relative transcript abundance samples, indexed by:
         //   replicate -> transcript (tid)
         boost::numeric::ublas::matrix<double> Q;
+
+        // tgroup log-abundance, indexed by replicate -> tgroup
+        boost::numeric::ublas::matrix<double> ts;
+
+        // transcript abundance relative to other transcripts within the same
+        // tgroup. Indexed by replicate -> tid.
+        boost::numeric::ublas::matrix<double> xs;
+
+        // tgroup position parameter, indexed by condition -> tgroup
+        boost::numeric::ublas::matrix<double> tgroup_mu;
+
+        // tgroup scale parameter, indexed by tgroup
+        std::vector<double> tgroup_sigma;
+
+        // parameters of the inverse gamma prior on tgroup_sigma
+        double tgroup_alpha, tgroup_beta;
 
         // Temporary space used by compute_xs
         std::vector<double> tgroup_expr;
@@ -120,9 +135,6 @@ class Analyze
         double tgroup_nu;
         double tgroup_alpha_alpha, tgroup_beta_alpha;
         double tgroup_alpha_beta, tgroup_beta_beta;
-
-        // used to load data into the sampler
-        friend class AnalyzeSamplerData;
 };
 
 

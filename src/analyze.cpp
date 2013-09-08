@@ -11,27 +11,285 @@
 using namespace boost::numeric::ublas;
 
 
-#if 0
 class TgroupMuSampler : public Shredder
 {
     public:
         TgroupMuSampler()
-            : Sampler(-INFINITY, INFINITY)
+            : Shredder(-INFINITY, INFINITY)
         {
         }
 
-    protected:
-        double f(double x, double&d)
+        double sample(double mu0, double nu, double sigma,
+                      const std::vector<double>& xs, size_t n)
         {
-            double fx = 0;
-            d = 0;
+            this->nu = nu;
+            this->sigma = sigma;
+            this->xs = &xs.at(0);
+            this->n = n;
+            return Shredder::sample(mu0);
         }
 
     private:
-        double sigma, double;
+        double nu;
+        double sigma;
+        const double* xs;
+        size_t n;
 
+        StudentsTLogPdf logpdf;
+
+    protected:
+        double f(double mu, double &d)
+        {
+            // TODO: prior on mu
+            d = logpdf.df_dmu(nu, mu, sigma, xs, n);
+            return logpdf.f(nu, mu, sigma, xs, n);
+        }
 };
-#endif
+
+
+class TgroupSigmaSampler : public Shredder
+{
+    public:
+        TgroupSigmaSampler()
+            : Shredder(1e-16, INFINITY)
+        {
+        }
+
+        double sample(double sigma0, double nu,
+                      const std::vector<double>& xs, double alpha, double beta,
+                      size_t n)
+        {
+            this->nu = nu;
+            this->xs = &xs.at(0);
+            this->n = n;
+            this->alpha = alpha;
+            this->beta = beta;
+            return Shredder::sample(sigma0);
+        }
+
+    private:
+        double nu;
+        const double* xs;
+        size_t n;
+        double alpha;
+        double beta;
+
+        StudentsTLogPdf likelihood_logpdf;
+        InvGammaLogPdf prior_logpdf;
+
+    protected:
+        double f(double sigma, double &d)
+        {
+            d = 0.0;
+            double fx = 0.0;
+
+            d += prior_logpdf.df_dx(alpha, beta, &sigma, 1);
+            fx += prior_logpdf.f(alpha, beta, &sigma, 1);
+
+            d += likelihood_logpdf.df_dsigma(nu, 0.0, sigma, xs, n);
+            fx += likelihood_logpdf.f(nu, 0.0, sigma, xs, n);
+
+            return fx;
+        }
+};
+
+
+class TgroupMuSigmaSamplerThread
+{
+    public:
+        TgroupMuSigmaSamplerThread(const matrix<double>& ts,
+                                   double nu,
+                                   matrix<double>& mu,
+                                   std::vector<double>& sigma,
+                                   double& alpha,
+                                   double& beta,
+                                   const std::vector<int>& condition,
+                                   const std::vector<std::vector<int> >& condition_samples,
+                                   Queue<int>& tgroup_queue,
+                                   Queue<int>& notify_queue)
+            : ts(ts)
+            , nu(nu)
+            , mu(mu)
+            , sigma(sigma)
+            , alpha(alpha)
+            , beta(beta)
+            , condition(condition)
+            , condition_samples(condition_samples)
+            , tgroup_queue(tgroup_queue)
+            , notify_queue(notify_queue)
+            , thread(NULL)
+        {
+            K = ts.size1();
+            T = sigma.size();
+            C = condition_samples.size();
+            xs.resize(K);
+        }
+
+        void run()
+        {
+            int tgroup;
+            while (true) {
+                if ((tgroup = tgroup_queue.pop()) == -1) break;
+
+                // sample mu
+                for (size_t i = 0; i < C; ++i) {
+                    size_t l = 0;
+                    BOOST_FOREACH (int j, condition_samples[i]) {
+                        xs[l++] = ts(j, tgroup);
+                    }
+
+                    mu(i, tgroup) = mu_sampler.sample(mu(i, tgroup), nu,
+                                                      sigma[tgroup], xs, l);
+                }
+
+                // sample sigma
+                for (size_t i = 0; i < K; ++i) {
+                    xs[i] = ts(i, tgroup) - mu(condition[i], tgroup);
+                }
+
+                for (size_t tgroup = 0; tgroup < T; ++tgroup) {
+                    sigma[tgroup] = sigma_sampler.sample(sigma[tgroup], nu,
+                                                         xs, alpha, beta, K);
+                }
+
+                notify_queue.push(1);
+            }
+        }
+
+        void start()
+        {
+            thread = new boost::thread(boost::bind(&TgroupMuSigmaSamplerThread::run, this));
+        }
+
+        void join()
+        {
+            thread->join();
+            delete thread;
+            thread = NULL;
+        }
+
+    private:
+        const matrix<double>& ts;
+        double nu;
+        matrix<double>& mu;
+        std::vector<double>& sigma;
+        double& alpha;
+        double& beta;
+        const std::vector<int>& condition;
+        const std::vector<std::vector<int> >& condition_samples;
+        Queue<int>& tgroup_queue;
+        Queue<int>& notify_queue;
+        boost::thread* thread;
+
+        // temporary data vector
+        std::vector<double> xs;
+
+        // number of replicates
+        size_t K;
+
+        // number of tgroups
+        size_t T;
+
+        // number of conditions
+        size_t C;
+
+        TgroupMuSampler    mu_sampler;
+        TgroupSigmaSampler sigma_sampler;
+};
+
+
+class TgroupAlphaSampler : public Shredder
+{
+    public:
+        TgroupAlphaSampler()
+            : Shredder(1e-16, INFINITY)
+        {
+        }
+
+        double sample(double alpha0, double beta,
+                      double alpha_alpha, double beta_alpha,
+                      const double* sigmas, size_t n)
+        {
+            this->beta = beta;
+            this->alpha_alpha = alpha_alpha;
+            this->beta_alpha = beta_alpha;
+            this->sigmas = sigmas;
+            this->n = n;
+            return Shredder::sample(alpha0);
+        }
+
+    private:
+        double beta;
+        double alpha_alpha;
+        double beta_alpha;
+        const double* sigmas;
+        size_t n;
+
+        InvGammaLogPdf prior_logpdf;
+        InvGammaLogPdf likelihood_logpdf;
+
+    protected:
+        double f(double alpha, double &d)
+        {
+            d = 0.0;
+            double fx = 0.0;
+
+            d += prior_logpdf.df_dx(alpha_alpha, beta_alpha, &alpha, 1);
+            fx += prior_logpdf.f(alpha_alpha, beta_alpha, &alpha, 1);
+
+            d += likelihood_logpdf.df_dx(alpha, beta, sigmas, n);
+            fx += prior_logpdf.f(alpha, beta, sigmas, n);
+
+            return fx;
+        }
+};
+
+
+class TgroupBetaSampler : public Shredder
+{
+    public:
+        TgroupBetaSampler()
+            : Shredder(1e-16, INFINITY)
+        {}
+
+        double sample(double beta0, double alpha,
+                      double alpha_beta, double beta_beta,
+                      const double* sigmas, size_t n)
+        {
+            this->alpha = alpha;
+            this->alpha_beta = alpha_beta;
+            this->beta_beta = beta_beta;
+            this->sigmas = sigmas;
+            this->n = n;
+            return Shredder::sample(beta0);
+        }
+
+    private:
+        double alpha;
+        double alpha_beta;
+        double beta_beta;
+        const double* sigmas;
+        size_t n;
+
+        InvGammaLogPdf prior_logpdf;
+        InvGammaLogPdf likelihood_logpdf;
+
+    protected:
+        double f(double beta, double &d)
+        {
+            d = 0.0;
+            double fx = 0.0;
+
+            d += prior_logpdf.df_dx(alpha_beta, beta_beta, &beta, 1);
+            fx += prior_logpdf.f(alpha_beta, beta_beta, &beta, 1);
+
+            d += likelihood_logpdf.df_dx(alpha, beta, sigmas, n);
+            fx += prior_logpdf.f(alpha, beta, sigmas, n);
+
+            return fx;
+        }
+};
+
 
 
 Analyze::Analyze(size_t burnin,
@@ -61,6 +319,9 @@ Analyze::Analyze(size_t burnin,
 
     tgroup_expr.resize(T);
 
+    alpha_sampler = new TgroupAlphaSampler();
+    beta_sampler = new TgroupBetaSampler();
+
     Logger::info("Number of transcripts: %u", N);
     Logger::info("Number of transcription groups: %u", T);
 }
@@ -68,7 +329,8 @@ Analyze::Analyze(size_t burnin,
 
 Analyze::~Analyze()
 {
-
+    delete alpha_sampler;
+    delete beta_sampler;
 }
 
 
@@ -180,7 +442,7 @@ class SamplerTickThread
                 std::copy(state.begin(), state.end(), row.begin());
 
                 // notify of completion
-                tock_queue.push(0);
+                tock_queue.push(1);
             }
         }
 
@@ -245,52 +507,38 @@ void Analyze::cleanup()
 }
 
 
-void Analyze::qsampler_tick()
-{
-    for (size_t i = 0; i < K; ++i) {
-        qsampler_tick_queue.push(i);
-    }
-
-    for (size_t i = 0; i < K; ++i) {
-        qsampler_tock_queue.pop();
-    }
-}
-
-
-void Analyze::qsampler_update_hyperparameters(const std::vector<double>& params)
+void Analyze::qsampler_update_hyperparameters()
 {
     for (size_t i = 0; i < K; ++i) {
         qsamplers[i]->hp.scale = scale[i];
         qsamplers[i]->hp.tgroup_nu = tgroup_nu;
 
-        // Stan lays out the paramers in a flat vector. Changing the model will
-        // fuck that up, so be careful.
         size_t c = condition[i];
         for (size_t j = 0; j < T; ++j) {
-            qsamplers[i]->hp.tgroup_mu[j] = params[c*T + j];
-            qsamplers[i]->hp.tgroup_sigma[j] = params[T*C + c*T + j];
+            qsamplers[i]->hp.tgroup_mu[j] = tgroup_mu(c, j);
+            qsamplers[i]->hp.tgroup_sigma[j] = tgroup_sigma[j];
         }
     }
 }
 
 
-void Analyze::compute_ts(std::vector<std::vector<double> >& ts)
+void Analyze::compute_ts()
 {
     for (unsigned int i = 0; i < K; ++i) {
-        std::fill(ts[i].begin(), ts[i].end(), 0.0);
+        matrix_row<matrix<double> > row(ts, i);
+        std::fill(row.begin(), row.end(), 0.0);
         for (TranscriptSet::iterator t = transcripts.begin(); t != transcripts.end(); ++t) {
-            ts[i][t->tgroup] += Q(i, t->id);
+            row(t->tgroup) += Q(i, t->id);
         }
 
-        BOOST_FOREACH (double& x, ts[i]) {
-            // TODO: scale
-            x = log(x);
+        for (size_t tgroup = 0; tgroup < T; ++tgroup) {
+            row(tgroup) = log(row(tgroup));
         }
     }
 }
 
 
-void Analyze::compute_xs(std::vector<std::vector<double> >& xs)
+void Analyze::compute_xs()
 {
     for (unsigned int i = 0; i < K; ++i) {
         std::fill(tgroup_expr.begin(), tgroup_expr.end(), 0.0);
@@ -299,7 +547,7 @@ void Analyze::compute_xs(std::vector<std::vector<double> >& xs)
         }
 
         for (TranscriptSet::iterator t = transcripts.begin(); t != transcripts.end(); ++t) {
-            xs[i][t->id] = Q(i, t->id) / tgroup_expr[t->tgroup];
+            xs(i, t->id) = Q(i, t->id) / tgroup_expr[t->tgroup];
         }
     }
 }
@@ -309,12 +557,9 @@ void Analyze::run()
 {
     C = condition_index.size();
     Q.resize(K, N);
+    ts.resize(K, T);
+    xs.resize(K, N);
     scale.resize(K, 1.0);
-
-    // TODO: This all neeeds to be rewritten now than stan is out of the picture
-#if 0
-    AnalyzeSamplerData sampler_data(*this);
-    model_t model(sampler_data, &std::cout);
 
     setup();
     BOOST_FOREACH (Sampler* qsampler, qsamplers) {
@@ -324,137 +569,85 @@ void Analyze::run()
     qsampler_threads.resize(constants::num_threads);
     BOOST_FOREACH (SamplerTickThread*& thread, qsampler_threads) {
         thread = new SamplerTickThread(qsamplers, Q, qsampler_tick_queue,
-                                       qsampler_tock_queue);
+                                       qsampler_notify_queue);
         thread->start();
     }
 
-    std::vector<double> cont_params0(model.num_params_r());
-    std::vector<int> disc_params0(model.num_params_i());
-    choose_initial_values(cont_params0, disc_params0);
-
-    qsampler_update_hyperparameters(cont_params0);
-    qsampler_tick();
-
-    compute_ts(model.ts);
-    compute_xs(model.xs);
-
-    double init_log_prob;
-    std::vector<double> init_grad;
-    init_log_prob = stan::model::log_prob_grad<true, true>(model, cont_params0, disc_params0,
-                                                           init_grad, &std::cout);
-
-    if (!boost::math::isfinite(init_log_prob)) {
-        Logger::abort("Non-finite initial log-probability: %f", init_log_prob);
+    musigma_sampler_threads.resize(constants::num_threads);
+    BOOST_FOREACH (TgroupMuSigmaSamplerThread*& thread, musigma_sampler_threads) {
+        thread = new TgroupMuSigmaSamplerThread(ts, tgroup_nu, tgroup_mu, tgroup_sigma,
+                                                tgroup_alpha, tgroup_beta,
+                                                condition, condition_samples,
+                                                musigma_sampler_tick_queue,
+                                                musigma_sampler_notify_queue);
+        thread->start();
     }
-
-    BOOST_FOREACH (double d, init_grad) {
-        if (!boost::math::isfinite(d)) {
-            Logger::abort("Initial gradient contains a non-finite value: %f", d);
-        }
-    }
-
-    // TODO: pass these numbers in
-    unsigned int seed = 0;
-    const double epsilon = 1.0;
-    const double epsilon_pm = 0.5;
-    int max_treedepth = 2;
-    double delta = 5.0;
-    double gamma = 0.05;
 
     const char* task_name = "Sampling";
     Logger::push_task(task_name, burnin + num_samples);
 
-    rng_t base_rng(seed);
-    stan::mcmc::sample s(cont_params0, disc_params0, 0, 0);
-    sampler_t sampler(model, base_rng, burnin);
-    sampler.seed(cont_params0, disc_params0);
-
-    // Burnin
-    // ------
-
-#if 0
-    try {
-        sampler.init_stepsize();
-    } catch (std::runtime_error e) {
-        Logger::abort("Error setting sampler step size: %s", e.what());
-    }
-#endif
-    sampler.set_nominal_stepsize(epsilon);
-
-    sampler.set_stepsize_jitter(epsilon_pm);
-    sampler.set_max_depth(max_treedepth);
-    sampler.get_stepsize_adaptation().set_delta(delta);
-    sampler.get_stepsize_adaptation().set_gamma(gamma);
-    sampler.get_stepsize_adaptation().set_mu(log(10 * sampler.get_nominal_stepsize()));
-    sampler.engage_adaptation();
 
     for (size_t i = 0; i < burnin; ++i) {
-        qsampler_update_hyperparameters(s.cont_params());
-        qsampler_tick();
-
-        compute_ts(model.ts);
-        compute_xs(model.xs);
-
-        const double* s_mu = &s.cont_params().at(0);
-        const double* s_sigma = &s.cont_params().at(C*T);
-        const double* s_alpha = &s.cont_params().at(C*T + C*T);
-        const double* s_beta = &s.cont_params().at(C*T + C*T + T);
-
-        s = sampler.transition(s);
-
+        sample();
         Logger::get_task(task_name).inc();
     }
-
-    sampler.disengage_adaptation();
-
-
-    // Samples
-    // -------
-
-    std::fstream diagnostic_stream("isolator_analyze_diagnostics.csv",
-                                    std::fstream::out);
-    std::fstream sample_stream("isolator_analyze_samples.csv",
-                                std::fstream::out);
-    stan::io::mcmc_writer<model_t> writer(&sample_stream, &diagnostic_stream);
 
     for (size_t i = 0; i < num_samples; ++i) {
-        qsampler_update_hyperparameters(s.cont_params());
-        qsampler_tick();
-
-        compute_ts(model.ts);
-        compute_xs(model.xs);
-        s = sampler.transition(s);
-
-        const double* s_mu = &s.cont_params().at(0);
-        const double* s_sigma = &s.cont_params().at(C*T);
-        const double* s_alpha = &s.cont_params().at(C*T + C*T);
-        const double* s_beta = &s.cont_params().at(C*T + C*T + T);
-
+        sample();
+        // TODO: record the sample somehow
         Logger::get_task(task_name).inc();
     }
 
-    diagnostic_stream.close();
-    sample_stream.close();
-
-    Logger::pop_task(task_name);
-
-
-    // Cleanup
-    // -------
-
-    // end the sampler threads
     for (size_t i = 0; i < constants::num_threads; ++i) {
         qsampler_tick_queue.push(-1);
+        musigma_sampler_tick_queue.push(-1);
     }
 
-    BOOST_FOREACH (SamplerTickThread*& thread, qsampler_threads) {
-        thread->join();
-        delete thread;
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        qsampler_threads[i]->join();
+        musigma_sampler_threads[i]->join();
     }
 
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        delete qsampler_threads[i];
+        delete musigma_sampler_threads[i];
+    }
+
+    Logger::pop_task(task_name);
     cleanup();
+}
 
-#endif
+
+void Analyze::sample()
+{
+    qsampler_update_hyperparameters();
+
+    for (size_t i = 0; i < K; ++i) {
+        qsampler_tick_queue.push(i);
+    }
+
+    for (size_t i = 0; i < K; ++i) {
+        qsampler_notify_queue.pop();
+    }
+
+    compute_ts();
+    compute_xs();
+
+    for (size_t i = 0; i < T; ++i) {
+        musigma_sampler_tick_queue.push(i);
+    }
+
+    for (size_t i = 0; i < T; ++i) {
+        musigma_sampler_notify_queue.pop();
+    }
+
+    tgroup_alpha = alpha_sampler->sample(tgroup_alpha, tgroup_beta,
+                                         tgroup_alpha_alpha, tgroup_beta_alpha,
+                                         &tgroup_sigma.at(0), T);
+
+    tgroup_beta = beta_sampler->sample(tgroup_beta, tgroup_alpha,
+                                       tgroup_alpha_beta, tgroup_beta_beta,
+                                       &tgroup_sigma.at(0), T);
 }
 
 
@@ -493,46 +686,19 @@ void Analyze::compute_depth()
 #endif
 
 
-void Analyze::choose_initial_values(std::vector<double>& cont_params,
-                                    std::vector<int>& disc_params)
+void Analyze::choose_initial_values()
 {
-    UNUSED(disc_params);
-    assert(disc_params.empty());
-
-    size_t off = 0;
-
     // tgroup_mu
     const double tgroup_mu_0 = -10;
-    for (size_t j = 0; j < T; ++j) {
-        for (size_t i = 0; i < C; ++i) {
-            cont_params[off++] = tgroup_mu_0;
-        }
-    }
+    std::fill(tgroup_mu.data().begin(), tgroup_mu.data().end(), tgroup_mu_0);
 
     // tgroup_sigma
     const double tgroup_sigma_0 = 100.0;
     //const double tgroup_sigma_0 =
         //(tgroup_alpha_alpha / tgroup_beta_alpha) / (tgroup_alpha_beta / tgroup_beta_beta);
-    for (size_t j = 0; j < T; ++j) {
-        for (size_t i = 0; i < C; ++i) {
-            cont_params[off++] = tgroup_sigma_0;
-        }
-    }
+    std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);
 
-    // tgroup_alpha
-    //const double tgroup_alpha_0 = tgroup_alpha_alpha / tgroup_beta_alpha;
-    const double tgroup_alpha_0 = tgroup_sigma_0;
-    for (size_t i = 0; i < T; ++i) {
-        cont_params[off++] = tgroup_alpha_0;
-    }
-
-    // tgroup_beta
-    //const double tgroup_beta_0 = tgroup_alpha_beta / tgroup_beta_beta;
-    const double tgroup_beta_0 = 1.0;
-    for (size_t i = 0; i < T; ++i) {
-        cont_params[off++] = tgroup_beta_0;
-    }
-
-    assert(off == cont_params.size());
+    tgroup_alpha = 10.0;
+    tgroup_beta = 1.0;
 }
 
