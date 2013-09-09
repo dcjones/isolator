@@ -3,6 +3,7 @@
 #include <gsl/gsl_sf_gamma.h>
 #include <gsl/gsl_sf_psi.h>
 
+#include "logger.hpp"
 #include "shredder.hpp"
 
 
@@ -24,12 +25,13 @@ double Shredder::sample(double x0)
 {
     double d0;
     double lp0 = f(x0, d0);
-    double slice_height = log(gsl_rng_uniform(rng)) - lp0;
+
+    double slice_height = log(gsl_rng_uniform(rng)) + lp0;
 
     double x_min = find_slice_edge(x0, slice_height, lp0, d0, -1);
     double x_max = find_slice_edge(x0, slice_height, lp0, d0,  1);
 
-    return x_min + (x_min + x_max) * gsl_rng_uniform(rng);
+    return x_min + (x_max - x_min) * gsl_rng_uniform(rng);
 }
 
 
@@ -58,7 +60,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
         // if we are moving in the wrong direction (i.e. toward the other root),
         // use bisection to correct course.
         if (direction < 0) {
-            if (x1 > x0) {
+            if (x1 > x_bound) {
                 if (lp > 0) {
                     x = finite(lower_limit) ?
                             (lower_limit + x) / 2 : x - fabs(x - x1);
@@ -71,7 +73,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
             else x = x1;
         }
         else {
-            if (x1 < x0) {
+            if (x1 < x_bound) {
                 if (lp > 0) {
                     x = finite(upper_limit) ?
                             (upper_limit + x) / 2 : x + fabs(x - x1);
@@ -84,7 +86,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
             else x = x1;
         }
 
-        lp = f(x1, d) - slice_height;
+        lp = f(x, d) - slice_height;
     }
 
     return x;

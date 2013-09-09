@@ -11,11 +11,20 @@
 using namespace boost::numeric::ublas;
 
 
+
+static void assert_finite(double x)
+{
+    if (!finite(x)) {
+        Logger::abort("%f found where finite value expected.", x);
+    }
+}
+
+
 class TgroupMuSampler : public Shredder
 {
     public:
         TgroupMuSampler()
-            : Shredder(-INFINITY, INFINITY)
+            : Shredder(-100, 100)
         {
         }
 
@@ -51,7 +60,7 @@ class TgroupSigmaSampler : public Shredder
 {
     public:
         TgroupSigmaSampler()
-            : Shredder(1e-16, INFINITY)
+            : Shredder(1e-16, 1e5)
         {
         }
 
@@ -140,6 +149,7 @@ class TgroupMuSigmaSamplerThread
 
                     mu(i, tgroup) = mu_sampler.sample(mu(i, tgroup), nu,
                                                       sigma[tgroup], xs, l);
+                    assert_finite(mu(i, tgroup));
                 }
 
                 // sample sigma
@@ -147,10 +157,9 @@ class TgroupMuSigmaSamplerThread
                     xs[i] = ts(i, tgroup) - mu(condition[i], tgroup);
                 }
 
-                for (size_t tgroup = 0; tgroup < T; ++tgroup) {
-                    sigma[tgroup] = sigma_sampler.sample(sigma[tgroup], nu,
-                                                         xs, alpha, beta, K);
-                }
+                sigma[tgroup] = sigma_sampler.sample(sigma[tgroup], nu,
+                                                     xs, alpha, beta, K);
+                assert_finite(sigma[tgroup]);
 
                 notify_queue.push(1);
             }
@@ -202,7 +211,7 @@ class TgroupAlphaSampler : public Shredder
 {
     public:
         TgroupAlphaSampler()
-            : Shredder(1e-16, INFINITY)
+            : Shredder(1e-16, 1e5)
         {
         }
 
@@ -237,7 +246,7 @@ class TgroupAlphaSampler : public Shredder
             d += prior_logpdf.df_dx(alpha_alpha, beta_alpha, &alpha, 1);
             fx += prior_logpdf.f(alpha_alpha, beta_alpha, &alpha, 1);
 
-            d += likelihood_logpdf.df_dx(alpha, beta, sigmas, n);
+            d += likelihood_logpdf.df_dalpha(alpha, beta, sigmas, n);
             fx += prior_logpdf.f(alpha, beta, sigmas, n);
 
             return fx;
@@ -249,7 +258,7 @@ class TgroupBetaSampler : public Shredder
 {
     public:
         TgroupBetaSampler()
-            : Shredder(1e-16, INFINITY)
+            : Shredder(1e-16, 1e5)
         {}
 
         double sample(double beta0, double alpha,
@@ -283,7 +292,7 @@ class TgroupBetaSampler : public Shredder
             d += prior_logpdf.df_dx(alpha_beta, beta_beta, &beta, 1);
             fx += prior_logpdf.f(alpha_beta, beta_beta, &beta, 1);
 
-            d += likelihood_logpdf.df_dx(alpha, beta, sigmas, n);
+            d += likelihood_logpdf.df_dbeta(alpha, beta, sigmas, n);
             fx += prior_logpdf.f(alpha, beta, sigmas, n);
 
             return fx;
@@ -311,7 +320,7 @@ Analyze::Analyze(size_t burnin,
     T = transcripts.num_tgroups();
 
     // TODO: constants (also maybe command line options eventually)
-    tgroup_nu = 4.0;
+    tgroup_nu = 100.0;
     tgroup_alpha_alpha = 5.0;
     tgroup_beta_alpha  = 2.5;
     tgroup_alpha_beta  = 5.0;
@@ -346,6 +355,8 @@ void Analyze::add_sample(const char* condition_name, const char* filename)
 
     filenames.push_back(filename);
     condition.push_back(c);
+    if (c >= (int) condition_samples.size()) condition_samples.resize(c + 1);
+    condition_samples[c].push_back(K);
     ++K;
 }
 
@@ -560,6 +571,10 @@ void Analyze::run()
     ts.resize(K, T);
     xs.resize(K, N);
     scale.resize(K, 1.0);
+    tgroup_sigma.resize(T);
+    tgroup_mu.resize(K, T);
+
+    choose_initial_values();
 
     setup();
     BOOST_FOREACH (Sampler* qsampler, qsamplers) {
@@ -644,10 +659,12 @@ void Analyze::sample()
     tgroup_alpha = alpha_sampler->sample(tgroup_alpha, tgroup_beta,
                                          tgroup_alpha_alpha, tgroup_beta_alpha,
                                          &tgroup_sigma.at(0), T);
+    assert_finite(tgroup_alpha);
 
     tgroup_beta = beta_sampler->sample(tgroup_beta, tgroup_alpha,
                                        tgroup_alpha_beta, tgroup_beta_beta,
                                        &tgroup_sigma.at(0), T);
+    assert_finite(tgroup_beta);
 }
 
 
@@ -699,6 +716,6 @@ void Analyze::choose_initial_values()
     std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);
 
     tgroup_alpha = 10.0;
-    tgroup_beta = 1.0;
+    tgroup_beta = 2.0;
 }
 
