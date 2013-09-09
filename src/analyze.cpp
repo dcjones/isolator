@@ -2,7 +2,6 @@
 #include <boost/foreach.hpp>
 #include <boost/numeric/ublas/matrix_proxy.hpp>
 #include <boost/thread.hpp>
-#include <gsl/gsl_statistics_double.h>
 
 #include "analyze.hpp"
 #include "constants.hpp"

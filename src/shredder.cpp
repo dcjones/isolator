@@ -1,7 +1,6 @@
 
 #include <cmath>
-#include <gsl/gsl_sf_gamma.h>
-#include <gsl/gsl_sf_psi.h>
+#include <boost/math/special_functions/digamma.hpp>
 
 #include "logger.hpp"
 #include "shredder.hpp"
@@ -11,13 +10,11 @@ Shredder::Shredder(double lower_limit, double upper_limit)
     : lower_limit(lower_limit)
     , upper_limit(upper_limit)
 {
-    rng = gsl_rng_alloc(gsl_rng_mt19937);
 }
 
 
 Shredder::~Shredder()
 {
-    gsl_rng_free(rng);
 }
 
 
@@ -26,12 +23,12 @@ double Shredder::sample(double x0)
     double d0;
     double lp0 = f(x0, d0);
 
-    double slice_height = log(gsl_rng_uniform(rng)) + lp0;
+    double slice_height = log(random_uniform_01(rng)) + lp0;
 
     double x_min = find_slice_edge(x0, slice_height, lp0, d0, -1);
     double x_max = find_slice_edge(x0, slice_height, lp0, d0,  1);
 
-    return x_min + (x_max - x_min) * gsl_rng_uniform(rng);
+    return x_min + (x_max - x_min) * random_uniform_01(rng);
 }
 
 
@@ -177,7 +174,7 @@ double InvGammaLogPdf::df_dalpha(double alpha, double beta, const double* xs, si
         part += log(xs[i]);
     }
 
-    return n * (log(beta) - gsl_sf_psi(alpha)) - part;
+    return n * (log(beta) - boost::math::digamma(alpha)) - part;
 }
 
 

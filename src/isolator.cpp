@@ -1,11 +1,16 @@
 
 //#include <google/profiler.h>
 
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/statistics/stats.hpp>
+#include <boost/accumulators/statistics/median.hpp>
+#include <boost/accumulators/statistics/mean.hpp>
+#include <boost/accumulators/statistics/variance.hpp>
+#include <boost/foreach.hpp>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <getopt.h>
-#include <gsl/gsl_statistics_float.h>
 #include <boost/foreach.hpp>
 #include <sys/time.h>
 #include <unistd.h>
@@ -18,8 +23,9 @@
 #include "logger.hpp"
 #include "sample_db.hpp"
 #include "sampler.hpp"
-#include "switchtest.hpp"
 #include "transcripts.hpp"
+
+using namespace boost::accumulators;
 
 const char* isolator_logo =
 "     _           _       _\n"
@@ -305,44 +311,34 @@ int isolator_summarize(int argc, char* argv[])
 
     fprintf(out_f,
             "transcript_id\tgene_id\teffective_length\t"
-            "posterior_mean\tposterior_sd\tposterior_median\tposterior_mad\t"
+            "posterior_mean\tposterior_sd\tposterior_median\t"
             "lower_95_cred\tupper_95_cred\n");
 
     std::vector<float> samples;
     for (SampleDBIterator i(db); i != SampleDBIterator(); ++i) {
         samples = i->samples;
 
-        std::sort(samples.begin(), samples.end());
-        float posterior_mean = gsl_stats_float_mean(
-                &samples.at(0), 1, samples.size());
-        float posterior_sd = gsl_stats_float_sd_m(
-                &samples.at(0), 1, samples.size(), posterior_mean);
-        float posterior_median = gsl_stats_float_median_from_sorted_data(
-                &samples.at(0), 1, samples.size());
+        accumulator_set<float,
+            stats<tag::mean, tag::median, tag::variance> > acc;
+        BOOST_FOREACH (float x, samples) {
+            acc(x);
+        }
 
-        //float lower_95_cred = gsl_stats_float_quantile_from_sorted_data(
-                //&samples.at(0), 1, samples.size(), 0.025);
-        //float upper_95_cred = gsl_stats_float_quantile_from_sorted_data(
-                //&samples.at(0), 1, samples.size(), 0.975);
+        float posterior_mean = mean(acc);
+        float posterior_sd = sqrt(variance(acc));
+        float posterior_median = median(acc);
+
+        // TODO: This is really cheating
         float lower_95_cred = samples.front();
         float upper_95_cred = samples.back();
 
-        for (std::vector<float>::iterator j = samples.begin();
-                j != samples.end(); ++j) {
-            *j = fabsf(*j - posterior_median);
-        }
-        std::sort(samples.begin(), samples.end());
-        float posterior_mad = gsl_stats_float_median_from_sorted_data(
-                &samples.at(0), 1, samples.size());
-
-        fprintf(out_f, "%s\t%s\t%f\t%e\t%e\t%e\t%e\t%e\t%e\n",
+        fprintf(out_f, "%s\t%s\t%f\t%e\t%e\t%e\t%e\t%e\n",
                 i->transcript_id.get().c_str(),
                 i->gene_id.get().c_str(),
                 i->effective_length,
                 posterior_mean,
                 posterior_sd,
                 posterior_median,
-                posterior_mad,
                 lower_95_cred,
                 upper_95_cred);
     }

@@ -14,7 +14,6 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 set(Boost_USE_MULTITHREADED ON)
 find_package(Boost 1.48.0 COMPONENTS thread system timer REQUIRED)
 find_package(ZLIB REQUIRED)
-find_package(GSL REQUIRED)
 find_package(Threads)
 
 # Check for SSE or AVX intrinsics

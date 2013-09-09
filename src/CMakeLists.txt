@@ -10,12 +10,10 @@ add_subdirectory(sqlite3)
 add_subdirectory(stan)
 
 add_executable(isolator
-               analysis.cpp
                analyze.cpp
                common.cpp
                constants.cpp
                cpuid.cpp
-               dirichlet.c
                emp_dist.cpp
                fragment_model.cpp
                gc.cpp
@@ -29,7 +27,6 @@ add_executable(isolator
                sampler.cpp
                shredder.cpp
                sparse_mat.cpp
-               switchtest.cpp
                transcripts.cpp)
 
 include_directories(${isolator_SOURCE_DIR}/src
@@ -51,7 +48,6 @@ target_link_libraries(isolator
                       ${Boost_THREAD_LIBRARY}
                       ${Boost_TIMER_LIBRARY}
                       ${ZLIB_LIBRARIES}
-                      ${GSL_LIBRARIES}
                       ${CMAKE_THREAD_LIBS_INIT})
 
 add_custom_command(

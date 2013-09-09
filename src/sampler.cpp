@@ -2,11 +2,7 @@
 #include <boost/foreach.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
-#include <gsl/gsl_multifit.h>
-#include <gsl/gsl_randist.h>
-#include <gsl/gsl_rng.h>
-#include <gsl/gsl_sf_gamma.h>
-#include <gsl/gsl_statistics.h>
+#include <boost/random.hpp>
 
 #include "constants.hpp"
 #include "hat-trie/hat-trie.h"
@@ -42,8 +38,8 @@ class StudentsTLogPdf
         StudentsTLogPdf(double nu = 4.0)
             : nu(nu)
         {
-            base = gsl_sf_lngamma((nu + 1)/2)
-                 - gsl_sf_lngamma(nu/2)
+            base = lgamma((nu + 1)/2)
+                 - lgamma(nu/2)
                  - log(sqrt(M_PI * nu));
         }
 
@@ -59,8 +55,8 @@ class StudentsTLogPdf
         {
             if (this->nu != nu) {
                 this->nu = nu;
-                base = gsl_sf_lngamma((nu + 1)/2)
-                     - gsl_sf_lngamma(nu/2)
+                base = lgamma((nu + 1)/2)
+                     - lgamma(nu/2)
                      - log(sqrt(M_PI * nu));
             }
         }
@@ -74,7 +70,7 @@ class StudentsTLogPdf
 static double gamma_lnpdf(double alpha, double beta, double x)
 {
     return alpha * log(beta) -
-           gsl_sf_lngamma(alpha) +
+           lgamma(alpha) +
            (alpha - 1) * log(x) -
            beta * x;
 }
@@ -1293,15 +1289,13 @@ class AbundanceSamplerThread
             , hillclimb(false)
             , thread(NULL)
         {
-            rng = gsl_rng_alloc(gsl_rng_mt19937);
             unsigned long seed = reinterpret_cast<unsigned long>(this) *
                                  (unsigned long) time(NULL);
-            gsl_rng_set(rng, seed);
+            rng.seed(seed);
         }
 
         ~AbundanceSamplerThread()
         {
-            gsl_rng_free(rng);
             if (thread) delete thread;
         }
 
@@ -1357,7 +1351,9 @@ class AbundanceSamplerThread
                                              float z0, float p0, bool left);
 
         StudentsTLogPdf cmix_prior;
-        gsl_rng* rng;
+        rng_t rng;
+        boost::random::uniform_01<double> random_uniform_01;
+        boost::random::uniform_int_distribution<unsigned int> random_uniform_int;
         Sampler& S;
         Queue<ComponentBlock>& q;
         bool hillclimb;
@@ -1601,7 +1597,7 @@ void AbundanceSamplerThread::run_intra_component(unsigned int c)
 
     // TODO: constant
     for (unsigned int i = 0; i < std::min<size_t>(5, S.component_num_transcripts[c]); ++i) {
-        double r = gsl_rng_uniform(rng);
+        double r = random_uniform_01(rng);
         unsigned int u = 0;
         while (u < S.component_num_transcripts[c] - 1 &&
                r > S.tmix[S.component_transcripts[c][u]]) {
@@ -1610,7 +1606,8 @@ void AbundanceSamplerThread::run_intra_component(unsigned int c)
         }
 
         unsigned int v =
-            gsl_rng_uniform_int(rng, S.component_num_transcripts[c] - 1);
+            random_uniform_int(rng, boost::random::uniform_int_distribution<unsigned int>::param_type(
+                                        0, S.component_num_transcripts[c] - 1));
         if (v >= u) ++v;
 
         run_inter_transcript(S.component_transcripts[c][u],
@@ -1637,7 +1634,7 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
     unsigned int component_size = S.component_frag[c + 1] - S.component_frag[c];
 
     double p0 = dotlog(S.frag_counts[c], S.frag_probs[c], component_size);
-    float slice_height = hillclimb ? p0 : p0 + fastlog2(gsl_rng_uniform(rng));
+    float slice_height = hillclimb ? p0 : p0 + fastlog2(random_uniform_01(rng));
     float z0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
 
     float z, s0, s1;
@@ -1647,11 +1644,11 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
         if (s1 - s0 < constants::zero_eps || s0 > z0 || s1 < z0) {
             return;
         }
-        float r = gsl_rng_uniform(rng);
+        float r = random_uniform_01(rng);
         z = s0 + r * s1 - r * s0;
     }
     else {
-        z = gsl_rng_uniform(rng);
+        z = random_uniform_01(rng);
     }
 
     /* proposed tmix[u], tmix[v] values */
@@ -1699,7 +1696,7 @@ void AbundanceSamplerThread::run_component(unsigned int c)
                //S.component_num_transcripts[c] * constants::tmix_prior_prec;
 
     float lp0 = compute_component_probability(c, x0);
-    float slice_height = lp0 + log(gsl_rng_uniform(rng));
+    float slice_height = lp0 + log(random_uniform_01(rng));
     float step = 1.0;
 
     float x_min = find_component_slice_edge(c, x0, slice_height, -step);
@@ -1707,7 +1704,7 @@ void AbundanceSamplerThread::run_component(unsigned int c)
 
     float x;
     while (true) {
-         x = x_min + (x_max - x_min) * gsl_rng_uniform(rng);
+         x = x_min + (x_max - x_min) * random_uniform_01(rng);
          float lp = compute_component_probability(c, x);
 
          if (lp >= slice_height) break;
@@ -1729,15 +1726,13 @@ class MultireadSamplerThread
               , q(q)
               , thread(NULL)
     {
-        rng = gsl_rng_alloc(gsl_rng_mt19937);
         unsigned long seed = reinterpret_cast<unsigned long>(this) *
             (unsigned long) time(NULL);
-        gsl_rng_set(rng, seed);
+        rng.seed(seed);
     }
 
         ~MultireadSamplerThread()
         {
-            gsl_rng_free(rng);
             if (thread) delete thread;
         }
 
@@ -1768,7 +1763,7 @@ class MultireadSamplerThread
                         }
                     }
                     else {
-                        float r = sumprob * gsl_rng_uniform(rng);
+                        float r = sumprob * random_uniform_01(rng);
                         unsigned int i;
                         for (i = 0; i < k; ++i) {
                             unsigned int c = S.multiread_alignments[block.u][i].component;
@@ -1812,7 +1807,8 @@ class MultireadSamplerThread
         Sampler& S;
         Queue<MultireadBlock>& q;
         boost::thread* thread;
-        gsl_rng* rng;
+        rng_t rng;
+        boost::random::uniform_01<double> random_uniform_01;
 };
 
 

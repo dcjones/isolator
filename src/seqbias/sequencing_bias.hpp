@@ -8,13 +8,13 @@
 #ifndef ISOLATOR_SEQUENCING_BIAS_HPP
 #define ISOLATOR_SEQUENCING_BIAS_HPP
 
+#include <boost/random.hpp>
 #include <string>
 
 #include "../pos_table.hpp"
 #include "common.hpp"
 #include "motif.hpp"
 #include "samtools/faidx.h"
-#include <gsl/gsl_rng.h>
 
 /** A representation of sequencing bias for a particular dataset.
  */
@@ -71,7 +71,8 @@ class sequencing_bias
         motif* M;
 
         /* random number generator */
-        gsl_rng* rng;
+        rng_t rng;
+        boost::random::uniform_int_distribution<pos_t> random_uniform_int;
 };
 
 

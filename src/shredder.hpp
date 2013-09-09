@@ -2,7 +2,10 @@
 #ifndef ISOLATOR_SHREDDER_HPP
 #define ISOLATOR_SHREDDER_HPP
 
-#include <gsl/gsl_rng.h>
+#include <boost/random/uniform_01.hpp>
+
+#include "common.hpp"
+
 
 // A fast, generic, univariate slice sampler implementatation.
 class Shredder
@@ -22,7 +25,8 @@ class Shredder
         // Bounds on the parameter being sampled over
         double lower_limit, upper_limit;
 
-        gsl_rng* rng;
+        rng_t rng;
+        boost::random::uniform_01<double> random_uniform_01;
 
     private:
         double find_slice_edge(double x0, double slice_height, double lp0,

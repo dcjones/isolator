@@ -140,7 +140,6 @@ sequencing_bias::sequencing_bias()
     : ref_f(NULL)
     , M(NULL)
 {
-    rng = gsl_rng_alloc(gsl_rng_mt19937);
 }
 
 
@@ -153,7 +152,6 @@ sequencing_bias::sequencing_bias(const char* ref_fn,
     : ref_f(NULL)
     , M(NULL)
 {
-    rng = gsl_rng_alloc(gsl_rng_mt19937);
     build(ref_fn, T, max_reads, L, R,
           task_name,
           complexity_penalty);
@@ -271,7 +269,8 @@ void sequencing_bias::build(const char* ref_fn,
         /* add a background sequence */
         /* adjust the current read position randomly, and sample */
         for (bg_sample_num = 0; bg_sample_num < bg_samples;) {
-            bg_pos = i->start + gsl_rng_uniform_int(rng, i->end - i->start + 1);
+            bg_pos = random_uniform_int(rng,
+                boost::random::uniform_int_distribution<pos_t>::param_type(i->start, i->end));
 
             if (i->strand == strand_neg) {
                 if (bg_pos < R || bg_pos >= seqlen - L) continue;
@@ -326,7 +325,6 @@ void sequencing_bias::build(const char* ref_fn,
 sequencing_bias::~sequencing_bias()
 {
     clear();
-    gsl_rng_free(rng);
 }
 
 

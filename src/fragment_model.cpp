@@ -1,7 +1,5 @@
 #include <boost/unordered_map.hpp>
-#include <gsl/gsl_cdf.h>
-#include <gsl/gsl_fit.h>
-#include <gsl/gsl_randist.h>
+#include <boost/math/distributions/normal.hpp>
 #include <cstdio>
 
 #include "constants.hpp"
@@ -721,16 +719,20 @@ void FragmentModel::estimate(TranscriptSet& ts,
 float FragmentModel::frag_len_p(pos_t frag_len)
 {
     if (frag_len_dist) return frag_len_dist->pdf(frag_len);
-    else return gsl_ran_gaussian_pdf((double) frag_len - constants::frag_len_mu,
-                                     constants::frag_len_sd);
+    else return boost::math::pdf(
+            boost::math::normal_distribution<double>(constants::frag_len_mu,
+                                                    constants::frag_len_sd),
+            frag_len);
 }
 
 
 float FragmentModel::frag_len_c(pos_t frag_len)
 {
     if (frag_len_dist) return frag_len_dist->cdf(frag_len);
-    else return gsl_cdf_gaussian_P((double) frag_len - constants::frag_len_mu,
-                                   constants::frag_len_sd);
+    else return boost::math::cdf(
+            boost::math::normal_distribution<double>(constants::frag_len_mu,
+                                                    constants::frag_len_sd),
+            frag_len);
 }
 
 

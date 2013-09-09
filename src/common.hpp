@@ -2,11 +2,16 @@
 #ifndef ISOLATOR_COMMON_HPP
 #define ISOLATOR_COMMON_HPP
 
+
+#include <boost/random/mersenne_twister.hpp>
 #include <boost/flyweight.hpp>
 #include <cstdlib>
 #include <string>
 
 #include "logger.hpp"
+
+// General purpose rng
+typedef boost::mt19937 rng_t;
 
 /* A genomic position. */
 typedef long pos_t;
