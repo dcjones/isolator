@@ -392,8 +392,7 @@ class SamplerInitThread
 
                 samplers[index] = new Sampler(filenames[index].c_str(), fa_fn,
                                               transcripts, *fms[index], run_gc_correction,
-                                              // XXX
-                                              false);
+                                              true);
             }
         }
 

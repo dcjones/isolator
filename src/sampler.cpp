@@ -14,57 +14,12 @@
 #include "sampler.hpp"
 #include "samtools/sam.h"
 #include "samtools/samtools_extra.h"
+#include "shredder.hpp"
 
 extern "C" {
 #include "samtools/khash.h"
 KHASH_MAP_INIT_STR(s, int)
 }
-
-
-static double sq(double x)
-{
-    return x * x;
-}
-
-
-// TODO: Fuck! I'm using standard deviation but this takes a precision function,
-// so it's totally fucked. Fix this first thing!
-
-// Log-pdf for student's t-distribution, avoiding some expensive recomputation.
-class StudentsTLogPdf
-{
-    public:
-        // nu: degrees of freedom
-        StudentsTLogPdf(double nu = 4.0)
-            : nu(nu)
-        {
-            base = lgamma((nu + 1)/2)
-                 - lgamma(nu/2)
-                 - log(sqrt(M_PI * nu));
-        }
-
-        double operator()(double nu, double mu, double lambda, double x)
-        {
-            set_nu(nu);
-            return base
-                 - log(mu)
-                 - ((nu + 1) / 2) * log1p(sq(x - mu) * lambda / nu);
-        }
-
-        void set_nu(double nu)
-        {
-            if (this->nu != nu) {
-                this->nu = nu;
-                base = lgamma((nu + 1)/2)
-                     - lgamma(nu/2)
-                     - log(sqrt(M_PI * nu));
-            }
-        }
-
-    private:
-        double base;
-        double nu;
-};
 
 
 static double gamma_lnpdf(double alpha, double beta, double x)
@@ -74,8 +29,6 @@ static double gamma_lnpdf(double alpha, double beta, double x)
            (alpha - 1) * log(x) -
            beta * x;
 }
-
-
 
 /* Safe c-style allocation. */
 
@@ -1428,9 +1381,13 @@ float AbundanceSamplerThread::compute_component_probability(unsigned int c, floa
 
         // prior
         BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-            lp += cmix_prior(S.hp.tgroup_nu, S.hp.tgroup_mu[tgroup],
-                             S.hp.tgroup_sigma[tgroup],
-                             log(S.tgroupmix[tgroup] * cmixc_scaled * S.hp.scale));
+            double x = log(S.tgroupmix[tgroup] * cmixc_scaled * S.hp.scale);
+            lp += cmix_prior.f(S.hp.tgroup_nu, S.hp.tgroup_mu[tgroup],
+                               S.hp.tgroup_sigma[tgroup],
+                               &x, 1);
+            if (!finite(lp)) {
+                Logger::abort("non-finite log-likelihood encountered");
+            }
         }
     }
 
