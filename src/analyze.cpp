@@ -391,8 +391,7 @@ class SamplerInitThread
                 fms[index]->estimate(transcripts, filenames[index].c_str(), fa_fn);
 
                 samplers[index] = new Sampler(filenames[index].c_str(), fa_fn,
-                                              transcripts, *fms[index], run_gc_correction,
-                                              true);
+                                              transcripts, *fms[index], run_gc_correction);
             }
         }
 
@@ -596,6 +595,8 @@ void Analyze::run()
         thread->start();
     }
 
+    warmup();
+
     const char* task_name = "Sampling";
     Logger::push_task(task_name, burnin + num_samples);
 
@@ -628,6 +629,43 @@ void Analyze::run()
 
     Logger::pop_task(task_name);
     cleanup();
+}
+
+
+void Analyze::warmup()
+{
+    // An attempt at a more efficient warm-up procedure.
+
+    // draw a few samples from the quantification samplers without priors
+    for (size_t i = 0; i < 10; ++i) {
+        for (size_t j = 0; j < K; ++j) {
+            qsampler_tick_queue.push(i);
+        }
+
+        for (size_t j = 0; j < K; ++j) {
+            qsampler_notify_queue.pop();
+        }
+    }
+
+    BOOST_FOREACH (Sampler* sampler, qsamplers) {
+        sampler->engage_priors();
+    }
+
+    compute_ts();
+    compute_xs();
+
+    // choose ml estimates for tgroup_mu
+    for (size_t i = 0; i < C; ++i) {
+        double mu = 0.0;
+        for (size_t j = 0; j < T; ++j) {
+            BOOST_FOREACH (int l, condition_samples[i]) {
+                mu += ts(l, j);
+            }
+            tgroup_mu(i, j) = mu / condition_samples[i].size();
+        }
+    }
+
+    // TODO: choose ml estimates for splicing paramaters
 }
 
 
@@ -708,12 +746,12 @@ void Analyze::choose_initial_values()
     std::fill(tgroup_mu.data().begin(), tgroup_mu.data().end(), tgroup_mu_0);
 
     // tgroup_sigma
-    const double tgroup_sigma_0 = 100.0;
+    const double tgroup_sigma_0 = 0.1;
     //const double tgroup_sigma_0 =
         //(tgroup_alpha_alpha / tgroup_beta_alpha) / (tgroup_alpha_beta / tgroup_beta_beta);
     std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);
 
-    tgroup_alpha = 10.0;
-    tgroup_beta = 2.0;
+    tgroup_alpha = 100;
+    tgroup_beta = 100;
 }
 

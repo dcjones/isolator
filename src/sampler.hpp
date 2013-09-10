@@ -69,7 +69,7 @@ class Sampler
     public:
         Sampler(const char* bam_fn, const char* ref_fn,
                 TranscriptSet& ts, FragmentModel& fm,
-                bool run_gc_correction, bool use_priors);
+                bool run_gc_correction, bool use_priors=false);
         ~Sampler();
 
         void run(unsigned int num_samples, SampleDB& out);
@@ -84,6 +84,10 @@ class Sampler
         // Return the current sampler state: a vector containing the relative
         // abundance of each transcript indexed by tid.
         const std::vector<double>& state() const;
+
+        // Use priors on transcript start site usage and splicing
+        void engage_priors();
+        void disengage_priors();
 
         // Hyperparameters that this sampler is not responsible for updating.
         // Public so they can be updated without a hassle.

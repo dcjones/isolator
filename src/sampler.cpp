@@ -2054,6 +2054,18 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
 }
 
 
+void Sampler::engage_priors()
+{
+    use_priors = true;
+}
+
+
+void Sampler::disengage_priors()
+{
+    use_priors = false;
+}
+
+
 Sampler::~Sampler()
 {
     delete [] tmix;

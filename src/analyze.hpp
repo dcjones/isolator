@@ -39,6 +39,7 @@ class Analyze
     private:
         void setup();
         void cleanup();
+        void warmup();
         void sample();
 
         void qsampler_update_hyperparameters();
