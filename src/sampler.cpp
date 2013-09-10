@@ -1605,9 +1605,10 @@ void AbundanceSamplerThread::run_intra_component(unsigned int c)
             ++u;
         }
 
+        random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
+                    0, S.component_num_transcripts[c] - 2));
         unsigned int v =
-            random_uniform_int(rng, boost::random::uniform_int_distribution<unsigned int>::param_type(
-                                        0, S.component_num_transcripts[c] - 1));
+            random_uniform_int(rng);
         if (v >= u) ++v;
 
         run_inter_transcript(S.component_transcripts[c][u],

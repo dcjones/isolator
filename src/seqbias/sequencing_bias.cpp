@@ -269,8 +269,9 @@ void sequencing_bias::build(const char* ref_fn,
         /* add a background sequence */
         /* adjust the current read position randomly, and sample */
         for (bg_sample_num = 0; bg_sample_num < bg_samples;) {
-            bg_pos = random_uniform_int(rng,
+            random_uniform_int.param(
                 boost::random::uniform_int_distribution<pos_t>::param_type(i->start, i->end));
+            bg_pos = random_uniform_int(rng);
 
             if (i->strand == strand_neg) {
                 if (bg_pos < R || bg_pos >= seqlen - L) continue;
