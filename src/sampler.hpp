@@ -85,6 +85,10 @@ class Sampler
         // abundance of each transcript indexed by tid.
         const std::vector<double>& state() const;
 
+        // Scaling factor to convert between relative abundance, normalized by sequencing depth,
+        // estimates in terms of number of reads.
+        const std::vector<double>& expr_scaling() const;
+
         // Use priors on transcript start site usage and splicing
         void engage_priors();
         void disengage_priors();
@@ -152,10 +156,14 @@ class Sampler
         double cmix_unscaled_sum;
 
         WeightMatrix* weight_matrix;
-        float* transcript_weights;
+        double* transcript_weights;
+
+        /* Factor by which transcript estimates in terms of number of reads differ
+           from the estimate accounting for transcript length, gc bias, and sequencing depth */
+        std::vector<double> tgroup_scaling;
 
         /* GC content of each transcript. */
-        float* transcript_gc;
+        double* transcript_gc;
 
         /* transcript_component[i] gives the component number of transcript i */
         unsigned int* transcript_component;

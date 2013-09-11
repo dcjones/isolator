@@ -107,6 +107,18 @@ static double sq(double x)
 }
 
 
+double NormalLogPdf::f(double mu, double sigma, const double* xs, size_t n)
+{
+    double part1 = n * (-log(2 * M_PI)/2 - log(sigma));
+    double part2 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part2 += sq(xs[i] - mu) / (2 * sq(sigma));
+    }
+
+    return part1 - part2;
+}
+
+
 double StudentsTLogPdf::f(double nu, double mu, double sigma, const double* xs, size_t n)
 {
     double part1 =

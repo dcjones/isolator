@@ -36,6 +36,14 @@ class Shredder
 
 // Some common distribution functions, with derivatives
 
+
+class NormalLogPdf
+{
+    public:
+        double f(double mu, double sigma, const double* xs, size_t n);
+};
+
+
 class StudentsTLogPdf
 {
     public:

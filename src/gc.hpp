@@ -11,15 +11,16 @@
 class GCCorrection
 {
     public:
-        GCCorrection(TranscriptSet& ts, const float* transcript_gc);
+        GCCorrection(TranscriptSet& ts, const double* transcript_gc);
         ~GCCorrection();
 
         void correct(double* expr);
+        void adjustments(const double* expr, double* weights);
 
     private:
         TranscriptSet& ts;
 
-        const float* transcript_gc;
+        const double* transcript_gc;
 
         // number of entrie (tgroups) in xs, ys
         size_t n;

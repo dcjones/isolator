@@ -741,8 +741,8 @@ class FragWeightEstimationThread
                 WeightMatrix& weight_matrix,
                 TSVec<FragIdxCount>& frag_counts,
                 TSVec<MultireadFrag>& multiread_frags,
-                float* transcript_weights,
-                float* transcript_gc,
+                double* transcript_weights,
+                double* transcript_gc,
                 Queue<SamplerInitInterval*>& q)
             : weight_matrix(weight_matrix)
             , frag_counts(frag_counts)
@@ -831,8 +831,8 @@ class FragWeightEstimationThread
         WeightMatrix& weight_matrix;
         TSVec<FragIdxCount>& frag_counts;
         TSVec<MultireadFrag>& multiread_frags;
-        float* transcript_weights;
-        float* transcript_gc;
+        double* transcript_weights;
+        double* transcript_gc;
 
         FragmentModel& fm;
         Indexer& read_indexer;
@@ -1303,7 +1303,8 @@ class AbundanceSamplerThread
                                              unsigned int u, unsigned int v,
                                              float z0, float p0, bool left);
 
-        StudentsTLogPdf cmix_prior;
+
+        NormalLogPdf cmix_prior;
         rng_t rng;
         boost::random::uniform_01<double> random_uniform_01;
         boost::random::uniform_int_distribution<unsigned int> random_uniform_int;
@@ -1360,36 +1361,20 @@ float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 
 float AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
 {
-    // TODO: prior over tgroupmix
-    /*
-     *
-     * What does the prior look like? We are doing log t-distribution to account
-     * for outlier replicates.
-     *
-     * The problem is that cmixc is not normalized. It's something on the same
-     * scale as "number of reads". We can't apply a prior to that shit.
-     *
-     *
-     */
-
     float lp = gamma_lnpdf(S.frag_count_sums[c] + S.component_num_transcripts[c] * constants::tmix_prior_prec,
                            1.0, cmixc);
 
     if (S.use_priors) {
-        // approximane the scaled cmix
-        double cmixc_scaled = cmixc / S.cmix_unscaled_sum;
 
         // prior
         BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-            double x = log(S.tgroupmix[tgroup] * cmixc_scaled * S.hp.scale);
+            double x = log(S.tgroupmix[tgroup] * cmixc);
 
-            // XXX
-            double mu = S.hp.tgroup_mu[tgroup];
+            double mu = S.hp.tgroup_mu[tgroup] + log(S.tgroup_scaling[tgroup]);
             double sigma = S.hp.tgroup_sigma[tgroup];
 
-            lp += cmix_prior.f(S.hp.tgroup_nu, S.hp.tgroup_mu[tgroup],
-                               S.hp.tgroup_sigma[tgroup],
-                               &x, 1);
+            lp += cmix_prior.f(mu, sigma, &x, 1);
+
             if (!finite(lp)) {
                 Logger::abort("non-finite log-likelihood encountered");
             }
@@ -1557,6 +1542,26 @@ void AbundanceSamplerThread::run_intra_component(unsigned int c)
     acopy(S.frag_probs_prop[c], S.frag_probs[c],
           (S.component_frag[c + 1] - S.component_frag[c]) * sizeof(float));
 
+
+    /* TODO: This is all wrong.
+
+    In analyze I'm doing inference on transcript abundance that has been normalized by
+    transcript length, gc content, and some hack to account for very short transcripts
+
+    The tempting thing to do would be to also use unnormalized values in
+    analyze, but since GC-bias and fragment length distributions can vary
+    between samples, this might be a mistake.
+
+    What if I leave everything unnormalized, and do something like
+
+        log(ts[i]) ~ N(mu * w_i)
+
+    Then we would report what?
+
+
+
+    */
+
     // TODO: constant
     for (unsigned int i = 0; i < std::min<size_t>(5, S.component_num_transcripts[c]); ++i) {
         double r = random_uniform_01(rng);
@@ -1646,10 +1651,6 @@ void AbundanceSamplerThread::run_component(unsigned int c)
         BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
             S.tgroupmix[tgroup] += S.tmix[tid];
         }
-
-        // Or, do I need to compute:
-        //  log(cmix[u] / total_reads * tgroupmix[tgroup])
-        // Something like that, anyway.
     }
 
     float x0 = S.cmix_unscaled[c];
@@ -1797,10 +1798,11 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     }
 
     weight_matrix = new WeightMatrix(ts.size());
-    transcript_weights = new float [ts.size()];
-    transcript_gc = new float [ts.size()];
+    transcript_weights = new double [ts.size()];
+    transcript_gc = new double [ts.size()];
     TSVec<FragIdxCount> nz_frag_counts;
     TSVec<MultireadFrag> multiread_frags;
+    tgroup_scaling.resize(ts.num_tgroups());
 
     std::vector<FragWeightEstimationThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -2039,13 +2041,18 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     cmix            = new double [num_components];
     cmix_unscaled   = new double [num_components];
 
+    expr.resize(weight_matrix->nrow);
+
+    // make sure no tiny transcript weights exist
+    for (size_t i = 0; i < weight_matrix->nrow; ++i) {
+        transcript_weights[i] = std::max<double>(constants::min_transcript_weight, transcript_weights[i]);
+    }
+
     // initialize hyperparameters
     hp.scale = 1.0;
     hp.tgroup_nu = 0.0;
     hp.tgroup_mu.resize(ts.num_tgroups(), 0.0);
     hp.tgroup_sigma.resize(ts.num_tgroups(), 0.0);
-
-    expr.resize(weight_matrix->nrow);
 
     if (fm.sb[0] && run_gc_correction) {
         gc_correct = new GCCorrection(ts, transcript_gc);
@@ -2218,6 +2225,8 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
 void Sampler::start()
 {
+    std::fill(tgroup_scaling.begin(), tgroup_scaling.end(), 1.0);
+
     /* Initial mixtures */
     for (unsigned int i = 0; i < num_components; ++i) {
         unsigned int j_max = 0;
@@ -2263,20 +2272,33 @@ void Sampler::sample()
     sample_multireads();
     sample_abundance();
 
-    double total_weight = 0.0;
+    // adjust for transcript weight
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-        expr[i] = cmix[transcript_component[i]] *
-            (transcript_weights[i] == 0.0 ?
-                tmix[i] : tmix[i] / transcript_weights[i]);
-        total_weight += expr[i];
+        expr[i] = cmix[transcript_component[i]] * (tmix[i] / transcript_weights[i]);
     }
 
-    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
-        expr[i] /= total_weight;
-    }
-
+    // adjust for gc content
     if (fm.sb[0] && gc_correct) {
         gc_correct->correct(&expr.at(0));
+    }
+
+    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+        expr[i] *= hp.scale;
+    }
+
+    std::fill(tgroupmix, tgroupmix + ts.num_tgroups(), 0.0);
+    for (unsigned int tgroup = 0; tgroup < tgroup_tids.size(); ++tgroup) {
+        BOOST_FOREACH (unsigned int tid, tgroup_tids[tgroup]) {
+            tgroupmix[tgroup] += tmix[tid];
+        }
+    }
+
+    std::fill(tgroup_scaling.begin(), tgroup_scaling.end(), 0.0);
+    for (unsigned int tgroup = 0; tgroup < tgroup_tids.size(); ++tgroup) {
+        BOOST_FOREACH (unsigned int tid, tgroup_tids[tgroup]) {
+            double transcript_scale = expr[tid] / (cmix[transcript_component[tid]] * tmix[tid]);
+            tgroup_scaling[tgroup] += (tmix[tid] / tgroupmix[tgroup]) * transcript_scale;
+        }
     }
 }
 
