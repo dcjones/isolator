@@ -1377,11 +1377,16 @@ float AbundanceSamplerThread::compute_component_probability(unsigned int c, floa
 
     if (S.use_priors) {
         // approximane the scaled cmix
-        double cmixc_scaled = cmixc / S.total_frag_count;
+        double cmixc_scaled = cmixc / S.cmix_unscaled_sum;
 
         // prior
         BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
             double x = log(S.tgroupmix[tgroup] * cmixc_scaled * S.hp.scale);
+
+            // XXX
+            double mu = S.hp.tgroup_mu[tgroup];
+            double sigma = S.hp.tgroup_sigma[tgroup];
+
             lp += cmix_prior.f(S.hp.tgroup_nu, S.hp.tgroup_mu[tgroup],
                                S.hp.tgroup_sigma[tgroup],
                                &x, 1);
@@ -2243,15 +2248,17 @@ void Sampler::start()
     update_frag_count_sums();
 
     /* Initial cmix */
+    cmix_unscaled_sum = 0.0;
     for (unsigned int c = 0; c < num_components; ++c) {
         cmix_unscaled[c] =
             component_num_transcripts[c] * constants::tmix_prior_prec +
             frag_count_sums[c];
+        cmix_unscaled_sum += cmix_unscaled[c];
     }
 }
 
 
-void Sampler::transition()
+void Sampler::sample()
 {
     sample_multireads();
     sample_abundance();
@@ -2349,9 +2356,9 @@ void Sampler::sample_abundance()
     }
 
     // normalize cmix (so it becomes a random dirichlet deviate)
-    float z = 0.0;
-    for (unsigned int c = 0; c < num_components; ++c) z += cmix[c];
-    for (unsigned int c = 0; c < num_components; ++c) cmix[c] /= z;
+    cmix_unscaled_sum = 0.0;
+    for (unsigned int c = 0; c < num_components; ++c) cmix_unscaled_sum += cmix[c];
+    for (unsigned int c = 0; c < num_components; ++c) cmix[c] /= cmix_unscaled_sum;
 
     // check for numerical errors
     for (unsigned int i = 0; i < num_components; ++i) {

@@ -28,7 +28,18 @@ double Shredder::sample(double x0)
     double x_min = find_slice_edge(x0, slice_height, lp0, d0, -1);
     double x_max = find_slice_edge(x0, slice_height, lp0, d0,  1);
 
-    return x_min + (x_max - x_min) * random_uniform_01(rng);
+    double x;
+    while (true) {
+        x = x_min + (x_max - x_min) * random_uniform_01(rng);
+        double d;
+        double lp = f(x, d);
+
+        if (lp >= slice_height) break;
+        else if (x > x0) x_max = x0;
+        else             x_min = x0;
+    }
+
+    return x;
 }
 
 

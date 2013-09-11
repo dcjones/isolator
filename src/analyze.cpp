@@ -2,6 +2,7 @@
 #include <boost/foreach.hpp>
 #include <boost/numeric/ublas/matrix_proxy.hpp>
 #include <boost/thread.hpp>
+#include <cstdio>
 
 #include "analyze.hpp"
 #include "constants.hpp"
@@ -50,7 +51,8 @@ class TgroupMuSampler : public Shredder
         {
             // TODO: prior on mu
             d = logpdf.df_dmu(nu, mu, sigma, xs, n);
-            return logpdf.f(nu, mu, sigma, xs, n);
+            double fx = logpdf.f(nu, mu, sigma, xs, n);
+            return fx;
         }
 };
 
@@ -146,6 +148,7 @@ class TgroupMuSigmaSamplerThread
                         xs[l++] = ts(j, tgroup);
                     }
 
+                    double mu_i_tgroup = mu(i, tgroup); // XXX: for debugging
                     mu(i, tgroup) = mu_sampler.sample(mu(i, tgroup), nu,
                                                       sigma[tgroup], xs, l);
                     assert_finite(mu(i, tgroup));
@@ -156,8 +159,10 @@ class TgroupMuSigmaSamplerThread
                     xs[i] = ts(i, tgroup) - mu(condition[i], tgroup);
                 }
 
+                double sigma0 = sigma[tgroup]; // XXX: for debugging
                 sigma[tgroup] = sigma_sampler.sample(sigma[tgroup], nu,
                                                      xs, alpha, beta, K);
+                double sigma1 = sigma[tgroup]; // XXX: for debugging
                 assert_finite(sigma[tgroup]);
 
                 notify_queue.push(1);
@@ -320,10 +325,10 @@ Analyze::Analyze(size_t burnin,
 
     // TODO: constants (also maybe command line options eventually)
     tgroup_nu = 100.0;
-    tgroup_alpha_alpha = 5.0;
-    tgroup_beta_alpha  = 2.5;
-    tgroup_alpha_beta  = 5.0;
-    tgroup_beta_beta   = 2.5;
+    tgroup_alpha_alpha = 500.0;
+    tgroup_beta_alpha  = 500.0;
+    tgroup_alpha_beta  = 500.0;
+    tgroup_beta_beta   = 500.0;
 
     tgroup_expr.resize(T);
 
@@ -443,7 +448,7 @@ class SamplerTickThread
             int index;
             while (true) {
                 if ((index = tick_queue.pop()) == -1) break;
-                samplers[index]->transition();
+                samplers[index]->sample();
                 const std::vector<double>& state = samplers[index]->state();
 
                 matrix_row<matrix<double> > row(Q, index);
@@ -639,7 +644,7 @@ void Analyze::warmup()
     // draw a few samples from the quantification samplers without priors
     for (size_t i = 0; i < 10; ++i) {
         for (size_t j = 0; j < K; ++j) {
-            qsampler_tick_queue.push(i);
+            qsampler_tick_queue.push(j);
         }
 
         for (size_t j = 0; j < K; ++j) {
@@ -647,17 +652,21 @@ void Analyze::warmup()
         }
     }
 
+    // TODO: priors are not fully implemented. They will likely fuck things up
+    // if engaged.
+#if 0
     BOOST_FOREACH (Sampler* sampler, qsamplers) {
         sampler->engage_priors();
     }
+#endif
 
     compute_ts();
     compute_xs();
 
     // choose ml estimates for tgroup_mu
     for (size_t i = 0; i < C; ++i) {
-        double mu = 0.0;
         for (size_t j = 0; j < T; ++j) {
+            double mu = 0.0;
             BOOST_FOREACH (int l, condition_samples[i]) {
                 mu += ts(l, j);
             }
@@ -671,6 +680,16 @@ void Analyze::warmup()
 
 void Analyze::sample()
 {
+    // XXX: debug output
+    {
+        FILE* out = fopen("analyze_state.tsv", "w");
+        fprintf(out, "ts\tmu\tsigma\n");
+        for (size_t i = 0; i < T; ++i) {
+            fprintf(out, "%f\t%f\t%f\n", ts(0, i), tgroup_mu(0, i), tgroup_sigma[i]);
+        }
+        fclose(out);
+    }
+
     qsampler_update_hyperparameters();
 
     for (size_t i = 0; i < K; ++i) {
@@ -746,7 +765,7 @@ void Analyze::choose_initial_values()
     std::fill(tgroup_mu.data().begin(), tgroup_mu.data().end(), tgroup_mu_0);
 
     // tgroup_sigma
-    const double tgroup_sigma_0 = 0.1;
+    const double tgroup_sigma_0 = 1.0;
     //const double tgroup_sigma_0 =
         //(tgroup_alpha_alpha / tgroup_beta_alpha) / (tgroup_alpha_beta / tgroup_beta_beta);
     std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);

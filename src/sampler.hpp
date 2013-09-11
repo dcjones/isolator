@@ -79,7 +79,7 @@ class Sampler
 
         // Generate a new sample. start() must be called prior to running an
         // iterations.
-        void transition();
+        void sample();
 
         // Return the current sampler state: a vector containing the relative
         // abundance of each transcript indexed by tid.
@@ -149,6 +149,7 @@ class Sampler
         /* Component mixture coefficients. */
         double* cmix;
         double* cmix_unscaled;
+        double cmix_unscaled_sum;
 
         WeightMatrix* weight_matrix;
         float* transcript_weights;
