@@ -1,6 +1,7 @@
 
 #include <boost/foreach.hpp>
 #include <boost/numeric/ublas/matrix_proxy.hpp>
+#include <boost/random/normal_distribution.hpp>
 #include <boost/thread.hpp>
 #include <cstdio>
 
@@ -20,87 +21,59 @@ static void assert_finite(double x)
 }
 
 
-class TgroupMuSampler : public Shredder
+// This is fucking retarted. I should be using conjugate prior relationships here.
+// What the fuck is wrong with me.
+class TgroupMuSampler
 {
     public:
         TgroupMuSampler()
-            : Shredder(-100, 100)
         {
         }
 
-        double sample(double mu0, double nu, double sigma,
-                      const std::vector<double>& xs, size_t n)
+        double sample(double sigma, const double* xs, size_t n,
+                      double prior_mu, double prior_sigma)
         {
-            this->nu = nu;
-            this->sigma = sigma;
-            this->xs = &xs.at(0);
-            this->n = n;
-            return Shredder::sample(mu0);
+            double prior_sd = prior_sigma * prior_sigma;
+            double sd = sigma * sigma;
+
+            double part = 1/prior_sd  + n/sd;
+            double posterior_mu =
+                (prior_mu / prior_sd + std::accumulate(xs, xs + n, 0.0) / sd) / part;
+            double posterior_sigma = sqrt(1 / part);
+
+            return posterior_mu + random_normal(rng) * posterior_sigma;
         }
 
     private:
-        double nu;
-        double sigma;
-        const double* xs;
-        size_t n;
-
-        StudentsTLogPdf logpdf;
-
-    protected:
-        double f(double mu, double &d)
-        {
-            // TODO: prior on mu
-            d = logpdf.df_dmu(nu, mu, sigma, xs, n);
-            double fx = logpdf.f(nu, mu, sigma, xs, n);
-            return fx;
-        }
+        rng_t rng;
+        boost::random::normal_distribution<double> random_normal;
 };
 
 
-class TgroupSigmaSampler : public Shredder
+class TgroupSigmaSampler
 {
     public:
         TgroupSigmaSampler()
-            : Shredder(1e-16, 1e5)
         {
         }
 
-        double sample(double sigma0, double nu,
-                      const std::vector<double>& xs, double alpha, double beta,
-                      size_t n)
+        double sample(const double* xs, size_t n, double prior_alpha, double prior_beta)
         {
-            this->nu = nu;
-            this->xs = &xs.at(0);
-            this->n = n;
-            this->alpha = alpha;
-            this->beta = beta;
-            return Shredder::sample(sigma0);
+            double posterior_alpha = prior_alpha + n / 2.0;
+
+            double part = 0.0;
+            for (size_t i = 0; i < n; ++i) {
+                part += xs[i] * xs[i];
+            }
+            double posterior_beta = prior_beta + part / 2.0;
+
+            boost::random::gamma_distribution<double> dist(posterior_alpha, posterior_beta);
+
+            return sqrt(1 / dist(rng));
         }
 
     private:
-        double nu;
-        const double* xs;
-        size_t n;
-        double alpha;
-        double beta;
-
-        StudentsTLogPdf likelihood_logpdf;
-        InvGammaLogPdf prior_logpdf;
-
-    protected:
-        double f(double sigma, double &d)
-        {
-            d = 0.0;
-            double fx = 0.0;
-
-            d += prior_logpdf.df_dx(alpha, beta, &sigma, 1);
-            fx += prior_logpdf.f(alpha, beta, &sigma, 1);
-
-            d += likelihood_logpdf.df_dsigma(nu, 0.0, sigma, xs, n);
-            fx += likelihood_logpdf.f(nu, 0.0, sigma, xs, n);
-
-            return fx;
-        }
+        rng_t rng;
 };
 
 
@@ -149,8 +122,9 @@ class TgroupMuSigmaSamplerThread
                     }
 
                     double mu_i_tgroup = mu(i, tgroup); // XXX: for debugging
-                    mu(i, tgroup) = mu_sampler.sample(mu(i, tgroup), nu,
-                                                      sigma[tgroup], xs, l);
+                    // TODO: actual priors
+                    mu(i, tgroup) = mu_sampler.sample(sigma[tgroup], &xs.at(0), l,
+                                                      -15.0, 10.0);
                     assert_finite(mu(i, tgroup));
                 }
 
@@ -160,8 +134,7 @@ class TgroupMuSigmaSamplerThread
                 }
 
                 double sigma0 = sigma[tgroup]; // XXX: for debugging
-                sigma[tgroup] = sigma_sampler.sample(sigma[tgroup], nu,
-                                                     xs, alpha, beta, K);
+                sigma[tgroup] = sigma_sampler.sample(&xs.at(0), K, alpha, beta);
                 double sigma1 = sigma[tgroup]; // XXX: for debugging
                 assert_finite(sigma[tgroup]);
 
