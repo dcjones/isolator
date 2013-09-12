@@ -1401,23 +1401,6 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
     unsigned int c = S.transcript_component[u];
     assert(c == S.transcript_component[v]);
 
-    double prior_lp_delta = 0.0;
-    if (S.use_priors && tgu != tgv) {
-        // some hairy stuff to avoid fully computing the normal log-pdf.
-        double xu0 = fastlog2(S.cmix[c] * S.tgroupmix[tgu]);
-        double xu1 = fastlog2(S.cmix[c] * (S.tgroupmix[tgu] - S.tmix[u] + tmixu));
-        double delta_u = xu1 - xu0;
-        double mu_u = S.hp.tgroup_mu[tgu];
-        double sigma_u = S.hp.tgroup_sigma[tgu];
-        prior_lp_delta -= (delta_u * delta_u + 2 * delta_u * (xu0 - mu_u)) / (2 * sigma_u * sigma_u);
-
-        double xv0 = fastlog2(S.cmix[c] * S.tgroupmix[tgv]);
-        double xv1 = fastlog2(S.cmix[c] * (S.tgroupmix[tgv] - S.tmix[v] + tmixv));
-        double delta_v = xv1 - xv0;
-        double mu_v = S.hp.tgroup_mu[tgv];
-        double sigma_v = S.hp.tgroup_sigma[tgv];
-        prior_lp_delta -= (delta_v * delta_v + 2 * delta_v * (xv0 - mu_v)) / (2 * sigma_v * sigma_v);
-    }
 
     acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0, (f1 - f0) * sizeof(float));
 
@@ -1444,9 +1427,29 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
                    S.weight_matrix->idxs[v], S.component_frag[c],
                    S.weight_matrix->rowlens[v]);
 
-
     *d *= tmixu + tmixv;
     *d /= M_LN2;
+
+    double prior_lp_delta = 0.0;
+    if (S.use_priors && tgu != tgv) {
+        // some hairy stuff to avoid fully computing the normal log-pdf.
+        double xu0 = fastlog2(S.cmix[c] * S.tgroupmix[tgu]);
+        double xu1 = fastlog2(S.cmix[c] * (S.tgroupmix[tgu] - S.tmix[u] + tmixu));
+        double delta_u = xu1 - xu0;
+        double mu_u = S.hp.tgroup_mu[tgu];
+        double sigma_u = S.hp.tgroup_sigma[tgu];
+        prior_lp_delta -= (delta_u * delta_u + 2 * delta_u * (xu0 - mu_u)) / (2 * sigma_u * sigma_u);
+
+        double xv0 = fastlog2(S.cmix[c] * S.tgroupmix[tgv]);
+        double xv1 = fastlog2(S.cmix[c] * (S.tgroupmix[tgv] - S.tmix[v] + tmixv));
+        double delta_v = xv1 - xv0;
+        double mu_v = S.hp.tgroup_mu[tgv];
+        double sigma_v = S.hp.tgroup_sigma[tgv];
+        prior_lp_delta -= (delta_v * delta_v + 2 * delta_v * (xv0 - mu_v)) / (2 * sigma_v * sigma_v);
+
+        *d += (xu1 - mu_u) / (sigma_u * sigma_u);
+        *d += (xv1 - mu_v) / (sigma_v * sigma_v);
+    }
 
     return p0 - pf01
               + dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0)

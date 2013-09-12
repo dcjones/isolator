@@ -82,7 +82,6 @@ float fastlog2(float x_)
 }
 
 
-
 /* AVX versions */
 
 PS32_CONST(1, 1.0f);
