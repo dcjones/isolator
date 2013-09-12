@@ -152,8 +152,6 @@ class Sampler
 
         /* Component mixture coefficients. */
         double* cmix;
-        double* cmix_unscaled;
-        double cmix_unscaled_sum;
 
         WeightMatrix* weight_matrix;
         double* transcript_weights;

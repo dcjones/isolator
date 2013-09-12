@@ -1370,6 +1370,10 @@ float AbundanceSamplerThread::compute_component_probability(unsigned int c, floa
         BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
             double x = log(S.tgroupmix[tgroup] * cmixc);
 
+            // XXX: for debugging
+            const double* tgroup_mu = &S.hp.tgroup_mu.at(0);
+            const double* tgroup_scaling = &S.tgroup_scaling.at(0);
+
             double mu = S.hp.tgroup_mu[tgroup] + log(S.tgroup_scaling[tgroup]);
             double sigma = S.hp.tgroup_sigma[tgroup];
 
@@ -1653,7 +1657,7 @@ void AbundanceSamplerThread::run_component(unsigned int c)
         }
     }
 
-    float x0 = S.cmix_unscaled[c];
+    float x0 = S.cmix[c];
 
     // Why does this not work just as well?
     //float x0 = S.cmix[c] * S.total_frag_count +
@@ -1676,7 +1680,7 @@ void AbundanceSamplerThread::run_component(unsigned int c)
          else             x_min = x0;
     }
 
-    S.cmix[c] = S.cmix_unscaled[c] = x;
+    S.cmix[c] = x;
 }
 
 
@@ -2039,7 +2043,6 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     tmix            = new double [weight_matrix->nrow];
     tgroupmix       = new double [tgroup_tids.size()];
     cmix            = new double [num_components];
-    cmix_unscaled   = new double [num_components];
 
     expr.resize(weight_matrix->nrow);
 
@@ -2082,7 +2085,6 @@ Sampler::~Sampler()
 {
     delete [] tmix;
     delete [] cmix;
-    delete [] cmix_unscaled;
     delete [] tgroupmix;
     delete [] transcript_component;
     for (size_t i = 0; i < num_components; ++i) {
@@ -2150,7 +2152,7 @@ void Sampler::run(unsigned int num_samples, SampleDB& out)
 
     /* Initial cmix */
     for (unsigned int c = 0; c < num_components; ++c) {
-        cmix_unscaled[c] =
+        cmix[c] =
             component_num_transcripts[c] * constants::tmix_prior_prec +
             frag_count_sums[c];
     }
@@ -2257,12 +2259,10 @@ void Sampler::start()
     update_frag_count_sums();
 
     /* Initial cmix */
-    cmix_unscaled_sum = 0.0;
     for (unsigned int c = 0; c < num_components; ++c) {
-        cmix_unscaled[c] =
+        cmix[c] =
             component_num_transcripts[c] * constants::tmix_prior_prec +
             frag_count_sums[c];
-        cmix_unscaled_sum += cmix_unscaled[c];
     }
 }
 
@@ -2286,19 +2286,24 @@ void Sampler::sample()
         expr[i] *= hp.scale;
     }
 
-    std::fill(tgroupmix, tgroupmix + ts.num_tgroups(), 0.0);
-    for (unsigned int tgroup = 0; tgroup < tgroup_tids.size(); ++tgroup) {
-        BOOST_FOREACH (unsigned int tid, tgroup_tids[tgroup]) {
-            tgroupmix[tgroup] += tmix[tid];
-        }
-    }
+    /*
+     *std::fill(tgroupmix, tgroupmix + ts.num_tgroups(), 0.0);
+     *for (unsigned int tgroup = 0; tgroup < tgroup_tids.size(); ++tgroup) {
+     *    BOOST_FOREACH (unsigned int tid, tgroup_tids[tgroup]) {
+     *        tgroupmix[tgroup] += tmix[tid];
+     *    }
+     *}
+     */
 
     std::fill(tgroup_scaling.begin(), tgroup_scaling.end(), 0.0);
     for (unsigned int tgroup = 0; tgroup < tgroup_tids.size(); ++tgroup) {
+        double scaled_expr = 0.0;
+        double unscaled_expr = 0.0;
         BOOST_FOREACH (unsigned int tid, tgroup_tids[tgroup]) {
-            double transcript_scale = expr[tid] / (cmix[transcript_component[tid]] * tmix[tid]);
-            tgroup_scaling[tgroup] += (tmix[tid] / tgroupmix[tgroup]) * transcript_scale;
+            scaled_expr += expr[tid];
+            unscaled_expr = cmix[transcript_component[tid]] * tmix[tid];
         }
+        tgroup_scaling[tgroup] = unscaled_expr / scaled_expr;
     }
 }
 
@@ -2376,11 +2381,6 @@ void Sampler::sample_abundance()
     for (size_t i = 0; i < constants::num_threads; ++i) {
         abundance_threads[i]->join();
     }
-
-    // normalize cmix (so it becomes a random dirichlet deviate)
-    cmix_unscaled_sum = 0.0;
-    for (unsigned int c = 0; c < num_components; ++c) cmix_unscaled_sum += cmix[c];
-    for (unsigned int c = 0; c < num_components; ++c) cmix[c] /= cmix_unscaled_sum;
 
     // check for numerical errors
     for (unsigned int i = 0; i < num_components; ++i) {

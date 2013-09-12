@@ -67,7 +67,7 @@ class TgroupSigmaSampler
             }
             double posterior_beta = prior_beta + part / 2.0;
 
-            boost::random::gamma_distribution<double> dist(posterior_alpha, posterior_beta);
+            boost::random::gamma_distribution<double> dist(posterior_alpha, 1/posterior_beta);
 
             return sqrt(1 / dist(rng));
         }
@@ -627,11 +627,9 @@ void Analyze::warmup()
 
     // TODO: priors are not fully implemented. They will likely fuck things up
     // if engaged.
-#if 0
     BOOST_FOREACH (Sampler* sampler, qsamplers) {
         sampler->engage_priors();
     }
-#endif
 
     compute_ts();
     compute_xs();
@@ -654,6 +652,7 @@ void Analyze::warmup()
 void Analyze::sample()
 {
     // XXX: debug output
+#if 0
     {
         FILE* out = fopen("analyze_state.tsv", "w");
         fprintf(out, "ts\tmu\tsigma\n");
@@ -662,6 +661,7 @@ void Analyze::sample()
         }
         fclose(out);
     }
+#endif
 
     qsampler_update_hyperparameters();
 
@@ -743,7 +743,7 @@ void Analyze::choose_initial_values()
         //(tgroup_alpha_alpha / tgroup_beta_alpha) / (tgroup_alpha_beta / tgroup_beta_beta);
     std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);
 
-    tgroup_alpha = 100;
-    tgroup_beta = 100;
+    tgroup_alpha = 1.0;
+    tgroup_beta = 0.1;
 }
 
