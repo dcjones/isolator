@@ -166,6 +166,9 @@ class Sampler
         /* transcript_component[i] gives the component number of transcript i */
         unsigned int* transcript_component;
 
+        /* transcript_tgroups[i] gives the tgroup of transcript i */
+        unsigned int* transcript_tgroup;
+
         /* map tgroup i to a vector of its constituent tids. */
         std::vector<std::vector<unsigned int> > tgroup_tids;
 

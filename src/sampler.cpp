@@ -1395,8 +1395,29 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
                                                   unsigned int f0, unsigned int f1,
                                                   float pf01, float p0, float* d)
 {
+    unsigned int tgu = S.transcript_tgroup[u];
+    unsigned int tgv = S.transcript_tgroup[v];
+
     unsigned int c = S.transcript_component[u];
     assert(c == S.transcript_component[v]);
+
+    double prior_lp_delta = 0.0;
+    if (S.use_priors && tgu != tgv) {
+        // some hairy stuff to avoid fully computing the normal log-pdf.
+        double xu0 = fastlog2(S.cmix[c] * S.tgroupmix[tgu]);
+        double xu1 = fastlog2(S.cmix[c] * (S.tgroupmix[tgu] - S.tmix[u] + tmixu));
+        double delta_u = xu1 - xu0;
+        double mu_u = S.hp.tgroup_mu[tgu];
+        double sigma_u = S.hp.tgroup_sigma[tgu];
+        prior_lp_delta -= (delta_u * delta_u + 2 * delta_u * (xu0 - mu_u)) / (2 * sigma_u * sigma_u);
+
+        double xv0 = fastlog2(S.cmix[c] * S.tgroupmix[tgv]);
+        double xv1 = fastlog2(S.cmix[c] * (S.tgroupmix[tgv] - S.tmix[v] + tmixv));
+        double delta_v = xv1 - xv0;
+        double mu_v = S.hp.tgroup_mu[tgv];
+        double sigma_v = S.hp.tgroup_sigma[tgv];
+        prior_lp_delta -= (delta_v * delta_v + 2 * delta_v * (xv0 - mu_v)) / (2 * sigma_v * sigma_v);
+    }
 
     acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0, (f1 - f0) * sizeof(float));
 
@@ -1427,7 +1448,9 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
     *d *= tmixu + tmixv;
     *d /= M_LN2;
 
-    return p0 - pf01 + dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0);
+    return p0 - pf01
+              + dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0)
+              + prior_lp_delta;
 }
 
 
@@ -1543,28 +1566,15 @@ void AbundanceSamplerThread::run_intra_component(unsigned int c)
 {
     if (S.component_num_transcripts[c] <= 1) return;
 
+    BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
+        S.tgroupmix[tgroup] = 0.0;
+        BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
+            S.tgroupmix[tgroup] += S.tmix[tid];
+        }
+    }
+
     acopy(S.frag_probs_prop[c], S.frag_probs[c],
           (S.component_frag[c + 1] - S.component_frag[c]) * sizeof(float));
-
-
-    /* TODO: This is all wrong.
-
-    In analyze I'm doing inference on transcript abundance that has been normalized by
-    transcript length, gc content, and some hack to account for very short transcripts
-
-    The tempting thing to do would be to also use unnormalized values in
-    analyze, but since GC-bias and fragment length distributions can vary
-    between samples, this might be a mistake.
-
-    What if I leave everything unnormalized, and do something like
-
-        log(ts[i]) ~ N(mu * w_i)
-
-    Then we would report what?
-
-
-
-    */
 
     // TODO: constant
     for (unsigned int i = 0; i < std::min<size_t>(5, S.component_num_transcripts[c]); ++i) {
@@ -1590,14 +1600,6 @@ void AbundanceSamplerThread::run_intra_component(unsigned int c)
 
 void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v)
 {
-    /* TODO: The really tricky part with adding priors will be here.
-     *
-     * We are changing the expression of two transcripts. They are either (a) in
-     * the same tss group, in which case the prior on tss usage plays no role,
-     * but the prior on splicing does, or (b) in two different tss groups, in
-     * which case both priors apply.
-     */
-
     unsigned int c = S.transcript_component[u];
     assert(c == S.transcript_component[v]);
 
@@ -1606,6 +1608,17 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
     unsigned int component_size = S.component_frag[c + 1] - S.component_frag[c];
 
     double p0 = dotlog(S.frag_counts[c], S.frag_probs[c], component_size);
+
+    unsigned int tgu = S.transcript_tgroup[u];
+    unsigned int tgv = S.transcript_tgroup[v];
+
+    if (S.use_priors && tgu != tgv) {
+        p0 += cmix_prior.f(S.hp.tgroup_mu[tgu] + fastlog2(S.tgroup_scaling[tgu]),
+                           S.hp.tgroup_sigma[tgu], &S.tgroupmix[tgu], 1);
+        p0 += cmix_prior.f(S.hp.tgroup_mu[tgv] + fastlog2(S.tgroup_scaling[tgv]),
+                           S.hp.tgroup_sigma[tgv], &S.tgroupmix[tgv], 1);
+    }
+
     float slice_height = hillclimb ? p0 : p0 + fastlog2(random_uniform_01(rng));
     float z0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
 
@@ -1642,6 +1655,11 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
           S.weight_matrix->idxs[v],
           S.component_frag[c],
           S.weight_matrix->rowlens[v]);
+
+    if (tgu != tgv) {
+        S.tgroupmix[tgu] += tmixu - S.tmix[u];
+        S.tgroupmix[tgv] += tmixv - S.tmix[v];
+    }
 
     S.tmix[u] = tmixu;
     S.tmix[v] = tmixv;
@@ -1905,8 +1923,10 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
             component_num_transcripts + num_components,
             0);
     transcript_component = new unsigned int [ts.size()];
+    transcript_tgroup = new unsigned int [ts.size()];
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
         unsigned int c = ds[weight_matrix->ncol + t->id];
+        transcript_tgroup[t->id] = t->tgroup;
         transcript_component[t->id] = c;
         component_num_transcripts[c]++;
         component_tgroups[c].insert(t->tgroup);
@@ -2087,6 +2107,7 @@ Sampler::~Sampler()
     delete [] cmix;
     delete [] tgroupmix;
     delete [] transcript_component;
+    delete [] transcript_tgroup;
     for (size_t i = 0; i < num_components; ++i) {
         afree(frag_counts[i]);
         afree(frag_probs[i]);
@@ -2285,15 +2306,6 @@ void Sampler::sample()
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         expr[i] *= hp.scale;
     }
-
-    /*
-     *std::fill(tgroupmix, tgroupmix + ts.num_tgroups(), 0.0);
-     *for (unsigned int tgroup = 0; tgroup < tgroup_tids.size(); ++tgroup) {
-     *    BOOST_FOREACH (unsigned int tid, tgroup_tids[tgroup]) {
-     *        tgroupmix[tgroup] += tmix[tid];
-     *    }
-     *}
-     */
 
     std::fill(tgroup_scaling.begin(), tgroup_scaling.end(), 0.0);
     for (unsigned int tgroup = 0; tgroup < tgroup_tids.size(); ++tgroup) {
