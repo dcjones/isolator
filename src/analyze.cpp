@@ -3,6 +3,9 @@
 #include <boost/numeric/ublas/matrix_proxy.hpp>
 #include <boost/random/normal_distribution.hpp>
 #include <boost/thread.hpp>
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/statistics/stats.hpp>
+#include <boost/accumulators/statistics/median.hpp>
 #include <cstdio>
 
 #include "analyze.hpp"
@@ -10,6 +13,7 @@
 #include "shredder.hpp"
 
 using namespace boost::numeric::ublas;
+using namespace boost::accumulators;
 
 
 
@@ -21,8 +25,6 @@ static void assert_finite(double x)
 }
 
 
-// This is fucking retarted. I should be using conjugate prior relationships here.
-// What the fuck is wrong with me.
 class TgroupMuSampler
 {
     public:
@@ -33,12 +35,12 @@ class TgroupMuSampler
         double sample(double sigma, const double* xs, size_t n,
                       double prior_mu, double prior_sigma)
         {
-            double prior_sd = prior_sigma * prior_sigma;
-            double sd = sigma * sigma;
+            double prior_var = prior_sigma * prior_sigma;
+            double var = sigma * sigma;
 
-            double part = 1/prior_sd  + n/sd;
+            double part = 1/prior_var  + n/var;
             double posterior_mu =
-                (prior_mu / prior_sd + std::accumulate(xs, xs + n, 0.0) / sd) / part;
+                (prior_mu / prior_var + std::accumulate(xs, xs + n, 0.0) / var) / part;
             double posterior_sigma = sqrt(1 / part);
 
             return posterior_mu + random_normal(rng) * posterior_sigma;
@@ -83,6 +85,8 @@ class TgroupMuSigmaSamplerThread
         TgroupMuSigmaSamplerThread(const matrix<double>& ts,
                                    double nu,
                                    matrix<double>& mu,
+                                   const std::vector<double>& experiment_tgroup_mu,
+                                   const std::vector<double>& experiment_tgroup_sigma,
                                    std::vector<double>& sigma,
                                    double& alpha,
                                    double& beta,
@@ -93,6 +97,8 @@ class TgroupMuSigmaSamplerThread
             : ts(ts)
             , nu(nu)
             , mu(mu)
+            , experiment_tgroup_mu(experiment_tgroup_mu)
+            , experiment_tgroup_sigma(experiment_tgroup_sigma)
             , sigma(sigma)
             , alpha(alpha)
             , beta(beta)
@@ -124,7 +130,8 @@ class TgroupMuSigmaSamplerThread
                     double mu_i_tgroup = mu(i, tgroup); // XXX: for debugging
                     // TODO: actual priors
                     mu(i, tgroup) = mu_sampler.sample(sigma[tgroup], &xs.at(0), l,
-                                                      -15.0, 10.0);
+                                                      experiment_tgroup_mu[tgroup],
+                                                      experiment_tgroup_sigma[tgroup]);
                     assert_finite(mu(i, tgroup));
                 }
 
@@ -158,6 +165,8 @@ class TgroupMuSigmaSamplerThread
         const matrix<double>& ts;
         double nu;
         matrix<double>& mu;
+        const std::vector<double>& experiment_tgroup_mu;
+        const std::vector<double>& experiment_tgroup_sigma;
         std::vector<double>& sigma;
         double& alpha;
         double& beta;
@@ -184,10 +193,10 @@ class TgroupMuSigmaSamplerThread
 };
 
 
-class TgroupAlphaSampler : public Shredder
+class AlphaSampler : public Shredder
 {
     public:
-        TgroupAlphaSampler()
+        AlphaSampler()
             : Shredder(1e-16, 1e5)
         {
         }
@@ -231,10 +240,10 @@ class TgroupAlphaSampler : public Shredder
 };
 
 
-class TgroupBetaSampler : public Shredder
+class BetaSampler : public Shredder
 {
     public:
-        TgroupBetaSampler()
+        BetaSampler()
             : Shredder(1e-16, 1e5)
         {}
 
@@ -278,6 +287,102 @@ class TgroupBetaSampler : public Shredder
 
 
 
+
+class ExperimentTgroupMuSigmaSamplerThread
+{
+    public:
+        ExperimentTgroupMuSigmaSamplerThread(
+                std::vector<double>& experiment_tgroup_mu,
+                double prior_mu,
+                double prior_sigma,
+                std::vector<double>& experiment_tgroup_sigma,
+                double& experiment_tgroup_alpha,
+                double& experiment_tgroup_beta,
+                matrix<double>& tgroup_mu,
+                Queue<int>& tgroup_queue,
+                Queue<int>& notify_queue)
+            : experiment_tgroup_mu(experiment_tgroup_mu)
+            , prior_mu(prior_mu)
+            , prior_sigma(prior_sigma)
+            , experiment_tgroup_sigma(experiment_tgroup_sigma)
+            , experiment_tgroup_alpha(experiment_tgroup_alpha)
+            , experiment_tgroup_beta(experiment_tgroup_beta)
+            , tgroup_mu(tgroup_mu)
+            , tgroup_queue(tgroup_queue)
+            , notify_queue(notify_queue)
+            , thread(NULL)
+        {
+        }
+
+        void run()
+        {
+            int tgroup;
+            size_t C = tgroup_mu.size1();
+
+            while (true) {
+                if ((tgroup = tgroup_queue.pop()) == -1) break;
+
+                double sigma = experiment_tgroup_sigma[tgroup];
+
+                // sample experiment_tgroup_mu[tgroup]
+
+                double prior_var = prior_sigma * prior_sigma;
+                double var = sigma * sigma;
+
+                matrix_column<matrix<double> > col(tgroup_mu, tgroup);
+
+                double part = 1/prior_var + C/var;
+                double posterior_mu =
+                    (prior_mu / prior_var + std::accumulate(col.begin(), col.end(), 0.0) / var) / part;
+                double posterior_sigma = sqrt(1 / part);
+
+                experiment_tgroup_mu[tgroup] = posterior_mu + random_normal(rng) * posterior_sigma;
+
+                // sample experiment_tgroup_sigma[tgroup]
+
+                double mu = experiment_tgroup_mu[tgroup];
+                double posterior_alpha = experiment_tgroup_alpha + C/2;
+                part = 0.0;
+                for (size_t i = 0; i < C; ++i) {
+                    part += (col[i] - mu) * (col[i] - mu);
+                }
+                double posterior_beta = experiment_tgroup_beta + part/2;
+
+                boost::random::gamma_distribution<double> dist(posterior_alpha, 1/posterior_beta);
+
+                experiment_tgroup_sigma[tgroup] = sqrt(1 / dist(rng));
+            }
+        }
+
+        void start()
+        {
+            thread = new boost::thread(boost::bind(&ExperimentTgroupMuSigmaSamplerThread::run, this));
+        }
+
+        void join()
+        {
+            thread->join();
+            delete thread;
+            thread = NULL;
+        }
+
+    private:
+        std::vector<double>& experiment_tgroup_mu;
+        double prior_mu, prior_sigma;
+        std::vector<double>& experiment_tgroup_sigma;
+        double& experiment_tgroup_alpha;
+        double& experiment_tgroup_beta;
+        matrix<double>& tgroup_mu;
+
+        Queue<int>& tgroup_queue;
+        Queue<int>& notify_queue;
+        boost::thread* thread;
+        rng_t rng;
+        boost::random::normal_distribution<double> random_normal;
+};
+
+
+
 Analyze::Analyze(size_t burnin,
                  size_t num_samples,
                  TranscriptSet& transcripts,
@@ -303,10 +408,13 @@ Analyze::Analyze(size_t burnin,
     tgroup_alpha_beta  = 500.0;
     tgroup_beta_beta   = 500.0;
 
+    experiment_tgroup_mu0 = -10;
+    experiment_tgroup_sigma0 = 5.0;
+
     tgroup_expr.resize(T);
 
-    alpha_sampler = new TgroupAlphaSampler();
-    beta_sampler = new TgroupBetaSampler();
+    alpha_sampler = new AlphaSampler();
+    beta_sampler = new BetaSampler();
 
     Logger::info("Number of transcripts: %u", N);
     Logger::info("Number of transcription groups: %u", T);
@@ -548,6 +656,8 @@ void Analyze::run()
     scale.resize(K, 1.0);
     tgroup_sigma.resize(T);
     tgroup_mu.resize(K, T);
+    experiment_tgroup_mu.resize(T);
+    experiment_tgroup_sigma.resize(T);
 
     choose_initial_values();
 
@@ -565,11 +675,24 @@ void Analyze::run()
 
     musigma_sampler_threads.resize(constants::num_threads);
     BOOST_FOREACH (TgroupMuSigmaSamplerThread*& thread, musigma_sampler_threads) {
-        thread = new TgroupMuSigmaSamplerThread(ts, tgroup_nu, tgroup_mu, tgroup_sigma,
+        thread = new TgroupMuSigmaSamplerThread(ts, tgroup_nu, tgroup_mu,
+                                                experiment_tgroup_mu, experiment_tgroup_sigma,
+                                                tgroup_sigma,
                                                 tgroup_alpha, tgroup_beta,
                                                 condition, condition_samples,
                                                 musigma_sampler_tick_queue,
                                                 musigma_sampler_notify_queue);
+        thread->start();
+    }
+
+    experiment_musigma_sampler_threads.resize(constants::num_threads);
+    BOOST_FOREACH (ExperimentTgroupMuSigmaSamplerThread*& thread, experiment_musigma_sampler_threads) {
+        thread = new ExperimentTgroupMuSigmaSamplerThread(
+            experiment_tgroup_mu, experiment_tgroup_mu0, experiment_tgroup_sigma0,
+            experiment_tgroup_sigma, experiment_tgroup_alpha, experiment_tgroup_beta,
+            tgroup_mu, experiment_musigma_sampler_tick_queue,
+            experiment_musigma_sampler_notify_queue);
+
         thread->start();
     }
 
@@ -593,16 +716,19 @@ void Analyze::run()
     for (size_t i = 0; i < constants::num_threads; ++i) {
         qsampler_tick_queue.push(-1);
         musigma_sampler_tick_queue.push(-1);
+        experiment_musigma_sampler_tick_queue.push(-1);
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         qsampler_threads[i]->join();
         musigma_sampler_threads[i]->join();
+        experiment_musigma_sampler_threads[i]->join();
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         delete qsampler_threads[i];
         delete musigma_sampler_threads[i];
+        delete experiment_musigma_sampler_threads[i];
     }
 
     Logger::pop_task(task_name);
@@ -625,13 +751,12 @@ void Analyze::warmup()
         }
     }
 
-    // TODO: priors are not fully implemented. They will likely fuck things up
-    // if engaged.
     BOOST_FOREACH (Sampler* sampler, qsamplers) {
         sampler->engage_priors();
     }
 
     compute_ts();
+    compute_ts_scaling();
     compute_xs();
 
     // choose ml estimates for tgroup_mu
@@ -646,6 +771,16 @@ void Analyze::warmup()
     }
 
     // TODO: choose ml estimates for splicing paramaters
+
+
+    // ml estimates for experiment_tgroup_mu
+    for (size_t j = 0; j < T; ++j) {
+        double mu = 0.0;
+        for (size_t i = 0; i < C; ++i) {
+            mu += tgroup_mu(i, j);
+        }
+        experiment_tgroup_mu[j] = mu / C;
+    }
 }
 
 
@@ -674,7 +809,10 @@ void Analyze::sample()
     }
 
     compute_ts();
+    compute_ts_scaling();
     compute_xs();
+
+    // sample condition-level parameters
 
     for (size_t i = 0; i < T; ++i) {
         musigma_sampler_tick_queue.push(i);
@@ -693,42 +831,57 @@ void Analyze::sample()
                                        tgroup_alpha_beta, tgroup_beta_beta,
                                        &tgroup_sigma.at(0), T);
     assert_finite(tgroup_beta);
+
+    // sample experiment-level parameters
+
+    for (size_t i = 0; i < T; ++i) {
+        experiment_musigma_sampler_tick_queue.push(i);
+    }
+
+    for (size_t i = 0; i < T; ++i) {
+        experiment_musigma_sampler_notify_queue.pop();
+    }
+
+    experiment_tgroup_alpha =
+        alpha_sampler->sample(experiment_tgroup_alpha,
+                              experiment_tgroup_beta,
+                              tgroup_alpha_alpha, tgroup_beta_alpha,
+                              &experiment_tgroup_sigma.at(0), T);
+
+    assert_finite(experiment_tgroup_alpha);
+
+    experiment_tgroup_beta =
+        beta_sampler->sample(experiment_tgroup_beta,
+                             experiment_tgroup_alpha,
+                             tgroup_alpha_beta, tgroup_beta_beta,
+                             &experiment_tgroup_sigma.at(0), T);
+
+    assert_finite(experiment_tgroup_beta);
 }
 
 
-#if 0
-// Compute normalization constants for each sample.
-void Analyze::compute_depth()
+void Analyze::compute_ts_scaling()
 {
-    const char* task_name = "Computing sample normalization constants";
-    Logger::push_task(task_name, quantification.size() * (M/10));
-
-    std::vector<double> sortedcol(N);
-    depth.resize(K);
-
-    // This is a posterior mean upper-quartile, normalized to the first sample
-    // so depth tends to be close to 1.
-    unsigned int i = 0;
-    BOOST_FOREACH (matrix<float>& Q, quantification) {
-        for (unsigned int j = 0; j < M; ++j) {
-            matrix_column<matrix<float> > col(Q, i);
-            std::copy(col.begin(), col.end(), sortedcol.begin());
-            std::sort(sortedcol.begin(), sortedcol.end());
-            depth[i] += gsl_stats_quantile_from_sorted_data(&sortedcol.at(0), 1, N, 0.75);
-            if (j % 10 == 0) Logger::get_task(task_name).inc();
+    for (unsigned int i = 0; i < K; ++i) {
+        matrix_row<matrix<double> > row(Q, i);
+        accumulator_set<double, stats<tag::median> > acc;
+        BOOST_FOREACH (double x, row) {
+            acc(x);
         }
-        depth[i] /= M;
-        ++i;
+        scale[i] = median(acc);
     }
 
     for (unsigned int i = 1; i < K; ++i) {
-        depth[i] = depth[i] / depth[0];
+        scale[i] = scale[1] / scale[i];
     }
-    depth[0] = 1.0;
 
-    Logger::pop_task(task_name);
+    for (unsigned int i = 0; i < K; ++i) {
+        matrix_row<matrix<double> > row(Q, i);
+        BOOST_FOREACH (double& x, row) {
+            x *= scale[i];
+        }
+    }
 }
-#endif
 
 
 void Analyze::choose_initial_values()
@@ -742,8 +895,12 @@ void Analyze::choose_initial_values()
     //const double tgroup_sigma_0 =
         //(tgroup_alpha_alpha / tgroup_beta_alpha) / (tgroup_alpha_beta / tgroup_beta_beta);
     std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);
+    std::fill(experiment_tgroup_sigma.begin(), experiment_tgroup_sigma.end(), tgroup_sigma_0);
 
     tgroup_alpha = 1.0;
     tgroup_beta = 0.1;
+    experiment_tgroup_alpha = 1.0;
+    experiment_tgroup_beta = 0.1;
 }
+
 

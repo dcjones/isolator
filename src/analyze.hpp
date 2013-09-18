@@ -7,6 +7,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <cstdio>
 
 #include "fragment_model.hpp"
 #include "queue.hpp"
@@ -16,8 +17,9 @@
 
 class SamplerTickThread;
 class TgroupMuSigmaSamplerThread;
-class TgroupAlphaSampler;
-class TgroupBetaSampler;
+class ExperimentTgroupMuSigmaSamplerThread;
+class AlphaSampler;
+class BetaSampler;
 
 
 class Analyze
@@ -48,6 +50,7 @@ class Analyze
         void compute_xs();
 
         void choose_initial_values();
+        void compute_ts_scaling();
 
         // number of burnin samples
         size_t burnin;
@@ -80,19 +83,23 @@ class Analyze
         // threads used for iterating samplers
         std::vector<SamplerTickThread*> qsampler_threads;
         std::vector<TgroupMuSigmaSamplerThread*> musigma_sampler_threads;
-        TgroupAlphaSampler* alpha_sampler;
-        TgroupBetaSampler* beta_sampler;
+        std::vector<ExperimentTgroupMuSigmaSamplerThread*> experiment_musigma_sampler_threads;
+        AlphaSampler* alpha_sampler;
+        BetaSampler* beta_sampler;
 
         // queues to send work to sampler threads, and be notified on completion
         // of ticks.
         Queue<int> qsampler_tick_queue, qsampler_notify_queue,
-                   musigma_sampler_tick_queue, musigma_sampler_notify_queue;
+                   musigma_sampler_tick_queue, musigma_sampler_notify_queue,
+                   experiment_musigma_sampler_tick_queue,
+                   experiment_musigma_sampler_notify_queue;
+
 
         // matrix containing relative transcript abundance samples, indexed by:
-        //   replicate -> transcript (tid)
+        //   sample -> transcript (tid)
         boost::numeric::ublas::matrix<double> Q;
 
-        // tgroup log-abundance, indexed by replicate -> tgroup
+        // tgroup log-abundance, indexed by sample -> tgroup
         boost::numeric::ublas::matrix<double> ts;
 
         // transcript abundance relative to other transcripts within the same
@@ -107,6 +114,18 @@ class Analyze
 
         // parameters of the inverse gamma prior on tgroup_sigma
         double tgroup_alpha, tgroup_beta;
+
+        // experiment-wise tgroup position paremeter, indexed by tgroup
+        std::vector<double> experiment_tgroup_mu;
+
+        // experiment-wide tgroup scale parameter, indexed by tgroup
+        std::vector<double> experiment_tgroup_sigma;
+
+        // parameters for normal prior over experiment_tgroup_mu
+        double experiment_tgroup_mu0, experiment_tgroup_sigma0;
+
+        // experiment wide parameters for the inverse gamma prior on experiment_tgroup_mu
+        double experiment_tgroup_alpha, experiment_tgroup_beta;
 
         // Temporary space used by compute_xs
         std::vector<double> tgroup_expr;
