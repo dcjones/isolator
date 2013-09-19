@@ -351,6 +351,8 @@ class ExperimentTgroupMuSigmaSamplerThread
                 boost::random::gamma_distribution<double> dist(posterior_alpha, 1/posterior_beta);
 
                 experiment_tgroup_sigma[tgroup] = sqrt(1 / dist(rng));
+
+                notify_queue.push(1);
             }
         }
 
@@ -871,7 +873,7 @@ void Analyze::compute_ts_scaling()
         scale[i] = median(acc);
     }
 
-    for (unsigned int i = 1; i < K; ++i) {
+    for (int i = (int) K; i >= 0; --i) {
         scale[i] = scale[1] / scale[i];
     }
 
