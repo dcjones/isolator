@@ -2,10 +2,13 @@
 #include <boost/foreach.hpp>
 #include <boost/numeric/ublas/matrix_proxy.hpp>
 #include <boost/random/normal_distribution.hpp>
+#include <boost/array.hpp>
 #include <boost/thread.hpp>
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics/stats.hpp>
 #include <boost/accumulators/statistics/median.hpp>
+#include <boost/accumulators/statistics/tail_quantile.hpp>
+#include <boost/accumulators/statistics/extended_p_square.hpp>
 #include <cstdio>
 
 #include "analyze.hpp"
@@ -709,9 +712,23 @@ void Analyze::run()
         Logger::get_task(task_name).inc();
     }
 
+
+    typedef accumulator_set<double, stats<tag::median, tag::tail_quantile<left>, tag::tail_quantile<right> > > parameter_accumulator_t;
+    size_t acc_cache_size = ceil(0.05 * num_samples);
+    parameter_accumulator_t acc_proto(tag::tail<left>::cache_size = acc_cache_size,
+                                      tag::tail<right>::cache_size = acc_cache_size);
+
+    std::vector<parameter_accumulator_t> experiment_tgroup_sigma_acc(T, acc_proto);
+
+    // TODO: do the same for tgroup_mu, tgroup_sigma
+
     for (size_t i = 0; i < num_samples; ++i) {
         sample();
-        // TODO: record the sample somehow
+
+        for (size_t i = 0; i < T; ++i) {
+            experiment_tgroup_sigma_acc[i](experiment_tgroup_sigma[i]);
+        }
+
         Logger::get_task(task_name).inc();
     }
 
@@ -732,6 +749,23 @@ void Analyze::run()
         delete musigma_sampler_threads[i];
         delete experiment_musigma_sampler_threads[i];
     }
+
+
+    // extract and output results
+    FILE* out = fopen("tgroup_variance.tsv", "w"); // TODO: pass in file name
+    if (!out) {
+        Logger::abort("Could not open %s for writing.", "tgroup_variance.tsv");
+    }
+
+    fprintf(out, "tgroup_id\tq01\tmedian\tq99\n");
+    for (unsigned int i = 0; i < T; ++i) {
+        fprintf(out, "%u\t%f\t%f\t%f\n", i,
+                quantile(experiment_tgroup_sigma_acc[i], quantile_probability = 0.01),
+                median(experiment_tgroup_sigma_acc[i]),
+                quantile(experiment_tgroup_sigma_acc[i], quantile_probability = 0.99));
+    }
+
+    fclose(out);
 
     Logger::pop_task(task_name);
     cleanup();
