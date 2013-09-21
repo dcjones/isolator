@@ -3,6 +3,7 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
 #include <boost/random.hpp>
+#include <climits>
 
 #include "constants.hpp"
 #include "hat-trie/hat-trie.h"
@@ -166,7 +167,7 @@ class WeightMatrix
          *   responsible for freeing this with delete [].
          *
          * */
-        unsigned int* compact()
+        unsigned int* compact(size_t* oldncol)
         {
             /* Reallocate each row array */
             for (unsigned int i = 0; i < nrow; ++i) {
@@ -198,6 +199,7 @@ class WeightMatrix
 
             unsigned int* newidx = new unsigned int [ncol];
             memset(newidx, 0, ncol * sizeof(unsigned int));
+            *oldncol = ncol;
 
             for (unsigned int i = 0; i < nrow; ++i) {
                 for (unsigned int j = 0; j < rowlens[i]; ++j) {
@@ -1857,7 +1859,8 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     /* Free a little space. */
     fm.multireads.clear();
 
-    unsigned int* idxmap = weight_matrix->compact();
+    size_t oldncol;
+    unsigned int* idxmap = weight_matrix->compact(&oldncol);
     Logger::debug("Weight-matrix dimensions: %lu x %lu",
             (unsigned long) weight_matrix->nrow,
             (unsigned long) weight_matrix->ncol);
@@ -1865,13 +1868,13 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     /* Update frag_count indexes */
     for (TSVec<FragIdxCount>::iterator i = nz_frag_counts.begin();
             i != nz_frag_counts.end(); ++i) {
-        i->first = idxmap[i->first];
+        i->first = i->first < oldncol ? idxmap[i->first] : UINT_MAX;
     }
 
     /* Update multiread fragment indexes */
     for (TSVec<MultireadFrag>::iterator i = multiread_frags.begin();
             i != multiread_frags.end(); ++i) {
-        i->frag_idx = idxmap[i->frag_idx];
+        i->frag_idx = i->frag_idx < oldncol ? idxmap[i->frag_idx] : UINT_MAX;
     }
 
     delete [] idxmap;
@@ -1963,7 +1966,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     /* Update frag_count indexes */
     for (TSVec<FragIdxCount>::iterator i = nz_frag_counts.begin();
             i != nz_frag_counts.end(); ++i) {
-        i->first = idxmap[i->first];
+        i->first = i->first < oldncol ? idxmap[i->first] : UINT_MAX;
     }
     std::sort(nz_frag_counts.begin(), nz_frag_counts.end());
 
