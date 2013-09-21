@@ -907,7 +907,7 @@ void Analyze::compute_ts_scaling()
         scale[i] = median(acc);
     }
 
-    for (int i = (int) K; i >= 0; --i) {
+    for (int i = (int) K - 1; i >= 0; --i) {
         scale[i] = scale[1] / scale[i];
     }
 
