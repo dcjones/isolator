@@ -31,6 +31,7 @@ add_executable(isolator
 
 include_directories(${isolator_SOURCE_DIR}/src
                     ${Boost_INCLUDE_DIRS}
+                    ${HDF5_INCLUDE_DIRS}
                     ${ZLIB_INCLUDE_DIRS})
 
 target_link_libraries(isolator
@@ -47,6 +48,7 @@ target_link_libraries(isolator
                       ${Boost_SYSTEM_LIBRARY}
                       ${Boost_THREAD_LIBRARY}
                       ${Boost_TIMER_LIBRARY}
+                      ${HDF5_LIBRARIES}
                       ${ZLIB_LIBRARIES}
                       ${CMAKE_THREAD_LIBS_INIT})
 

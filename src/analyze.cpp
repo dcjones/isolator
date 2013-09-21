@@ -9,7 +9,6 @@
 #include <boost/accumulators/statistics/median.hpp>
 #include <boost/accumulators/statistics/tail_quantile.hpp>
 #include <boost/accumulators/statistics/extended_p_square.hpp>
-#include <cstdio>
 
 #include "analyze.hpp"
 #include "constants.hpp"
@@ -568,7 +567,7 @@ class SamplerTickThread
 };
 
 
-void Analyze::setup()
+void Analyze::setup_samplers()
 {
     fms.resize(K);
     qsamplers.resize(K);
@@ -589,6 +588,47 @@ void Analyze::setup()
         threads[i]->join();
         delete threads[i];
     }
+}
+
+
+void Analyze::setup_output(hid_t file_id)
+{
+    herr_t status;
+    hsize_t dims2[2] = {num_samples, 0};
+    // hsize_t dims3[3] = {num_samples, 0, 0};
+
+    if (H5Gcreate1(file_id, "/experiment", 0) < 0 ||
+        H5Gcreate1(file_id, "/condition", 0) < 0 ||
+        H5Gcreate1(file_id, "/sample", 0) < 0) {
+        Logger::abort("Unable to create an HDF5 group.");
+    }
+
+    // data set creation properties
+    const double fill_value = NAN;
+    hid_t dataset_prop = H5Pcreate(H5P_DATASET_CREATE);
+    H5Pset_layout(dataset_prop, H5D_CONTIGUOUS);
+    H5Pset_alloc_time(dataset_prop, H5D_ALLOC_TIME_EARLY);
+    H5Pset_fill_value(dataset_prop, H5T_NATIVE_DOUBLE, &fill_value);
+    H5Pset_fill_time(dataset_prop, H5D_FILL_TIME_ALLOC);
+
+    // experiment parameters
+    dims2[1] = T;
+    h5_experiment_tgroup_dataspace_id = H5Screate_simple(2, dims2, NULL);
+
+    h5_experiment_mean_id = H5Dcreate1(file_id, "/experiment/tgroup_mean",
+                                       H5T_NATIVE_DOUBLE,
+                                       h5_experiment_tgroup_dataspace_id,
+                                       dataset_prop);
+
+
+    h5_experiment_sd_id = H5Dcreate1(file_id, "/experiment/tgroup_sd",
+                                     H5T_NATIVE_DOUBLE,
+                                     h5_experiment_tgroup_dataspace_id,
+                                     dataset_prop);
+
+    // TODO: condition parameters
+
+    // TODO: sample parameters
 }
 
 
@@ -666,7 +706,15 @@ void Analyze::run()
 
     choose_initial_values();
 
-    setup();
+    setup_samplers();
+
+    const char* output_filename = "output.hdf5";
+    hid_t output_file_id = H5Fcreate(output_filename, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    if (output_file_id < 0) {
+        Logger::abort("Unable to open %s for writing.", output_filename);
+    }
+    setup_output(output_file_id);
+
     BOOST_FOREACH (Sampler* qsampler, qsamplers) {
         qsampler->start();
     }
@@ -706,29 +754,15 @@ void Analyze::run()
     const char* task_name = "Sampling";
     Logger::push_task(task_name, burnin + num_samples);
 
-
     for (size_t i = 0; i < burnin; ++i) {
         sample();
         Logger::get_task(task_name).inc();
     }
 
 
-    typedef accumulator_set<double, stats<tag::median, tag::tail_quantile<left>, tag::tail_quantile<right> > > parameter_accumulator_t;
-    size_t acc_cache_size = ceil(0.05 * num_samples);
-    parameter_accumulator_t acc_proto(tag::tail<left>::cache_size = acc_cache_size,
-                                      tag::tail<right>::cache_size = acc_cache_size);
-
-    std::vector<parameter_accumulator_t> experiment_tgroup_sigma_acc(T, acc_proto);
-
-    // TODO: do the same for tgroup_mu, tgroup_sigma
-
     for (size_t i = 0; i < num_samples; ++i) {
         sample();
-
-        for (size_t i = 0; i < T; ++i) {
-            experiment_tgroup_sigma_acc[i](experiment_tgroup_sigma[i]);
-        }
-
+        write_output(i);
         Logger::get_task(task_name).inc();
     }
 
@@ -750,22 +784,10 @@ void Analyze::run()
         delete experiment_musigma_sampler_threads[i];
     }
 
-
-    // extract and output results
-    FILE* out = fopen("tgroup_variance.tsv", "w"); // TODO: pass in file name
-    if (!out) {
-        Logger::abort("Could not open %s for writing.", "tgroup_variance.tsv");
-    }
-
-    fprintf(out, "tgroup_id\tq01\tmedian\tq99\n");
-    for (unsigned int i = 0; i < T; ++i) {
-        fprintf(out, "%u\t%f\t%f\t%f\n", i,
-                quantile(experiment_tgroup_sigma_acc[i], quantile_probability = 0.01),
-                median(experiment_tgroup_sigma_acc[i]),
-                quantile(experiment_tgroup_sigma_acc[i], quantile_probability = 0.99));
-    }
-
-    fclose(out);
+    H5Fclose(output_file_id);
+    H5Dclose(h5_experiment_mean_id);
+    H5Dclose(h5_experiment_sd_id);
+    H5Sclose(h5_experiment_tgroup_dataspace_id);
 
     Logger::pop_task(task_name);
     cleanup();
@@ -893,6 +915,36 @@ void Analyze::sample()
                              &experiment_tgroup_sigma.at(0), T);
 
     assert_finite(experiment_tgroup_beta);
+}
+
+
+void Analyze::write_output(size_t sample_num)
+{
+    hsize_t start2[2] = {sample_num, 0};
+    hsize_t count2[2] = {1, T};
+    herr_t status;
+
+    status = H5Sselect_hyperslab(h5_experiment_tgroup_dataspace_id, H5S_SELECT_SET,
+                                start2, NULL, count2, NULL);
+    if (status < 0) {
+        Logger::abort("HD5 dataspace selection failed.");
+    }
+
+    status = H5Dwrite(h5_experiment_mean_id, H5T_NATIVE_DOUBLE,
+             H5S_ALL, h5_experiment_tgroup_dataspace_id,
+             H5P_DEFAULT, &experiment_tgroup_mu.at(0));
+
+    if (status < 0) {
+        Logger::abort("HD5 write operation failed.");
+    }
+
+    H5Dwrite(h5_experiment_sd_id, H5T_NATIVE_DOUBLE,
+             H5S_ALL, h5_experiment_tgroup_dataspace_id,
+             H5P_DEFAULT, &experiment_tgroup_sigma.at(0));
+
+    if (status < 0) {
+        Logger::abort("HD5 write operation failed.");
+    }
 }
 
 

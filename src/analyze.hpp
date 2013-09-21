@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 #include <cstdio>
+#include <hdf5.h>
+#include <hdf5_hl.h>
 
 #include "fragment_model.hpp"
 #include "queue.hpp"
@@ -39,10 +41,12 @@ class Analyze
         void run();
 
     private:
-        void setup();
+        void setup_samplers();
+        void setup_output(hid_t output_file_id);
         void cleanup();
         void warmup();
         void sample();
+        void write_output(size_t sample_num);
 
         void qsampler_update_hyperparameters();
 
@@ -93,7 +97,6 @@ class Analyze
                    musigma_sampler_tick_queue, musigma_sampler_notify_queue,
                    experiment_musigma_sampler_tick_queue,
                    experiment_musigma_sampler_notify_queue;
-
 
         // matrix containing relative transcript abundance samples, indexed by:
         //   sample -> transcript (tid)
@@ -155,6 +158,11 @@ class Analyze
         double tgroup_nu;
         double tgroup_alpha_alpha, tgroup_beta_alpha;
         double tgroup_alpha_beta, tgroup_beta_beta;
+
+        // HDF5 dataspace ids, for output purposes
+        hid_t h5_experiment_tgroup_dataspace_id;
+        hid_t h5_experiment_mean_id;
+        hid_t h5_experiment_sd_id;
 };
 
 
