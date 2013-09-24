@@ -130,7 +130,7 @@ class Analyze
         // experiment wide parameters for the inverse gamma prior on experiment_tgroup_mu
         double experiment_tgroup_alpha, experiment_tgroup_beta;
 
-        // Temporary space used by compute_xs
+        // temporary space used by compute_xs
         std::vector<double> tgroup_expr;
 
         // Condition index corresponding to the given name
@@ -141,6 +141,9 @@ class Analyze
 
         // normalization constant for each sample
         std::vector<double> scale;
+
+        // temporary space used for computing scale
+        std::vector<double> scale_work;
 
         // number of sequenced samples
         unsigned int K;
@@ -163,6 +166,8 @@ class Analyze
         hid_t h5_experiment_tgroup_dataspace_id;
         hid_t h5_experiment_mean_id;
         hid_t h5_experiment_sd_id;
+
+        hid_t h5_tgroup_row_mem_dataspace_id;
 };
 
 

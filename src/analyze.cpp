@@ -416,6 +416,7 @@ Analyze::Analyze(size_t burnin,
     experiment_tgroup_sigma0 = 5.0;
 
     tgroup_expr.resize(T);
+    scale_work.resize(N);
 
     alpha_sampler = new AlphaSampler();
     beta_sampler = new BetaSampler();
@@ -626,6 +627,14 @@ void Analyze::setup_output(hid_t file_id)
                                      h5_experiment_tgroup_dataspace_id,
                                      dataset_prop);
 
+    hsize_t tgroup_row_dims = T;
+    h5_tgroup_row_mem_dataspace_id = H5Screate_simple(1, &tgroup_row_dims, NULL);
+
+    hsize_t tgroup_row_start = 0;
+    status = H5Sselect_hyperslab(h5_tgroup_row_mem_dataspace_id, H5S_SELECT_SET,
+                                 &tgroup_row_start, NULL, &tgroup_row_dims, NULL);
+
+
     // TODO: condition parameters
 
     // TODO: sample parameters
@@ -788,6 +797,7 @@ void Analyze::run()
     H5Dclose(h5_experiment_mean_id);
     H5Dclose(h5_experiment_sd_id);
     H5Sclose(h5_experiment_tgroup_dataspace_id);
+    H5Sclose(h5_tgroup_row_mem_dataspace_id);
 
     Logger::pop_task(task_name);
     cleanup();
@@ -866,8 +876,8 @@ void Analyze::sample()
         qsampler_notify_queue.pop();
     }
 
-    compute_ts();
     compute_ts_scaling();
+    compute_ts();
     compute_xs();
 
     // sample condition-level parameters
@@ -920,18 +930,19 @@ void Analyze::sample()
 
 void Analyze::write_output(size_t sample_num)
 {
-    hsize_t start2[2] = {sample_num, 0};
-    hsize_t count2[2] = {1, T};
+    hsize_t file_start2[2] = {sample_num, 0};
+    hsize_t file_count2[2] = {1, T};
     herr_t status;
 
     status = H5Sselect_hyperslab(h5_experiment_tgroup_dataspace_id, H5S_SELECT_SET,
-                                start2, NULL, count2, NULL);
+                                 file_start2, NULL, file_count2, NULL);
+
     if (status < 0) {
         Logger::abort("HD5 dataspace selection failed.");
     }
 
     status = H5Dwrite(h5_experiment_mean_id, H5T_NATIVE_DOUBLE,
-             H5S_ALL, h5_experiment_tgroup_dataspace_id,
+             h5_tgroup_row_mem_dataspace_id, h5_experiment_tgroup_dataspace_id,
              H5P_DEFAULT, &experiment_tgroup_mu.at(0));
 
     if (status < 0) {
@@ -939,7 +950,7 @@ void Analyze::write_output(size_t sample_num)
     }
 
     H5Dwrite(h5_experiment_sd_id, H5T_NATIVE_DOUBLE,
-             H5S_ALL, h5_experiment_tgroup_dataspace_id,
+             h5_tgroup_row_mem_dataspace_id, h5_experiment_tgroup_dataspace_id,
              H5P_DEFAULT, &experiment_tgroup_sigma.at(0));
 
     if (status < 0) {
@@ -952,15 +963,19 @@ void Analyze::compute_ts_scaling()
 {
     for (unsigned int i = 0; i < K; ++i) {
         matrix_row<matrix<double> > row(Q, i);
-        accumulator_set<double, stats<tag::median> > acc;
-        BOOST_FOREACH (double x, row) {
-            acc(x);
-        }
-        scale[i] = median(acc);
+
+        // unscale abundance estimates so we can compute a new scale
+        // and renormalize. I know this must seem weird.
+        BOOST_FOREACH (double& x, row) x /= scale[i];
+
+        // normalize according to an upper quantile
+        std::copy(row.begin(), row.end(), scale_work.begin());
+        std::sort(scale_work.begin(), scale_work.end());
+        scale[i] = scale_work[scale_work.size() * 0.85];
     }
 
     for (int i = (int) K - 1; i >= 0; --i) {
-        scale[i] = scale[1] / scale[i];
+        scale[i] = scale[0] / scale[i];
     }
 
     for (unsigned int i = 0; i < K; ++i) {

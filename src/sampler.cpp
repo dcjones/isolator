@@ -1576,6 +1576,9 @@ void AbundanceSamplerThread::run_intra_component(unsigned int c)
         BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
             S.tgroupmix[tgroup] += S.tmix[tid];
         }
+        if (S.tgroupmix[tgroup] <= 0.0) {
+            Logger::abort("A non-positive tgroup mixture occurred.");
+        }
     }
 
     acopy(S.frag_probs_prop[c], S.frag_probs[c],
@@ -1643,7 +1646,13 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
 
     /* proposed tmix[u], tmix[v] values */
     float tmixu = z * (S.tmix[u] + S.tmix[v]);
+    tmixu = std::max<double>(tmixu, constants::zero_eps);
+    tmixu = std::min<double>(tmixu, 1.0 - constants::zero_eps);
+
     float tmixv = (1.0 - z) * (S.tmix[u] + S.tmix[v]);
+    tmixv = std::max<double>(tmixv, constants::zero_eps);
+    tmixv = std::min<double>(tmixv, 1.0 - constants::zero_eps);
+
     float tmix_delta_u = tmixu - S.tmix[u];
     float tmix_delta_v = tmixv - S.tmix[v];
 
@@ -1668,6 +1677,10 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
 
     S.tmix[u] = tmixu;
     S.tmix[v] = tmixv;
+
+    if (S.tmix[u] <= 0.0 || S.tmix[v] <= 0.0) {
+        Logger::abort("A non-positive tmix was encountered.");
+    }
 }
 
 
@@ -2300,8 +2313,14 @@ void Sampler::sample()
     sample_abundance();
 
     // adjust for transcript weight
+    double expr_total = 0.0;
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         expr[i] = cmix[transcript_component[i]] * (tmix[i] / transcript_weights[i]);
+        expr_total += expr[i];
+    }
+
+    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+        expr[i] /= expr_total;
     }
 
     // adjust for gc content
