@@ -163,11 +163,15 @@ class Analyze
         double tgroup_alpha_beta, tgroup_beta_beta;
 
         // HDF5 dataspace ids, for output purposes
-        hid_t h5_experiment_tgroup_dataspace_id;
-        hid_t h5_experiment_mean_id;
-        hid_t h5_experiment_sd_id;
 
-        hid_t h5_tgroup_row_mem_dataspace_id;
+        // dataspaces
+        hid_t h5_experiment_tgroup_dataspace;
+        hid_t h5_transcript_dataspace;
+        hid_t h5_tgroup_row_mem_dataspace;
+
+        // datasets
+        hid_t h5_experiment_mean_dataset;
+        hid_t h5_experiment_sd_dataset;
 };
 
 

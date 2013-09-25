@@ -608,28 +608,99 @@ void Analyze::setup_output(hid_t file_id)
     H5Pset_fill_value(dataset_prop, H5T_NATIVE_DOUBLE, &fill_value);
     H5Pset_fill_time(dataset_prop, H5D_FILL_TIME_ALLOC);
 
+    // transcript data
+    hsize_t transcript_dims = N;
+    h5_transcript_dataspace = H5Screate_simple(1, &transcript_dims, NULL);
+
+    hid_t h5_varstring_type = H5Tcopy(H5T_C_S1);
+    if (h5_varstring_type < 0 || H5Tset_size(h5_varstring_type, H5T_VARIABLE) < 0) {
+        Logger::abort("Failed to cerate HDF5 type.");
+    }
+
+    hid_t h5_transcript_id = H5Dcreate2(file_id, "/transcript_id", h5_varstring_type,
+                                        h5_transcript_dataspace,
+                                        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+    hid_t h5_gene_id = H5Dcreate2(file_id, "/gene_id", h5_varstring_type,
+                                  h5_transcript_dataspace,
+                                  H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+    hid_t h5_tgroup_id = H5Dcreate2(file_id, "/tgroup", H5T_NATIVE_UINT,
+                                    h5_transcript_dataspace, H5P_DEFAULT,
+                                    H5P_DEFAULT, H5P_DEFAULT);
+
+    if (h5_transcript_id < 0 || h5_gene_id < 0 || h5_tgroup_id < 0) {
+        Logger::abort("HDF5 dataset creation failed.");
+    }
+
+    // write transcript ids, gene ids
+    {
+        const char** transcript_string_data = new const char* [N];
+        for (TranscriptSet::iterator t = transcripts.begin();
+                t != transcripts.end(); ++t) {
+            transcript_string_data[t->id] = t->transcript_id.get().c_str();
+        }
+
+        status = H5Dwrite(h5_transcript_id, h5_varstring_type,
+                          H5S_ALL, H5S_ALL, H5P_DEFAULT, transcript_string_data);
+        if (status < 0) Logger::abort("HDF5 write failed.");
+
+        for (TranscriptSet::iterator t = transcripts.begin();
+                t != transcripts.end(); ++t) {
+            transcript_string_data[t->id] = t->gene_id.get().c_str();
+        }
+
+        status = H5Dwrite(h5_gene_id, h5_varstring_type,
+                          H5S_ALL, H5S_ALL, H5P_DEFAULT, transcript_string_data);
+        if (status < 0) Logger::abort("HDF5 write failed.");
+
+        delete [] transcript_string_data;
+
+        unsigned int* tgroup_data = new unsigned int[N];
+        for (TranscriptSet::iterator t = transcripts.begin();
+                t != transcripts.end(); ++t) {
+            tgroup_data[t->id] = t->tgroup;
+        }
+
+        status = H5Dwrite(h5_tgroup_id, H5T_NATIVE_UINT,
+                          H5S_ALL, H5S_ALL, H5P_DEFAULT, tgroup_data);
+        if (status < 0) Logger::abort("HDF5 write failed.");
+
+        delete[] tgroup_data;
+    }
+
+    H5Dclose(h5_transcript_id);
+    H5Dclose(h5_gene_id);
+    H5Dclose(h5_tgroup_id);
+    H5Tclose(h5_varstring_type);
+
+    // write tgroup ids
+
+
     // experiment parameters
     dims2[1] = T;
-    h5_experiment_tgroup_dataspace_id = H5Screate_simple(2, dims2, NULL);
+    h5_experiment_tgroup_dataspace = H5Screate_simple(2, dims2, NULL);
 
-    h5_experiment_mean_id = H5Dcreate1(file_id, "/experiment/tgroup_mean",
-                                       H5T_NATIVE_DOUBLE,
-                                       h5_experiment_tgroup_dataspace_id,
-                                       dataset_prop);
+    h5_experiment_mean_dataset = H5Dcreate2(file_id, "/experiment/tgroup_mean",
+                                            H5T_NATIVE_DOUBLE,
+                                            h5_experiment_tgroup_dataspace,
+                                            H5P_DEFAULT, dataset_prop, H5P_DEFAULT);
 
+    h5_experiment_sd_dataset = H5Dcreate2(file_id, "/experiment/tgroup_sd",
+                                          H5T_NATIVE_DOUBLE,
+                                          h5_experiment_tgroup_dataspace,
+                                          H5P_DEFAULT, dataset_prop, H5P_DEFAULT);
 
-    h5_experiment_sd_id = H5Dcreate1(file_id, "/experiment/tgroup_sd",
-                                     H5T_NATIVE_DOUBLE,
-                                     h5_experiment_tgroup_dataspace_id,
-                                     dataset_prop);
+    if (h5_experiment_mean_dataset < 0 || h5_experiment_sd_dataset < 0) {
+        Logger::abort("HDF5 dataset creation failed.");
+    }
 
     hsize_t tgroup_row_dims = T;
-    h5_tgroup_row_mem_dataspace_id = H5Screate_simple(1, &tgroup_row_dims, NULL);
+    h5_tgroup_row_mem_dataspace = H5Screate_simple(1, &tgroup_row_dims, NULL);
 
     hsize_t tgroup_row_start = 0;
-    status = H5Sselect_hyperslab(h5_tgroup_row_mem_dataspace_id, H5S_SELECT_SET,
+    status = H5Sselect_hyperslab(h5_tgroup_row_mem_dataspace, H5S_SELECT_SET,
                                  &tgroup_row_start, NULL, &tgroup_row_dims, NULL);
-
 
     // TODO: condition parameters
 
@@ -789,11 +860,11 @@ void Analyze::run()
         delete experiment_musigma_sampler_threads[i];
     }
 
+    H5Dclose(h5_experiment_mean_dataset);
+    H5Dclose(h5_experiment_sd_dataset);
+    H5Sclose(h5_experiment_tgroup_dataspace);
+    H5Sclose(h5_tgroup_row_mem_dataspace);
     H5Fclose(output_file_id);
-    H5Dclose(h5_experiment_mean_id);
-    H5Dclose(h5_experiment_sd_id);
-    H5Sclose(h5_experiment_tgroup_dataspace_id);
-    H5Sclose(h5_tgroup_row_mem_dataspace_id);
 
     Logger::pop_task(task_name);
     cleanup();
@@ -918,23 +989,23 @@ void Analyze::write_output(size_t sample_num)
     hsize_t file_count2[2] = {1, T};
     herr_t status;
 
-    status = H5Sselect_hyperslab(h5_experiment_tgroup_dataspace_id, H5S_SELECT_SET,
+    status = H5Sselect_hyperslab(h5_experiment_tgroup_dataspace, H5S_SELECT_SET,
                                  file_start2, NULL, file_count2, NULL);
 
     if (status < 0) {
         Logger::abort("HD5 dataspace selection failed.");
     }
 
-    status = H5Dwrite(h5_experiment_mean_id, H5T_NATIVE_DOUBLE,
-             h5_tgroup_row_mem_dataspace_id, h5_experiment_tgroup_dataspace_id,
+    status = H5Dwrite(h5_experiment_mean_dataset, H5T_NATIVE_DOUBLE,
+             h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
              H5P_DEFAULT, &experiment_tgroup_mu.at(0));
 
     if (status < 0) {
         Logger::abort("HD5 write operation failed.");
     }
 
-    H5Dwrite(h5_experiment_sd_id, H5T_NATIVE_DOUBLE,
-             h5_tgroup_row_mem_dataspace_id, h5_experiment_tgroup_dataspace_id,
+    H5Dwrite(h5_experiment_sd_dataset, H5T_NATIVE_DOUBLE,
+             h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
              H5P_DEFAULT, &experiment_tgroup_sigma.at(0));
 
     if (status < 0) {
