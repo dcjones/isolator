@@ -129,8 +129,6 @@ class TgroupMuSigmaSamplerThread
                         xs[l++] = ts(j, tgroup);
                     }
 
-                    double mu_i_tgroup = mu(i, tgroup); // XXX: for debugging
-                    // TODO: actual priors
                     mu(i, tgroup) = mu_sampler.sample(sigma[tgroup], &xs.at(0), l,
                                                       experiment_tgroup_mu[tgroup],
                                                       experiment_tgroup_sigma[tgroup]);
@@ -142,9 +140,7 @@ class TgroupMuSigmaSamplerThread
                     xs[i] = ts(i, tgroup) - mu(condition[i], tgroup);
                 }
 
-                double sigma0 = sigma[tgroup]; // XXX: for debugging
                 sigma[tgroup] = sigma_sampler.sample(&xs.at(0), K, alpha, beta);
-                double sigma1 = sigma[tgroup]; // XXX: for debugging
                 assert_finite(sigma[tgroup]);
 
                 notify_queue.push(1);
@@ -223,7 +219,7 @@ class AlphaSampler : public Shredder
         size_t n;
 
         InvGammaLogPdf prior_logpdf;
-        InvGammaLogPdf likelihood_logpdf;
+        SqInvGammaLogPdf likelihood_logpdf;
 
     protected:
         double f(double alpha, double &d)
@@ -235,7 +231,7 @@ class AlphaSampler : public Shredder
             fx += prior_logpdf.f(alpha_alpha, beta_alpha, &alpha, 1);
 
             d += likelihood_logpdf.df_dalpha(alpha, beta, sigmas, n);
-            fx += prior_logpdf.f(alpha, beta, sigmas, n);
+            fx += likelihood_logpdf.f(alpha, beta, sigmas, n);
 
             return fx;
         }
@@ -269,7 +265,7 @@ class BetaSampler : public Shredder
         size_t n;
 
         InvGammaLogPdf prior_logpdf;
-        InvGammaLogPdf likelihood_logpdf;
+        SqInvGammaLogPdf likelihood_logpdf;
 
     protected:
         double f(double beta, double &d)
@@ -281,7 +277,7 @@ class BetaSampler : public Shredder
             fx += prior_logpdf.f(alpha_beta, beta_beta, &beta, 1);
 
             d += likelihood_logpdf.df_dbeta(alpha, beta, sigmas, n);
-            fx += prior_logpdf.f(alpha, beta, sigmas, n);
+            fx += likelihood_logpdf.f(alpha, beta, sigmas, n);
 
             return fx;
         }
@@ -407,10 +403,10 @@ Analyze::Analyze(size_t burnin,
 
     // TODO: constants (also maybe command line options eventually)
     tgroup_nu = 100.0;
-    tgroup_alpha_alpha = 500.0;
-    tgroup_beta_alpha  = 500.0;
-    tgroup_alpha_beta  = 500.0;
-    tgroup_beta_beta   = 500.0;
+    tgroup_alpha_alpha = 1.5;
+    tgroup_beta_alpha  = 1.0;
+    tgroup_alpha_beta  = 1.5;
+    tgroup_beta_beta   = 1.0;
 
     experiment_tgroup_mu0 = -10;
     experiment_tgroup_sigma0 = 5.0;
@@ -854,18 +850,6 @@ void Analyze::warmup()
 
 void Analyze::sample()
 {
-    // XXX: debug output
-#if 0
-    {
-        FILE* out = fopen("analyze_state.tsv", "w");
-        fprintf(out, "ts\tmu\tsigma\n");
-        for (size_t i = 0; i < T; ++i) {
-            fprintf(out, "%f\t%f\t%f\n", ts(0, i), tgroup_mu(0, i), tgroup_sigma[i]);
-        }
-        fclose(out);
-    }
-#endif
-
     qsampler_update_hyperparameters();
 
     for (size_t i = 0; i < K; ++i) {
@@ -1000,10 +984,10 @@ void Analyze::choose_initial_values()
     std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);
     std::fill(experiment_tgroup_sigma.begin(), experiment_tgroup_sigma.end(), tgroup_sigma_0);
 
-    tgroup_alpha = 1.0;
-    tgroup_beta = 0.1;
-    experiment_tgroup_alpha = 1.0;
-    experiment_tgroup_beta = 0.1;
+    tgroup_alpha = 0.1;
+    tgroup_beta = 1.0;
+    experiment_tgroup_alpha = 0.1;
+    experiment_tgroup_beta = 1.0;
 }
 
 

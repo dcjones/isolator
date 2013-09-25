@@ -212,4 +212,49 @@ double InvGammaLogPdf::df_dbeta(double alpha, double beta, const double* xs, siz
 }
 
 
+double SqInvGammaLogPdf::f(double alpha, double beta, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        double x = xs[i] * xs[i];
+        part += (alpha + 1) * log(x) + beta / x;
+    }
 
+    return n * (alpha * log(beta) - lgamma(alpha)) - part;
+}
+
+
+double SqInvGammaLogPdf::df_dx(double alpha, double beta, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        double x = xs[i] * xs[i];
+        part += beta / sq(x) - (alpha + 1) / x;
+    }
+
+    return part;
+}
+
+
+double SqInvGammaLogPdf::df_dalpha(double alpha, double beta, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        double x = xs[i] * xs[i];
+        part += log(x);
+    }
+
+    return n * (log(beta) - boost::math::digamma(alpha)) - part;
+}
+
+
+double SqInvGammaLogPdf::df_dbeta(double alpha, double beta, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        double x = xs[i] * xs[i];
+        part += 1 / x;
+    }
+
+    return n * (alpha / beta) - part;
+}
