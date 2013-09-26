@@ -166,12 +166,17 @@ class Analyze
 
         // dataspaces
         hid_t h5_experiment_tgroup_dataspace;
+        hid_t h5_condition_tgroup_dataspace;
         hid_t h5_transcript_dataspace;
         hid_t h5_tgroup_row_mem_dataspace;
 
         // datasets
         hid_t h5_experiment_mean_dataset;
         hid_t h5_experiment_sd_dataset;
+        hid_t h5_condition_mean_dataset;
+
+        // a write buffer for converting doubles to floats before hdf5 output
+        std::vector<float> tgroup_row_data;
 };
 
 

@@ -412,6 +412,7 @@ Analyze::Analyze(size_t burnin,
     experiment_tgroup_sigma0 = 5.0;
 
     tgroup_expr.resize(T);
+    tgroup_row_data.resize(T);
     scale_work.resize(N);
 
     alpha_sampler = new AlphaSampler();
@@ -685,13 +686,14 @@ void Analyze::setup_output(hid_t file_id)
             Logger::abort("HDF5 group creation failed.");
         }
 
+        hsize_t dims[2] = {num_samples, T};
         hsize_t chunk_dims[2] = {1, T};
+
         hid_t dataset_create_property = H5Pcreate(H5P_DATASET_CREATE);
         H5Pset_layout(dataset_create_property, H5D_CHUNKED);
         H5Pset_chunk(dataset_create_property, 2, chunk_dims);
         H5Pset_deflate(dataset_create_property, 7);
 
-        hsize_t dims[2] = {num_samples, T};
         h5_experiment_tgroup_dataspace = H5Screate_simple(2, dims, NULL);
 
         h5_experiment_mean_dataset =
@@ -708,12 +710,44 @@ void Analyze::setup_output(hid_t file_id)
             Logger::abort("HDF5 dataset creation failed.");
         }
 
+        H5Pclose(dataset_create_property);
+
         hsize_t tgroup_row_dims = T;
         h5_tgroup_row_mem_dataspace = H5Screate_simple(1, &tgroup_row_dims, NULL);
 
         hsize_t tgroup_row_start = 0;
         status = H5Sselect_hyperslab(h5_tgroup_row_mem_dataspace, H5S_SELECT_SET,
                                      &tgroup_row_start, NULL, &tgroup_row_dims, NULL);
+    }
+
+
+    // condition parameters
+    // --------------------
+    {
+        if (H5Gcreate1(file_id, "/condition", 0) < 0) {
+            Logger::abort("HDF5 group creation failed.");
+        }
+
+        hsize_t dims[3] = {num_samples, C, T};
+        hsize_t chunk_dims[3] = {1, 1, T};
+
+        hid_t dataset_create_property = H5Pcreate(H5P_DATASET_CREATE);
+        H5Pset_layout(dataset_create_property, H5D_CHUNKED);
+        H5Pset_chunk(dataset_create_property, 3, chunk_dims);
+        H5Pset_deflate(dataset_create_property, 7);
+
+        h5_condition_tgroup_dataspace = H5Screate_simple(3, dims, NULL);
+
+        h5_condition_mean_dataset =
+            H5Dcreate2(file_id, "/condition/tgroup_mean", H5T_NATIVE_FLOAT,
+                       h5_condition_tgroup_dataspace, H5P_DEFAULT,
+                       dataset_create_property, H5P_DEFAULT);
+
+        if (h5_condition_mean_dataset < 0) {
+            Logger::abort("HDF5 dataset creation failed.");
+        }
+
+        H5Pclose(dataset_create_property);
     }
 }
 
@@ -873,6 +907,8 @@ void Analyze::run()
     H5Dclose(h5_experiment_mean_dataset);
     H5Dclose(h5_experiment_sd_dataset);
     H5Sclose(h5_experiment_tgroup_dataspace);
+    H5Dclose(h5_condition_mean_dataset);
+    H5Sclose(h5_condition_tgroup_dataspace);
     H5Sclose(h5_tgroup_row_mem_dataspace);
     H5Fclose(output_file_id);
 
@@ -1006,20 +1042,48 @@ void Analyze::write_output(size_t sample_num)
         Logger::abort("HD5 dataspace selection failed.");
     }
 
-    status = H5Dwrite(h5_experiment_mean_dataset, H5T_NATIVE_DOUBLE,
+    std::copy(experiment_tgroup_mu.begin(), experiment_tgroup_mu.end(),
+              tgroup_row_data.begin());
+    status = H5Dwrite(h5_experiment_mean_dataset, H5T_NATIVE_FLOAT,
              h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
-             H5P_DEFAULT, &experiment_tgroup_mu.at(0));
+             H5P_DEFAULT, &tgroup_row_data.at(0));
 
     if (status < 0) {
         Logger::abort("HD5 write operation failed.");
     }
 
-    H5Dwrite(h5_experiment_sd_dataset, H5T_NATIVE_DOUBLE,
-             h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
-             H5P_DEFAULT, &experiment_tgroup_sigma.at(0));
+    std::copy(experiment_tgroup_sigma.begin(), experiment_tgroup_sigma.end(),
+              tgroup_row_data.begin());
+    status = H5Dwrite(h5_experiment_sd_dataset, H5T_NATIVE_FLOAT,
+                      h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
+                      H5P_DEFAULT, &tgroup_row_data.at(0));
 
     if (status < 0) {
         Logger::abort("HD5 write operation failed.");
+    }
+
+
+    hsize_t file_start3[3] = {sample_num, 0, 0};
+    hsize_t file_count3[3] = {1, 1, T};
+    status = H5Sselect_hyperslab(h5_condition_tgroup_dataspace, H5S_SELECT_SET,
+                                 file_start2, NULL, file_count2, NULL);
+
+    for (size_t i = 0; i < C; ++i) {
+        file_start3[1] = i;
+        status = H5Sselect_hyperslab(h5_condition_tgroup_dataspace, H5S_SELECT_SET,
+                                     file_start3, NULL, file_count3, NULL);
+        if (status < 0) {
+            Logger::abort("HDF5 hyperslab selection failed.");
+        }
+
+        matrix_row<matrix<double > > mu_row(tgroup_mu, i);
+        std::copy(mu_row.begin(), mu_row.end(), tgroup_row_data.begin());
+        status = H5Dwrite(h5_condition_mean_dataset, H5T_NATIVE_FLOAT,
+                          h5_tgroup_row_mem_dataspace, h5_condition_tgroup_dataspace,
+                          H5P_DEFAULT, &tgroup_row_data.at(0));
+        if (status < 0) {
+            Logger::abort("HDF5 write operation failed.");
+        }
     }
 }
 
