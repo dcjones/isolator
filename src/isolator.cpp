@@ -244,11 +244,15 @@ void print_summarize_help(FILE* fout)
 
 int isolator_summarize(int argc, char* argv[])
 {
+    Logger::start();
+
     static struct option long_options[] =
     {
         {"help",        no_argument,       NULL, 'h'},
         {"verbose",     no_argument,       NULL, 'v'},
         {"out",         required_argument, NULL, 'o'},
+        {"list",        no_argument,       NULL, 'l'},
+        {"strategy",    required_argument, NULL, 's'},
         {0, 0, 0, 0}
     };
 
@@ -258,8 +262,17 @@ int isolator_summarize(int argc, char* argv[])
     int opt;
     int opt_idx;
 
+    const char* strategy_names[] = {
+        "condition_tgroup_mean",
+        "experiment_tgroup_sd",
+        NULL
+    };
+    const char** s; // used in a couple places below
+
+    size_t strategy = 0;
+
     while (true) {
-        opt = getopt_long(argc, argv, "hvo:", long_options, &opt_idx);
+        opt = getopt_long(argc, argv, "hvo:s:l", long_options, &opt_idx);
 
         if (opt == -1) break;
 
@@ -276,6 +289,32 @@ int isolator_summarize(int argc, char* argv[])
                 out_fn = optarg;
                 break;
 
+            case 'l':
+                s = strategy_names;
+                printf("Available strategies:\n");
+                while (*s) {
+                    printf("  %s\n", *s);
+                    ++s;
+                }
+                return 0;
+
+            case 's':
+                s = strategy_names;
+                strategy = 0;
+                while (*s) {
+                    if (strcmp(*s, optarg) == 0) {
+                        break;
+                    }
+                    ++strategy;
+                    ++s;
+                }
+
+                if (!*s) {
+                    Logger::abort("No such strategy: %s", optarg);
+                    return 1;
+                }
+                break;
+
             case '?':
                 fprintf(stderr, "\n");
                 print_summarize_help(stderr);
@@ -285,6 +324,8 @@ int isolator_summarize(int argc, char* argv[])
                 abort();
         }
     }
+
+    Logger::info("Outputing %s", strategy_names[strategy]);
 
     /* no positional argumens */
     if (optind == argc) {
@@ -309,13 +350,17 @@ int isolator_summarize(int argc, char* argv[])
 
     const char* in_fn = argv[optind];
 
-    Logger::start();
     Summarize summarize(in_fn);
-    summarize.median_condition_tgroup_expression(out_f);
-    Logger::end();
+    if (strategy == 0) {
+        summarize.median_condition_tgroup_expression(out_f);
+    }
+    else if (strategy == 1) {
+        summarize.median_experiment_tgroup_sd(out_f);
+    }
 
     fclose(out_f);
 
+    Logger::end();
     return EXIT_SUCCESS;
 }
 

@@ -166,6 +166,10 @@ void Summarize::median_condition_tgroup_expression(FILE* output)
 		}
 	}
 
+	H5Sclose(mem_dataspace);
+	H5Sclose(dataspace);
+	H5Dclose(dataset);
+
 	fprintf(output, "transcript_ids\tgene_ids");
 	for (unsigned int i = 0; i < C; ++i) {
 		fprintf(output, "\tcondition%u_mean_expr", i + 1);
@@ -191,10 +195,88 @@ void Summarize::median_condition_tgroup_expression(FILE* output)
 		}
 		fputc('\n', output);
 	}
+}
+
+
+void Summarize::median_experiment_tgroup_sd(FILE* output)
+{
+	typedef std::vector<std::set<std::string> > string_set_vector;
+
+	string_set_vector tgroup_gene_ids(T);
+	string_set_vector tgroup_transcript_ids(T);
+
+	for (size_t i = 0; i < N; ++i) {
+		tgroup_gene_ids[tgroup[i]].insert(gene_ids[i]);
+		tgroup_transcript_ids[tgroup[i]].insert(transcript_ids[i]);
+	}
+
+	hid_t dataset = H5Dopen2(h5_file, "/experiment/tgroup_sd", H5P_DEFAULT);
+	if (dataset < 0) {
+		Logger::abort("Failed to open the /experiment/tgroup_sd dataset");
+	}
+
+	hid_t dataspace = H5Dget_space(dataset);
+	hsize_t dims[2]; // dims are: num_samples, T
+	H5Sget_simple_extent_dims(dataspace, dims, NULL);
+	size_t num_samples = dims[0];
+	T = dims[1];
+
+	hsize_t mem_dataspace_dims[1] = {T};
+	hsize_t mem_dataspace_start[1] = {0};
+	hid_t mem_dataspace = H5Screate_simple(1, mem_dataspace_dims, NULL);
+	H5Sselect_hyperslab(mem_dataspace, H5S_SELECT_SET, mem_dataspace_start,
+		                NULL, mem_dataspace_dims, NULL);
+
+	std::vector<std::vector<float> > data(num_samples);
+	for (size_t i = 0; i < num_samples; ++i) {
+		data[i].resize(T);
+	}
+
+	hsize_t file_dataspace_start[2] = {0, 0};
+	hsize_t file_dataspace_dims[2] = {1, T};
+
+	for (size_t i = 0; i < num_samples; ++i) {
+		file_dataspace_start[0] = i;
+		H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
+			                file_dataspace_start, NULL,
+			                file_dataspace_dims, NULL);
+
+		herr_t status = H5Dread(dataset, H5T_NATIVE_FLOAT, mem_dataspace,
+			                    dataspace, H5P_DEFAULT, &data[i].at(0));
+
+		if (status < 0) {
+			Logger::abort("Reading the /experiment/tgroup_sd dataset failed.");
+		}
+	}
 
 	H5Sclose(mem_dataspace);
 	H5Sclose(dataspace);
 	H5Dclose(dataset);
+
+	// temporary vector for computing medians
+	std::vector<float> median_work(num_samples);
+
+	fprintf(output, "transcript_ids\tgene_ids\tsd\n");
+	for (size_t i = 0; i < T; ++i) {
+		bool firstid = true;
+		BOOST_FOREACH (const std::string& transcript_id, tgroup_transcript_ids[i]) {
+			fprintf(output, firstid ? "%s" : ",%s", transcript_id.c_str());
+			firstid = false;
+		}
+		fputc('\t', output);
+
+		firstid = true;
+		BOOST_FOREACH (const std::string& gene_id, tgroup_gene_ids[i]) {
+			fprintf(output, firstid ? "%s" : ",%s", gene_id.c_str());
+			firstid = false;
+		}
+
+		for (size_t j = 0; j < num_samples; ++j) {
+			median_work[j] = data[j][i];
+		}
+		std::sort(median_work.begin(), median_work.end());
+		fprintf(output, "\t%f\n", median_work[median_work.size() / 2]);
+	}
 }
 
 

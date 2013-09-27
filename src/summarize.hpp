@@ -22,6 +22,7 @@ class Summarize
 
 		// pre-baked summarizations
 		void median_condition_tgroup_expression(FILE* output);
+		void median_experiment_tgroup_sd(FILE* output);
 
 
 	private:
