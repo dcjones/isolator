@@ -26,6 +26,7 @@ add_executable(isolator
                sample_db.cpp
                sampler.cpp
                shredder.cpp
+               summarize.cpp
                sparse_mat.cpp
                transcripts.cpp)
 

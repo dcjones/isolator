@@ -23,6 +23,7 @@
 #include "logger.hpp"
 #include "sample_db.hpp"
 #include "sampler.hpp"
+#include "summarize.hpp"
 #include "transcripts.hpp"
 
 using namespace boost::accumulators;
@@ -224,7 +225,7 @@ int isolator_quantify(int argc, char* argv[])
 
 void print_summarize_usage(FILE* fout)
 {
-    fprintf(fout, "Usage: isolator summarize [options] quantify_output.db\n");
+    fprintf(fout, "Usage: isolator summarize [options] analyze_output.hdf5\n");
 }
 
 
@@ -251,7 +252,7 @@ int isolator_summarize(int argc, char* argv[])
         {0, 0, 0, 0}
     };
 
-    const char* out_fn = NULL;
+    const char* out_fn = "isolator_summarize.tsv";
     Logger::level logger_level = Logger::INFO;
 
     int opt;
@@ -287,14 +288,14 @@ int isolator_summarize(int argc, char* argv[])
 
     /* no positional argumens */
     if (optind == argc) {
-        print_quantify_usage(stdout);
+        print_summarize_usage(stdout);
         return 0;
     }
 
     /* too many */
     else if (optind + 1 > argc) {
         fprintf(stderr, "Too many arguments.\n\n");
-        print_quantify_usage(stderr);
+        print_summarize_usage(stderr);
         return 1;
     }
 
@@ -307,43 +308,14 @@ int isolator_summarize(int argc, char* argv[])
     }
 
     const char* in_fn = argv[optind];
-    SampleDB db(in_fn, false);
 
-    fprintf(out_f,
-            "transcript_id\tgene_id\teffective_length\t"
-            "posterior_mean\tposterior_sd\tposterior_median\t"
-            "lower_95_cred\tupper_95_cred\n");
+    Logger::start();
+    Summarize summarize(in_fn);
+    summarize.median_condition_tgroup_expression(out_f);
+    Logger::end();
 
-    std::vector<float> samples;
-    for (SampleDBIterator i(db); i != SampleDBIterator(); ++i) {
-        samples = i->samples;
+    fclose(out_f);
 
-        accumulator_set<float,
-            stats<tag::mean, tag::median, tag::variance> > acc;
-        BOOST_FOREACH (float x, samples) {
-            acc(x);
-        }
-
-        float posterior_mean = mean(acc);
-        float posterior_sd = sqrt(variance(acc));
-        float posterior_median = median(acc);
-
-        // TODO: This is really cheating
-        float lower_95_cred = samples.front();
-        float upper_95_cred = samples.back();
-
-        fprintf(out_f, "%s\t%s\t%f\t%e\t%e\t%e\t%e\t%e\n",
-                i->transcript_id.get().c_str(),
-                i->gene_id.get().c_str(),
-                i->effective_length,
-                posterior_mean,
-                posterior_sd,
-                posterior_median,
-                lower_95_cred,
-                upper_95_cred);
-    }
-
-    if (out_fn) fclose(out_f);
     return EXIT_SUCCESS;
 }
 
