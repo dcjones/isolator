@@ -263,6 +263,8 @@ int isolator_summarize(int argc, char* argv[])
     int opt_idx;
 
     const char* strategy_names[] = {
+        "median_transcript_expression",
+        "median_gene_expression",
         "condition_tgroup_mean",
         "experiment_tgroup_sd",
         NULL
@@ -352,9 +354,15 @@ int isolator_summarize(int argc, char* argv[])
 
     Summarize summarize(in_fn);
     if (strategy == 0) {
-        summarize.median_condition_tgroup_expression(out_f);
+        summarize.median_transcript_expression(out_f);
     }
     else if (strategy == 1) {
+        summarize.median_gene_expression(out_f);
+    }
+    else if (strategy == 2) {
+        summarize.median_condition_tgroup_expression(out_f);
+    }
+    else if (strategy == 3) {
         summarize.median_experiment_tgroup_sd(out_f);
     }
 

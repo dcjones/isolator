@@ -5,10 +5,11 @@
 // Read and produce plain-text tables from the HDF5 output generated
 // by "analyze".
 
-#include <vector>
-#include <string>
-#include <map>
+#include <boost/numeric/ublas/matrix.hpp>
 #include <cstdio>
+#include <map>
+#include <string>
+#include <vector>
 
 #include <hdf5.h>
 #include <hdf5_hl.h>
@@ -24,9 +25,18 @@ class Summarize
 		void median_condition_tgroup_expression(FILE* output);
 		void median_experiment_tgroup_sd(FILE* output);
 
+        void median_transcript_expression(FILE* output);
+        void median_gene_expression(FILE* output);
+
 
 	private:
+        void median_transcript_expression(
+                boost::numeric::ublas::matrix<float>& Q);
+
 		hid_t h5_file;
+
+        // number of samples
+        size_t K;
 
 		// number of transcripts
 		size_t N;

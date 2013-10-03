@@ -93,6 +93,22 @@ Summarize::Summarize(const char* filename)
 	Logger::info("%lu tgroups", (unsigned long) T);
 
 	H5Dclose(dataset);
+    H5Sclose(dataspace);
+
+    // figure out K (number of samples)
+    dataset = H5Dopen2(h5_file, "/transcript_quantification", H5P_DEFAULT);
+    if (dataset < 0) {
+        Logger::abort("Failed to open the /transcript_quant dataset");
+    }
+
+    dataspace = H5Dget_space(dataset);
+    hsize_t dims3[3]; // dims are num_samples, K, N
+    H5Sget_simple_extent_dims(dataspace, dims3, NULL);
+    K = dims3[1];
+
+    H5Dclose(dataset);
+    H5Sclose(dataspace);
+
 }
 
 
@@ -277,6 +293,116 @@ void Summarize::median_experiment_tgroup_sd(FILE* output)
 		std::sort(median_work.begin(), median_work.end());
 		fprintf(output, "\t%f\n", median_work[median_work.size() / 2]);
 	}
+}
+
+
+void Summarize::median_transcript_expression(matrix<float>& Q)
+{
+    hid_t dataset = H5Dopen2(h5_file, "/transcript_quantification", H5P_DEFAULT);
+    if (dataset < 0) {
+        Logger::abort("Failed to open the /transcript_quant dataset");
+    }
+
+    hid_t dataspace = H5Dget_space(dataset);
+    hsize_t dims[3]; // dims are num_samples, K, N
+    H5Sget_simple_extent_dims(dataspace, dims, NULL);
+    size_t num_samples = dims[0];
+    size_t K = dims[1];
+
+    hsize_t file_dataspace_start[3] = {0, 0, 0};
+    hsize_t file_dataspace_dims[3] = {num_samples, 1, N};
+
+    hsize_t mem_dataspace_dims[2] = {num_samples, N};
+    hsize_t mem_dataspace_start[2] = {0, 0};
+    hid_t mem_dataspace = H5Screate_simple(2, mem_dataspace_dims, NULL);
+    H5Sselect_hyperslab(mem_dataspace, H5S_SELECT_SET, mem_dataspace_start,
+                        NULL, mem_dataspace_dims, NULL);
+
+    matrix<float> Qi(num_samples, N);
+
+    for (size_t i = 0; i < K; ++i) {
+        herr_t status;
+        file_dataspace_start[1] = i;
+
+        H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
+                            file_dataspace_start, NULL,
+                            file_dataspace_dims, NULL);
+
+        status = H5Dread(dataset, H5T_NATIVE_FLOAT, mem_dataspace,
+                         dataspace, H5P_DEFAULT, &Qi.data()[0]);
+
+        if (status < 0) {
+            Logger::abort("Reading the /transcript_quantification dataset failed.");
+        }
+
+        for (size_t j = 0; j < N; ++j) {
+            matrix_column<matrix<float> > col(Qi, j);
+            std::sort(col.begin(), col.end());
+            float med = col[col.size() / 2];
+            Q(i, j) = med;
+        }
+    }
+
+	H5Sclose(mem_dataspace);
+	H5Sclose(dataspace);
+	H5Dclose(dataset);
+}
+
+
+void Summarize::median_transcript_expression(FILE* output)
+{
+    matrix<float> Q(K, N);
+    median_transcript_expression(Q);
+
+    fprintf(output, "transcript_id\tgene_id");
+    for (unsigned int i = 0; i < K; ++i) {
+        fprintf(output, "\tsample_%u", i);
+    }
+    fputc('\n', output);
+
+    for (size_t i = 0; i < N; ++i) {
+        fprintf(output, "%s\t%s",
+                transcript_ids[i].c_str(),
+                gene_ids[i].c_str());
+        for (size_t j = 0; j < K; ++j) {
+            fprintf(output, "\t%e", Q(j, i));
+        }
+        fputc('\n', output);
+    }
+}
+
+
+void Summarize::median_gene_expression(FILE* output)
+{
+    matrix<float> Q(K, N);
+    median_transcript_expression(Q);
+
+    std::map<std::string, std::vector<size_t> > gid_to_tids;
+    for (size_t i = 0; i < N; ++i) {
+        gid_to_tids[gene_ids[i]].push_back(i);
+    }
+
+    fprintf(output, "gene_id");
+    for (unsigned int i = 0; i < K; ++i) {
+        fprintf(output, "\tsample_%u", i);
+    }
+    fputc('\n', output);
+
+    boost::numeric::ublas::vector<float> margin(K);
+
+    typedef std::pair<std::string, std::vector<size_t> > item_t;
+    BOOST_FOREACH (const item_t& item, gid_to_tids) {
+        fprintf(output, "%s", item.first.c_str());
+        std::fill(margin.begin(), margin.end(), 0.0);
+        BOOST_FOREACH (size_t tid, item.second) {
+            margin += matrix_column<matrix<float> >(Q, tid);
+        }
+
+        for (size_t j = 0; j < K; ++j) {
+            fprintf(output, "\t%e", margin[j]);
+        }
+        fputc('\n', output);
+    }
 }
 
 
