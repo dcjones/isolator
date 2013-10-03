@@ -684,7 +684,7 @@ void Analyze::setup_output(hid_t file_id)
         herr_t status;
 
         hsize_t dims[3] = {num_samples, K, N};
-        hsize_t chunk_dims[3] = {1, K, N};
+        hsize_t chunk_dims[3] = {1, 1, N};
 
         hid_t dataset_create_property = H5Pcreate(H5P_DATASET_CREATE);
         H5Pset_layout(dataset_create_property, H5D_CHUNKED);
@@ -694,7 +694,7 @@ void Analyze::setup_output(hid_t file_id)
         h5_sample_quant_dataspace = H5Screate_simple(3, dims, NULL);
 
         h5_sample_quant_dataset =
-            H5Dcreate2(file_id, "/transcript_quant", H5T_NATIVE_FLOAT,
+            H5Dcreate2(file_id, "/transcript_quantification", H5T_NATIVE_FLOAT,
                        h5_sample_quant_dataspace, H5P_DEFAULT,
                        dataset_create_property, H5P_DEFAULT);
 
