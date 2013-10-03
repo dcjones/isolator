@@ -605,16 +605,24 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
     // train seqbias
     if (fa_fn) {
+        std::string task_name0 = std::string("Training sense sequence bias (") +
+                                 std::string(bam_fn) +
+                                 std::string(")");
+
+        std::string task_name1 = std::string("Training antisense sequence bias (") +
+                                 std::string(bam_fn) +
+                                 std::string(")");
+
         sb[0] = new sequencing_bias(fa_fn, *seqbias_sense_pos,
                                     constants::seqbias_num_reads,
                                     constants::seqbias_left_pos,
                                     constants::seqbias_right_pos,
-                                    "Training sense sequence bias");
+                                    task_name0.c_str());
         sb[1] = new sequencing_bias(fa_fn, *seqbias_antisense_pos,
                                     constants::seqbias_num_reads,
                                     constants::seqbias_left_pos,
                                     constants::seqbias_right_pos,
-                                    "Training antisense sequence bias");
+                                    task_name1.c_str());
     }
     else sb[0] = sb[1] = NULL;
 
