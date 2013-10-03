@@ -677,6 +677,48 @@ void Analyze::setup_output(hid_t file_id)
         delete [] tgroup_data;
     }
 
+
+    // sample quantification
+    // ---------------------
+    {
+        herr_t status;
+
+        hsize_t dims[3] = {num_samples, K, N};
+        hsize_t chunk_dims[3] = {1, K, N};
+
+        hid_t dataset_create_property = H5Pcreate(H5P_DATASET_CREATE);
+        H5Pset_layout(dataset_create_property, H5D_CHUNKED);
+        H5Pset_chunk(dataset_create_property, 3, chunk_dims);
+        H5Pset_deflate(dataset_create_property, 7);
+
+        h5_sample_quant_dataspace = H5Screate_simple(3, dims, NULL);
+
+        h5_sample_quant_dataset =
+            H5Dcreate2(file_id, "/transcript_quant", H5T_NATIVE_FLOAT,
+                       h5_sample_quant_dataspace, H5P_DEFAULT,
+                       dataset_create_property, H5P_DEFAULT);
+
+        if (h5_sample_quant_dataset < 0) {
+            Logger::abort("HDF5 dataset creation failed.");
+        }
+
+        H5Pclose(dataset_create_property);
+
+        hsize_t sample_quant_mem_dims[2] = {K, N};
+        h5_sample_quant_mem_dataspace =
+            H5Screate_simple(2, sample_quant_mem_dims, NULL);
+
+        hsize_t sample_quant_start[2] = {0, 0};
+        status = H5Sselect_hyperslab(h5_sample_quant_dataspace, H5S_SELECT_SET,
+                                     sample_quant_start, NULL,
+                                     sample_quant_mem_dims, NULL);
+
+        if (status < 0) {
+            Logger::abort("HDF5 hyperslab creation failed.");
+        }
+    }
+
+
     // experiment parameters
     // ---------------------
     {
@@ -909,6 +951,9 @@ void Analyze::run()
     H5Sclose(h5_experiment_tgroup_dataspace);
     H5Dclose(h5_condition_mean_dataset);
     H5Sclose(h5_condition_tgroup_dataspace);
+    H5Dclose(h5_sample_quant_dataset);
+    H5Sclose(h5_sample_quant_dataspace);
+    H5Sclose(h5_sample_quant_mem_dataspace);
     H5Sclose(h5_tgroup_row_mem_dataspace);
     H5Fclose(output_file_id);
 
@@ -1045,8 +1090,8 @@ void Analyze::write_output(size_t sample_num)
     std::copy(experiment_tgroup_mu.begin(), experiment_tgroup_mu.end(),
               tgroup_row_data.begin());
     status = H5Dwrite(h5_experiment_mean_dataset, H5T_NATIVE_FLOAT,
-             h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
-             H5P_DEFAULT, &tgroup_row_data.at(0));
+                      h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
+                      H5P_DEFAULT, &tgroup_row_data.at(0));
 
     if (status < 0) {
         Logger::abort("HD5 write operation failed.");
@@ -1084,6 +1129,26 @@ void Analyze::write_output(size_t sample_num)
         if (status < 0) {
             Logger::abort("HDF5 write operation failed.");
         }
+    }
+
+
+    hsize_t sample_quant_start[3] = {sample_num, 0, 0};
+    hsize_t sample_quant_count[3] = {1, K, N};
+
+    status = H5Sselect_hyperslab(h5_sample_quant_dataspace, H5S_SELECT_SET,
+                                 sample_quant_start, NULL,
+                                 sample_quant_count, NULL);
+
+    if (status < 0) {
+        Logger::abort("HDF5 dataspace selection failed.");
+    }
+
+    status = H5Dwrite(h5_sample_quant_dataset, H5T_NATIVE_DOUBLE,
+                      h5_sample_quant_mem_dataspace, h5_sample_quant_dataspace,
+                      H5P_DEFAULT, &Q.data()[0]);
+
+    if (status < 0) {
+        Logger::abort("HDF5 write operation failed.");
     }
 }
 
