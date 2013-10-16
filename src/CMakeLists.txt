@@ -7,7 +7,6 @@ add_subdirectory(loess)
 add_subdirectory(samtools)
 add_subdirectory(seqbias)
 add_subdirectory(sqlite3)
-add_subdirectory(stan)
 
 add_executable(isolator
                analyze.cpp
@@ -44,7 +43,6 @@ target_link_libraries(isolator
                       samtools
                       seqbias
                       sqlite3
-                      stan
                       nlopt
                       ${Boost_SYSTEM_LIBRARY}
                       ${Boost_THREAD_LIBRARY}
@@ -53,13 +51,3 @@ target_link_libraries(isolator
                       ${ZLIB_LIBRARIES}
                       ${CMAKE_THREAD_LIBS_INIT})
 
-add_custom_command(
-    OUTPUT "${CMAKE_SOURCE_DIR}/analyze_model.hpp"
-    COMMAND stanc --no_main --o=${CMAKE_SOURCE_DIR}/src/analyze_model.hpp analyze.stan
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src"
-    DEPENDS analyze.stan)
-
-#set_source_files_properties(analyze.cpp
-                            #PROPERTIES OBJECT_DEPENDS analyze_model.cpp)
-
-include_directories("eigen")
