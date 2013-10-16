@@ -28,6 +28,10 @@ class Summarize
         void median_transcript_expression(FILE* output);
         void median_gene_expression(FILE* output);
 
+        void tgroup_fold_change(FILE* output,
+        	                    unsigned int condition_a,
+        	                    unsigned int condition_b);
+
 
 	private:
         void median_transcript_expression(

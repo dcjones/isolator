@@ -237,6 +237,10 @@ void print_summarize_help(FILE* fout)
             "-h, --help                Print this help message\n"
             "-v, --verbose             Print a bunch of information useful mainly for debugging.\n"
             "-o, --out=FILE            Output summary to the given file. (default: standard out).\n"
+            "-l, --list                List summarization strategies.\n"
+            "-s, --strategy            Summarization strategy.\n"
+            "-a, --condition_a         First condition for pairwise comparisons.\n"
+            "-b, --condition_b         First condition for pairwise comparisons.\n"
             "\n"
             "See 'isolator help summarize' for more.\n");
 }
@@ -253,11 +257,14 @@ int isolator_summarize(int argc, char* argv[])
         {"out",         required_argument, NULL, 'o'},
         {"list",        no_argument,       NULL, 'l'},
         {"strategy",    required_argument, NULL, 's'},
+        {"condition_a", required_argument, NULL, 'a'},
+        {"condition_b", required_argument, NULL, 'b'},
         {0, 0, 0, 0}
     };
 
     const char* out_fn = "isolator_summarize.tsv";
     Logger::level logger_level = Logger::INFO;
+    unsigned int condition_a = 0, condition_b = 1;
 
     int opt;
     int opt_idx;
@@ -267,6 +274,7 @@ int isolator_summarize(int argc, char* argv[])
         "median_gene_expression",
         "condition_tgroup_mean",
         "experiment_tgroup_sd",
+        "tgroup_fold_change",
         NULL
     };
     const char** s; // used in a couple places below
@@ -317,6 +325,14 @@ int isolator_summarize(int argc, char* argv[])
                 }
                 break;
 
+            case 'a':
+                condition_a = strtoul(optarg, NULL, 10);
+                break;
+
+            case 'b':
+                condition_b = strtoul(optarg, NULL, 10);
+                break;
+
             case '?':
                 fprintf(stderr, "\n");
                 print_summarize_help(stderr);
@@ -364,6 +380,9 @@ int isolator_summarize(int argc, char* argv[])
     }
     else if (strategy == 3) {
         summarize.median_experiment_tgroup_sd(out_f);
+    }
+    else if (strategy == 4) {
+        summarize.tgroup_fold_change(out_f, condition_a, condition_b);
     }
 
     fclose(out_f);
