@@ -6,8 +6,8 @@ static void cpuid(unsigned int op, unsigned int* eax,
                   unsigned int* ecx, unsigned int* edx)
 {
      __asm__("pushq %%rbx\n\tcpuid\n\tpopq %%rbx"
-	     : "=a" (*eax), "=c" (*ecx), "=d" (*edx)
-	     : "a" (op));
+         : "=a" (*eax), "=c" (*ecx), "=d" (*edx)
+         : "a" (op));
 }
 
 

@@ -27,15 +27,15 @@ class BetaSampler;
 class Analyze
 {
     public:
-		Analyze(size_t burnin,
+        Analyze(size_t burnin,
                 size_t num_samples,
                 TranscriptSet& ts,
                 const char* genome_filename,
                 bool run_gc_correction);
-		~Analyze();
+        ~Analyze();
 
-		// Add a replicate under a particular condition
-		void add_sample(const char* condition_name,
+        // Add a replicate under a particular condition
+        void add_sample(const char* condition_name,
                         const char* filename);
 
         void run();
@@ -63,7 +63,7 @@ class Analyze
         size_t num_samples;
 
         // transcript set
-		TranscriptSet& transcripts;
+        TranscriptSet& transcripts;
 
         // File name of a fasta file containing the reference genome sequence
         // against which the reads are aligned.
@@ -75,8 +75,8 @@ class Analyze
         // file names for the BAM/SAM file corresponding to each
         std::vector<std::string> filenames;
 
-		// condition index to sample indexes
-		std::vector<std::vector<int> > condition_samples;
+        // condition index to sample indexes
+        std::vector<std::vector<int> > condition_samples;
 
         // fragment models for each sample
         std::vector<FragmentModel*> fms;
