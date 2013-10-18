@@ -22,6 +22,7 @@ class TgroupMuSigmaSamplerThread;
 class ExperimentTgroupMuSigmaSamplerThread;
 class AlphaSampler;
 class BetaSampler;
+class SpliceMeanPrecSamplerThread;
 
 
 class Analyze
@@ -90,13 +91,16 @@ class Analyze
         std::vector<ExperimentTgroupMuSigmaSamplerThread*> experiment_musigma_sampler_threads;
         AlphaSampler* alpha_sampler;
         BetaSampler* beta_sampler;
+        std::vector<SpliceMeanPrecSamplerThread*> splice_mean_prec_sampler_threads;
 
         // queues to send work to sampler threads, and be notified on completion
         // of ticks.
         Queue<int> qsampler_tick_queue, qsampler_notify_queue,
                    musigma_sampler_tick_queue, musigma_sampler_notify_queue,
                    experiment_musigma_sampler_tick_queue,
-                   experiment_musigma_sampler_notify_queue;
+                   experiment_musigma_sampler_notify_queue,
+                   splice_mean_prec_sampler_tick_queue,
+                   splice_mean_prec_sampler_notify_queue;
 
         // matrix containing relative transcript abundance samples, indexed by:
         //   sample -> transcript (tid)

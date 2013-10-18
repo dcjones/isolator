@@ -276,3 +276,12 @@ double BetaLogPdf::df_dx(double alpha, double beta, double x)
 {
     return (alpha - 1) / x - (beta - 1) / (1 - x);
 }
+
+
+double BetaLogPdf::df_dgamma(double gamma, double c, double x)
+{
+    return c * (log(x / (1 - x)) +
+                boost::math::digamma(gamma * c) -
+                boost::math::digamma((1 - gamma) * c));
+}
+

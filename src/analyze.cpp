@@ -191,6 +191,73 @@ class TgroupMuSigmaSamplerThread
 };
 
 
+// Sample parameters giving the mean within-group splicing proportions per
+// condition.
+class SpliceMeanPrecSamplerThread
+{
+    public:
+        SpliceMeanPrecSamplerThread(
+                        std::vector<std::vector<std::vector<double> > >&
+                            mean,
+                        std::vector<double>& precision,
+                        const matrix<double>& Q,
+                        Queue<int>& spliced_tgroup_queue,
+                        Queue<int>& notify_queue)
+            : mean(mean)
+            , precision(precision)
+            , Q(Q)
+            , spliced_tgroup_queue(spliced_tgroup_queue)
+            , notify_queue(notify_queue)
+            , thread(NULL)
+        {
+            C = mean.size();
+        }
+
+        void run()
+        {
+            int spliced_tgroup_idx;
+            while (true) {
+                if ((spliced_tgroup_idx = spliced_tgroup_queue.pop()) == -1) break;
+
+                for (size_t i = 0; i < C; ++i) {
+                    // TODO: everything
+                }
+
+                notify_queue.push(1);
+            }
+        }
+
+        void start()
+        {
+            thread = new boost::thread(
+                    boost::bind(&SpliceMeanPrecSamplerThread::run, this));
+        }
+
+        void join()
+        {
+            thread->join();
+            delete thread;
+            thread = NULL;
+        }
+
+    private:
+        // what we are sampling over
+        std::vector<std::vector<std::vector<double> > >& mean;
+        std::vector<double>& precision;
+
+        // current transcript quantification
+        const matrix<double>& Q;
+
+        Queue<int>& spliced_tgroup_queue;
+        Queue<int>& notify_queue;
+
+        size_t C;
+
+        boost::thread* thread;
+};
+
+
+
 class AlphaSampler : public Shredder
 {
     public:
@@ -281,6 +348,60 @@ class BetaSampler : public Shredder
 
             return fx;
         }
+};
+
+
+class BetaDistributionSampler : public Shredder
+{
+    public:
+        BetaDistributionSampler()
+            : Shredder(1e-16, 1.0)
+        {}
+
+        // What is x here? I should really be sampling over a/b, right?
+        double sample(double a0, double b0, double prec,
+                      double a_prior, double b_prior,
+                      const double* data, size_t n)
+        {
+            this->a0 = a0;
+            this->b0 = b0;
+            this->prec = prec;
+            this->a_prior = a_prior;
+            this->b_prior = b_prior;
+            this->data = data;
+            this->n = n;
+            return Shredder::sample(a0 / (a0 + b0));
+        }
+
+    private:
+        double a0, b0;
+        double prec;
+        double a_prior, b_prior;
+        const double* data;
+        size_t n;
+        BetaLogPdf beta_logpdf;
+
+    protected:
+        double f(double x, double &d)
+        {
+            double fx = 0.0;
+            d = 0.0;
+
+            double a = x * (a0 + b0);
+            double b = (1 - x) * (a0 + b0);
+
+            // prior
+            fx += beta_logpdf.f(a_prior, b_prior, x);
+            d += beta_logpdf.df_dx(a_prior, b_prior, x);
+
+            // likelihood
+            for (size_t i = 0; i < n; ++i) {
+                fx += beta_logpdf.f(a * prec, b * prec, data[i]);
+                // TODO: see math notes for the derivative here. It's messy.
+            }
+
+            return fx;
+        };
 };
 
 
@@ -838,9 +959,15 @@ void Analyze::qsampler_update_hyperparameters()
             qsamplers[i]->hp.tgroup_mu[j] = tgroup_mu(c, j);
             qsamplers[i]->hp.tgroup_sigma[j] = tgroup_sigma[j];
 
-            // TODO: actually set these
             std::fill(qsamplers[i]->hp.splice_param.begin(),
                       qsamplers[i]->hp.splice_param.end(), 1.0);
+            for (size_t k = 0; k < spliced_tgroup_indexes.size(); ++k) {
+                unsigned int tgroup = spliced_tgroup_indexes[k];
+                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
+                    qsamplers[i]->hp.splice_param[tgroup_tids[tgroup][l]] =
+                        condition_splice_mean[c][k][l];
+                }
+            }
         }
     }
 }
@@ -934,6 +1061,15 @@ void Analyze::run()
         thread->start();
     }
 
+    splice_mean_prec_sampler_threads.resize(constants::num_threads);
+    BOOST_FOREACH (SpliceMeanPrecSamplerThread*& thread, splice_mean_prec_sampler_threads) {
+        thread = new SpliceMeanPrecSamplerThread(
+                condition_splice_mean, splice_precision, Q,
+                splice_mean_prec_sampler_tick_queue,
+                splice_mean_prec_sampler_notify_queue);
+        thread->start();
+    }
+
     warmup();
 
     const char* task_name = "Sampling";
@@ -955,18 +1091,21 @@ void Analyze::run()
         qsampler_tick_queue.push(-1);
         musigma_sampler_tick_queue.push(-1);
         experiment_musigma_sampler_tick_queue.push(-1);
+        splice_mean_prec_sampler_tick_queue.push(-1);
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         qsampler_threads[i]->join();
         musigma_sampler_threads[i]->join();
         experiment_musigma_sampler_threads[i]->join();
+        splice_mean_prec_sampler_threads[i]->join();
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         delete qsampler_threads[i];
         delete musigma_sampler_threads[i];
         delete experiment_musigma_sampler_threads[i];
+        delete splice_mean_prec_sampler_threads[i];
     }
 
     H5Dclose(h5_experiment_mean_dataset);
@@ -1019,8 +1158,15 @@ void Analyze::warmup()
         }
     }
 
-    // TODO: choose ml estimates for splicing paramaters
-
+    // choose initially flat values for splicing parameters
+    for (size_t i = 0; i < C; ++i) {
+        for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
+            std::fill(condition_splice_mean[i][j].begin(),
+                      condition_splice_mean[i][j].end(),
+                      1.0 / condition_splice_mean[i][j].size());
+        }
+    }
+    std::fill(splice_precision.begin(), splice_precision.end(), 1.0);
 
     // ml estimates for experiment_tgroup_mu
     for (size_t j = 0; j < T; ++j) {
@@ -1068,6 +1214,14 @@ void Analyze::sample()
                                        tgroup_alpha_beta, tgroup_beta_beta,
                                        &tgroup_sigma.at(0), T);
     assert_finite(tgroup_beta);
+
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        splice_mean_prec_sampler_tick_queue.push(i);
+    }
+
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        splice_mean_prec_sampler_notify_queue.pop();
+    }
 
     // sample experiment-level parameters
 
