@@ -74,5 +74,13 @@ class SqInvGammaLogPdf
 };
 
 
+class BetaLogPdf
+{
+public:
+    double f(double alpha, double beta, double x);
+    double df_dx(double alpha, double beta, double x);
+};
+
+
 #endif
 

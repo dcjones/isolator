@@ -133,6 +133,19 @@ class Analyze
         // temporary space used by compute_xs
         std::vector<double> tgroup_expr;
 
+        // tids belonging to each tgroup (indexed by tgroup)
+        std::vector<std::vector<unsigned int> > tgroup_tids;
+
+        // sorted indexes of tgroups with multiple transcripts
+        std::vector<unsigned int> spliced_tgroup_indexes;
+
+        // condition slice mean indexed by condition, spliced tgroup, transcript
+        // according to spliced_tgroup_indexes and tgroup_tids
+        std::vector<std::vector<std::vector<double> > > condition_splice_mean;
+
+        // splicing precision, indexed by spliced tgroup
+        std::vector<double> splice_precision;
+
         // Condition index corresponding to the given name
         std::map<std::string, int> condition_index;
 

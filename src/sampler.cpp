@@ -1299,14 +1299,17 @@ class AbundanceSamplerThread
         float recompute_intra_component_probability(unsigned int u, unsigned int v,
                                               float tmixu, float tmixv,
                                               unsigned int f0, unsigned int f1,
-                                              float pf01, float p0, float *d);
+                                              float pf01, float p0,
+                                              float bu, float bv, float *d);
 
         float transcript_slice_sample_search(float slice_height,
                                              unsigned int u, unsigned int v,
-                                             float z0, float p0, bool left);
+                                             float z0, float p0, bool left,
+                                             double bu, double bv);
 
 
         NormalLogPdf cmix_prior;
+        BetaLogPdf splice_prior;
         rng_t rng;
         boost::random::uniform_01<double> random_uniform_01;
         boost::random::uniform_int_distribution<unsigned int> random_uniform_int;
@@ -1371,11 +1374,6 @@ float AbundanceSamplerThread::compute_component_probability(unsigned int c, floa
         // prior
         BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
             double x = log(S.tgroupmix[tgroup] * cmixc);
-
-            // XXX: for debugging
-            const double* tgroup_mu = &S.hp.tgroup_mu.at(0);
-            const double* tgroup_scaling = &S.tgroup_scaling.at(0);
-
             double mu = S.hp.tgroup_mu[tgroup] + log(S.tgroup_scaling[tgroup]);
             double sigma = S.hp.tgroup_sigma[tgroup];
 
@@ -1395,7 +1393,8 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
                                                   unsigned int u, unsigned int v,
                                                   float tmixu, float tmixv,
                                                   unsigned int f0, unsigned int f1,
-                                                  float pf01, float p0, float* d)
+                                                  float pf01, float p0,
+                                                  float bu, float bv, float* d)
 {
     unsigned int tgu = S.transcript_tgroup[u];
     unsigned int tgv = S.transcript_tgroup[v];
@@ -1453,6 +1452,33 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
         *d += (xv1 - mu_v) / (sigma_v * sigma_v);
     }
 
+    // splicing priors
+    if (S.use_priors && tgu == tgv) {
+        double x0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
+        double x = tmixu / (tmixu + tmixv);
+        double a = S.hp.splice_param[u];
+        double b = S.hp.splice_param[v];
+
+        *d += splice_prior.df_dx(a, b, x);
+        p0 += (a - 1) * log(x / x0) + (b - 1) * log((1 - x) / (1 - x0));
+    }
+    else {
+        double a, x, x0;
+
+        // super secret trick for recomputing tgroup_tmix[u]
+        x = tmixu / (tmixu - S.tmix[u] + (S.tmix[u]/S.tgroup_tmix[u]));
+        x0 = S.tgroup_tmix[u];
+        a = S.hp.splice_param[u];
+        *d += splice_prior.df_dx(a, bu, x);
+        p0 += (a - 1) * log(x / x0) + (bu - 1) * log((1 - x) / (1 - x0));
+
+        x = tmixv / (tmixv - S.tmix[v] + (S.tmix[v]/S.tgroup_tmix[v]));
+        x0 = S.tgroup_tmix[v];
+        a = S.hp.splice_param[v];
+        *d += splice_prior.df_dx(a, bv, x);
+        p0 += (a - 1) * log(x / x0) + (bv - 1) * log((1 - x) / (1 - x0));
+    }
+
     return p0 - pf01
               + dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0)
               + prior_lp_delta;
@@ -1463,7 +1489,8 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
 float AbundanceSamplerThread::transcript_slice_sample_search(
                                                  float slice_height,
                                                  unsigned int u, unsigned int v,
-                                                 float z0, float p0, bool left)
+                                                 float z0, float p0, bool left,
+                                                 double bu, double bv)
 {
     static const float peps = 1e-2f;
     static const float zeps = 1e-6f;
@@ -1509,7 +1536,7 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
 
     z = z0;
     p = recompute_intra_component_probability(
-            u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
+            u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, bu, bv, &d);
     p -= slice_height;
 
     /* upper or lower bound on z (depending on 'left') */
@@ -1557,7 +1584,7 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
         }
 
         p = recompute_intra_component_probability(
-                u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, &d);
+                u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, bu, bv, &d);
         p -= slice_height;
 
         if (++iter > constants::max_newton_iter) break;
@@ -1578,6 +1605,10 @@ void AbundanceSamplerThread::run_intra_component(unsigned int c)
         }
         if (S.tgroupmix[tgroup] <= 0.0) {
             Logger::abort("A non-positive tgroup mixture occurred.");
+        }
+
+        BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
+            S.tgroup_tmix[tid] = S.tmix[tid] / S.tgroupmix[tgroup];
         }
     }
 
@@ -1627,13 +1658,39 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
                            S.hp.tgroup_sigma[tgv], &S.tgroupmix[tgv], 1);
     }
 
+    double bu = 0.0, bv = 0.0;
+    if (S.use_priors) {
+        if (tgu == tgv) {
+            p0 += splice_prior.f(S.hp.splice_param[u], S.hp.splice_param[v],
+                                 S.tgroup_tmix[u]);
+        }
+        else {
+            // maginalize to get beta parameters
+            double a;
+
+            a = S.hp.splice_param[u];
+            bu = 0.0;
+            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgu]) {
+                if (tid != u) bu += S.hp.splice_param[tid];
+            }
+            p0 += splice_prior.f(a, bu, S.tgroup_tmix[u]);
+
+            a = S.hp.splice_param[v];
+            bv = 0.0;
+            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgv]) {
+                if (tid != v) bv += S.hp.splice_param[tid];
+            }
+            p0 += splice_prior.f(a, bv, S.tgroup_tmix[v]);
+        }
+    }
+
     float slice_height = hillclimb ? p0 : p0 + fastlog2(random_uniform_01(rng));
     float z0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
 
     float z, s0, s1;
     if (finite(slice_height)) {
-        s0 = transcript_slice_sample_search(slice_height, u, v, z0, p0, true);
-        s1 = transcript_slice_sample_search(slice_height, u, v, z0, p0, false);
+        s0 = transcript_slice_sample_search(slice_height, u, v, z0, p0, true, bu, bv);
+        s1 = transcript_slice_sample_search(slice_height, u, v, z0, p0, false, bu, bv);
         if (s1 - s0 < constants::zero_eps || s0 > z0 || s1 < z0) {
             return;
         }
@@ -1674,6 +1731,9 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
         S.tgroupmix[tgu] += tmixu - S.tmix[u];
         S.tgroupmix[tgv] += tmixv - S.tmix[v];
     }
+
+    S.tgroup_tmix[u] = tmixu / S.tgroupmix[tgu];
+    S.tgroup_tmix[v] = tmixv / S.tgroupmix[tgv];
 
     S.tmix[u] = tmixu;
     S.tmix[v] = tmixv;
@@ -2081,6 +2141,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     frag_count_sums = new float [num_components];
     tmix            = new double [weight_matrix->nrow];
     tgroupmix       = new double [tgroup_tids.size()];
+    tgroup_tmix     = new double [weight_matrix->nrow];
     cmix            = new double [num_components];
 
     expr.resize(weight_matrix->nrow);
@@ -2095,6 +2156,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     hp.tgroup_nu = 0.0;
     hp.tgroup_mu.resize(ts.num_tgroups(), 0.0);
     hp.tgroup_sigma.resize(ts.num_tgroups(), 0.0);
+    hp.splice_param.resize(ts.size());
 
     if (fm.sb[0] && run_gc_correction) {
         gc_correct = new GCCorrection(ts, transcript_gc);
@@ -2125,6 +2187,7 @@ Sampler::~Sampler()
     delete [] tmix;
     delete [] cmix;
     delete [] tgroupmix;
+    delete [] tgroup_tmix;
     delete [] transcript_component;
     delete [] transcript_tgroup;
     for (size_t i = 0; i < num_components; ++i) {

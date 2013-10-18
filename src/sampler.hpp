@@ -108,7 +108,8 @@ class Sampler
             // Scale parameter for the tgroup abundance prior
             std::vector<double> tgroup_sigma;
 
-            // TODO: Hyperparameters for splicing. Yikes.
+            // Dirichlet parameters for splicing priors, indexed by tid
+            std::vector<double> splice_param;
         } hp;
 
     private:
@@ -150,6 +151,9 @@ class Sampler
         /* Transcription group within-component relative abundance. */
         double* tgroupmix;
 
+        /* Relative abundance of a transcript within its tgroup */
+        double* tgroup_tmix;
+
         /* Component mixture coefficients. */
         double* cmix;
 
@@ -188,7 +192,7 @@ class Sampler
         float** frag_counts;
 
         /* Number of multireads. */
-        unsigned num_multireads;
+        unsigned int num_multireads;
 
         /* Number of alignments for each multiread. */
         unsigned int* multiread_num_alignments;

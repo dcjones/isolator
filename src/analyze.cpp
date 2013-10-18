@@ -418,8 +418,27 @@ Analyze::Analyze(size_t burnin,
     alpha_sampler = new AlphaSampler();
     beta_sampler = new BetaSampler();
 
+    tgroup_tids = transcripts.tgroup_tids();
+
+    for (size_t i = 0; i < tgroup_tids.size(); ++i) {
+        if (tgroup_tids[i].size() > 1) {
+            spliced_tgroup_indexes.push_back(i);
+        }
+    }
+
+    condition_splice_mean.resize(C);
+    for (size_t i = 0; i < C; ++i) {
+        condition_splice_mean[i].resize(spliced_tgroup_indexes.size());
+        for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
+            condition_splice_mean[i][j].resize(
+                tgroup_tids[spliced_tgroup_indexes[j]].size());
+        }
+    }
+
     Logger::info("Number of transcripts: %u", N);
     Logger::info("Number of transcription groups: %u", T);
+    Logger::info("Number of tgroup with multiple isoforms: %u",
+                  spliced_tgroup_indexes.size());
 }
 
 
@@ -818,6 +837,10 @@ void Analyze::qsampler_update_hyperparameters()
         for (size_t j = 0; j < T; ++j) {
             qsamplers[i]->hp.tgroup_mu[j] = tgroup_mu(c, j);
             qsamplers[i]->hp.tgroup_sigma[j] = tgroup_sigma[j];
+
+            // TODO: actually set these
+            std::fill(qsamplers[i]->hp.splice_param.begin(),
+                      qsamplers[i]->hp.splice_param.end(), 1.0);
         }
     }
 }
@@ -1199,5 +1222,4 @@ void Analyze::choose_initial_values()
     experiment_tgroup_alpha = 0.1;
     experiment_tgroup_beta = 1.0;
 }
-
 

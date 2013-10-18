@@ -107,6 +107,12 @@ static double sq(double x)
 }
 
 
+static double lbeta(double x, double y)
+{
+    return lgamma(x) + lgamma(y) - lgamma(x + y);
+}
+
+
 double NormalLogPdf::f(double mu, double sigma, const double* xs, size_t n)
 {
     double part1 = n * (-log(2 * M_PI)/2 - log(sigma));
@@ -257,4 +263,16 @@ double SqInvGammaLogPdf::df_dbeta(double alpha, double beta, const double* xs, s
     }
 
     return n * (alpha / beta) - part;
+}
+
+
+double BetaLogPdf::f(double alpha, double beta, double x)
+{
+    return (alpha - 1) * log(x) + (beta - 1) * log(1 - x) - lbeta(alpha, beta);
+}
+
+
+double BetaLogPdf::df_dx(double alpha, double beta, double x)
+{
+    return (alpha - 1) / x - (beta - 1) / (1 - x);
 }
