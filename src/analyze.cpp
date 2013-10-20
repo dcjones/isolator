@@ -27,6 +27,60 @@ static void assert_finite(double x)
 }
 
 
+class BetaDistributionSampler : public Shredder
+{
+    public:
+        BetaDistributionSampler()
+            : Shredder(1e-16, 1.0)
+        {}
+
+        // What is x here? I should really be sampling over a/b, right?
+        double sample(double a0, double b0, double prec,
+                      double a_prior, double b_prior,
+                      const double* data, size_t n)
+        {
+            this->a0 = a0;
+            this->b0 = b0;
+            this->prec = prec;
+            this->a_prior = a_prior;
+            this->b_prior = b_prior;
+            this->data = data;
+            this->n = n;
+            return Shredder::sample(a0 / (a0 + b0));
+        }
+
+    private:
+        double a0, b0;
+        double prec;
+        double a_prior, b_prior;
+        const double* data;
+        size_t n;
+        BetaLogPdf beta_logpdf;
+
+    protected:
+        double f(double x, double &d)
+        {
+            double fx = 0.0;
+            d = 0.0;
+
+            double a = x * (a0 + b0);
+            double b = (1 - x) * (a0 + b0);
+
+            // prior
+            fx += beta_logpdf.f(a_prior, b_prior, x);
+            d += beta_logpdf.df_dx(a_prior, b_prior, x);
+
+            // likelihood
+            for (size_t i = 0; i < n; ++i) {
+                fx += beta_logpdf.f(a * prec, b * prec, data[i]);
+                d += beta_logpdf.df_dgamma(x, (a0 + b0) * prec, data[i]);
+            }
+
+            return fx;
+        };
+};
+
+
 class TgroupMuSampler
 {
     public:
@@ -201,11 +255,17 @@ class SpliceMeanPrecSamplerThread
                             mean,
                         std::vector<double>& precision,
                         const matrix<double>& Q,
+                        const std::vector<unsigned int>& spliced_tgroup_indexes,
+                        const std::vector<std::vector<unsigned int> >& tgroup_tids,
+                        const std::vector<std::vector<int> >& condition_samples,
                         Queue<int>& spliced_tgroup_queue,
                         Queue<int>& notify_queue)
             : mean(mean)
             , precision(precision)
             , Q(Q)
+            , spliced_tgroup_indexes(spliced_tgroup_indexes)
+            , tgroup_tids(tgroup_tids)
+            , condition_samples(condition_samples)
             , spliced_tgroup_queue(spliced_tgroup_queue)
             , notify_queue(notify_queue)
             , thread(NULL)
@@ -215,13 +275,56 @@ class SpliceMeanPrecSamplerThread
 
         void run()
         {
-            int spliced_tgroup_idx;
-            while (true) {
-                if ((spliced_tgroup_idx = spliced_tgroup_queue.pop()) == -1) break;
+            // temporary array for storing observation marginals
+            std::vector<double> data;
+            BOOST_FOREACH (const std::vector<int>& samples, condition_samples) {
+                data.resize(std::max(data.size(), samples.size()));
+            }
 
+            int j;
+            while (true) {
+                if ((j = spliced_tgroup_queue.pop()) == -1) break;
+
+                size_t tgroup = spliced_tgroup_indexes[j];
+
+                // sample mean
                 for (size_t i = 0; i < C; ++i) {
-                    // TODO: everything
+                    std::vector<double>& ms = mean[i][j];
+
+                    // TODO: constant
+                    for (size_t round = 0; round < 5 && round < ms.size(); ++round) {
+                        unsigned int u =
+                            boost::random::uniform_int_distribution<unsigned int>(
+                                    ms.size() - 1)(rng);
+                        unsigned int v =
+                            boost::random::uniform_int_distribution<unsigned int>(
+                                    ms.size() - 2)(rng);
+
+                        if (v == u) ++v;
+
+                        unsigned int tidu = tgroup_tids[tgroup][u];
+                        unsigned int tidv = tgroup_tids[tgroup][v];
+
+                        for (size_t k = 0; k < condition_samples[i].size(); ++j) {
+                            size_t sample_num = condition_samples[i][k];
+                            data[k] = Q(sample_num, tidu) / Q(sample_num, tidv);
+                        }
+
+                        double x = betadist_sampler.sample(
+                                mean[i][j][u], mean[i][j][v], precision[j],
+                                // TODO: prior on mean
+                                1.0, 1.0,
+                                &data.at(0), condition_samples[i].size());
+                        assert(0.0 <= x && x <= 1.0);
+
+                        double meansum = mean[i][j][u] + mean[i][j][v];
+                        mean[i][j][u] = x * meansum;
+                        mean[i][j][v] = (1 - x) * meansum;
+                    }
                 }
+
+                // sample precision
+                // TODO
 
                 notify_queue.push(1);
             }
@@ -248,10 +351,16 @@ class SpliceMeanPrecSamplerThread
         // current transcript quantification
         const matrix<double>& Q;
 
+        const std::vector<unsigned int>& spliced_tgroup_indexes;
+        const std::vector<std::vector<unsigned int> >& tgroup_tids;
+        const std::vector<std::vector<int> >& condition_samples;
+
         Queue<int>& spliced_tgroup_queue;
         Queue<int>& notify_queue;
 
         size_t C;
+        BetaDistributionSampler betadist_sampler;
+        rng_t rng;
 
         boost::thread* thread;
 };
@@ -349,62 +458,6 @@ class BetaSampler : public Shredder
             return fx;
         }
 };
-
-
-class BetaDistributionSampler : public Shredder
-{
-    public:
-        BetaDistributionSampler()
-            : Shredder(1e-16, 1.0)
-        {}
-
-        // What is x here? I should really be sampling over a/b, right?
-        double sample(double a0, double b0, double prec,
-                      double a_prior, double b_prior,
-                      const double* data, size_t n)
-        {
-            this->a0 = a0;
-            this->b0 = b0;
-            this->prec = prec;
-            this->a_prior = a_prior;
-            this->b_prior = b_prior;
-            this->data = data;
-            this->n = n;
-            return Shredder::sample(a0 / (a0 + b0));
-        }
-
-    private:
-        double a0, b0;
-        double prec;
-        double a_prior, b_prior;
-        const double* data;
-        size_t n;
-        BetaLogPdf beta_logpdf;
-
-    protected:
-        double f(double x, double &d)
-        {
-            double fx = 0.0;
-            d = 0.0;
-
-            double a = x * (a0 + b0);
-            double b = (1 - x) * (a0 + b0);
-
-            // prior
-            fx += beta_logpdf.f(a_prior, b_prior, x);
-            d += beta_logpdf.df_dx(a_prior, b_prior, x);
-
-            // likelihood
-            for (size_t i = 0; i < n; ++i) {
-                fx += beta_logpdf.f(a * prec, b * prec, data[i]);
-                // TODO: see math notes for the derivative here. It's messy.
-            }
-
-            return fx;
-        };
-};
-
-
 
 
 class ExperimentTgroupMuSigmaSamplerThread
@@ -1065,6 +1118,9 @@ void Analyze::run()
     BOOST_FOREACH (SpliceMeanPrecSamplerThread*& thread, splice_mean_prec_sampler_threads) {
         thread = new SpliceMeanPrecSamplerThread(
                 condition_splice_mean, splice_precision, Q,
+                spliced_tgroup_indexes,
+                tgroup_tids,
+                condition_samples,
                 splice_mean_prec_sampler_tick_queue,
                 splice_mean_prec_sampler_notify_queue);
         thread->start();
