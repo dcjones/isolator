@@ -173,6 +173,30 @@ double StudentsTLogPdf::df_dsigma(double nu, double mu, double sigma, const doub
 }
 
 
+double GammaLogPdf::f(double alpha, double beta, const double* xs, size_t n)
+{
+    double part1 = 0.0, part2 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part1 += log(xs[i]);
+        part2 += xs[i];
+    }
+
+    return
+        n * (alpha * log(beta) - lgamma(alpha)) +
+        (alpha - 1) * part1 -
+        beta * part2;
+}
+
+
+double GammaLogPdf::df_dx(double alpha, double beta, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += (alpha - 1) / xs[i];
+    }
+
+    return part - n * beta;
+}
 
 double InvGammaLogPdf::f(double alpha, double beta, const double* xs, size_t n)
 {
@@ -284,4 +308,60 @@ double BetaLogPdf::df_dgamma(double gamma, double c, double x)
                 boost::math::digamma(gamma * c) -
                 boost::math::digamma((1 - gamma) * c));
 }
+
+
+double DirichletLogPdf::f(double alpha,
+                          const boost::numeric::ublas::matrix<double>* mean,
+                          const boost::numeric::ublas::matrix<double>* data,
+                          size_t n, size_t m)
+{
+    double part1 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < m; ++j) {
+            part1 += ((*mean)(i, j) - 1) * log((*data)(i, j));
+        }
+    }
+    part1 *= alpha;
+
+    double part2 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        double part2i= 0.0;
+        for (size_t j = 0; j < m; ++j) {
+            part2i += gamma(alpha * (*mean)(i, j));
+        }
+        part2 += log(part2i);
+    }
+
+    return n * lgamma(alpha) - part2 + part1;
+}
+
+
+double DirichletLogPdf::df_dalpha(double alpha,
+                                  const boost::numeric::ublas::matrix<double>* mean,
+                                  const boost::numeric::ublas::matrix<double>* data,
+                                  size_t n, size_t m)
+{
+    double part1 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < m; ++j) {
+            part1 += ((*mean)(i, j) - 1) * log((*data)(i, j));
+        }
+    }
+    part1 *= alpha;
+
+    double part2 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        double numerator = 0.0, denominator = 0.0;
+        for (size_t j = 0; j < m; ++j) {
+            numerator += (*mean)(i, j) *
+                         gamma(alpha * (*mean)(i ,j)) *
+                         boost::math::digamma(alpha * (*mean)(i, j));
+            denominator += gamma(alpha * (*mean)(i, j));
+        }
+        part2 += numerator / denominator;
+    }
+
+    return n * boost::math::digamma(alpha) - part2 + part1;
+}
+
 

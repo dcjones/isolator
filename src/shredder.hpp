@@ -2,6 +2,7 @@
 #ifndef ISOLATOR_SHREDDER_HPP
 #define ISOLATOR_SHREDDER_HPP
 
+#include <boost/numeric/ublas/matrix.hpp>
 #include <boost/random/uniform_01.hpp>
 
 #include "common.hpp"
@@ -54,6 +55,14 @@ class StudentsTLogPdf
 };
 
 
+class GammaLogPdf
+{
+    public:
+        double f(double alpha, double beta, const double* xs, size_t n);
+        double df_dx(double alpha, double beta, const double* xs, size_t n);
+};
+
+
 class InvGammaLogPdf
 {
     public:
@@ -80,6 +89,21 @@ class BetaLogPdf
         double f(double alpha, double beta, double x);
         double df_dx(double alpha, double beta, double x);
         double df_dgamma(double gamma, double c, double x);
+};
+
+
+class DirichletLogPdf
+{
+    public:
+        double f(double alpha,
+                 const boost::numeric::ublas::matrix<double>* mean,
+                 const boost::numeric::ublas::matrix<double>* data,
+                 size_t n, size_t m);
+
+        double df_dalpha(double alpha,
+                         const boost::numeric::ublas::matrix<double>* mean,
+                         const boost::numeric::ublas::matrix<double>* data,
+                         size_t n, size_t m);
 };
 
 

@@ -150,6 +150,14 @@ class Analyze
         // splicing precision, indexed by spliced tgroup
         std::vector<double> splice_precision;
 
+        // parameters for the gamma prior on splice_precision
+        double splice_alpha, splice_beta;
+
+        // paramaters for the inverse gamma priors on splice_alpha and
+        // splice_beta
+        double splice_alpha_alpha, splice_beta_alpha;
+        double splice_alpha_beta, splice_beta_beta;
+
         // Condition index corresponding to the given name
         std::map<std::string, int> condition_index;
 

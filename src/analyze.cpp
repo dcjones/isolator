@@ -81,6 +81,55 @@ class BetaDistributionSampler : public Shredder
 };
 
 
+class SplicePrecisionSampler : public Shredder
+{
+    public:
+        SplicePrecisionSampler()
+            : Shredder(1e-16, 100000.0)
+        {}
+
+        // mean and dat are both matrices indexed by sample then transcript
+        double sample(double prec, const matrix<double>* mean,
+                      double prior_alpha, double prior_beta,
+                      const matrix<double>* data,
+                      size_t n, size_t m)
+        {
+            this->prior_alpha = prior_alpha;
+            this->prior_beta = prior_beta;
+            this->mean = mean;
+            this->data = data;
+            this->n = n;
+            this->m = m;
+
+            return Shredder::sample(prec);
+        }
+
+    private:
+        double prior_alpha, prior_beta;
+        const matrix<double>* mean;
+        const matrix<double>* data;
+        size_t n, m;
+
+        GammaLogPdf prior_logpdf;
+        DirichletLogPdf likelihood_logpdf;
+
+    protected:
+        double f(double prec, double &d)
+        {
+            double fx = 0.0;
+            d = 0.0;
+
+            fx += prior_logpdf.f(prior_alpha, prior_beta, &prec, 1);
+            d += prior_logpdf.df_dx(prior_alpha, prior_beta, &prec, 1);
+
+            fx += likelihood_logpdf.f(prec, mean, data, n, m);
+            d += likelihood_logpdf.df_dalpha(prec, mean, data, n, m);
+
+            return fx;
+        }
+};
+
+
 class TgroupMuSampler
 {
     public:
@@ -254,23 +303,30 @@ class SpliceMeanPrecSamplerThread
                         std::vector<std::vector<std::vector<double> > >&
                             mean,
                         std::vector<double>& precision,
+                        const double& splice_alpha,
+                        const double& splice_beta,
                         const matrix<double>& Q,
                         const std::vector<unsigned int>& spliced_tgroup_indexes,
                         const std::vector<std::vector<unsigned int> >& tgroup_tids,
+                        const std::vector<int>& condition,
                         const std::vector<std::vector<int> >& condition_samples,
                         Queue<int>& spliced_tgroup_queue,
                         Queue<int>& notify_queue)
             : mean(mean)
             , precision(precision)
+            , splice_alpha(splice_alpha)
+            , splice_beta(splice_beta)
             , Q(Q)
             , spliced_tgroup_indexes(spliced_tgroup_indexes)
             , tgroup_tids(tgroup_tids)
+            , condition(condition)
             , condition_samples(condition_samples)
             , spliced_tgroup_queue(spliced_tgroup_queue)
             , notify_queue(notify_queue)
             , thread(NULL)
         {
             C = mean.size();
+            K = Q.size1();
         }
 
         void run()
@@ -280,6 +336,14 @@ class SpliceMeanPrecSamplerThread
             BOOST_FOREACH (const std::vector<int>& samples, condition_samples) {
                 data.resize(std::max(data.size(), samples.size()));
             }
+
+            // temporary space for
+            size_t max_size2 = 0;
+            BOOST_FOREACH (const std::vector<unsigned int>& tids, tgroup_tids) {
+                max_size2 = std::max<size_t>(tids.size(), max_size2);
+            }
+            matrix<double> meanj(K, max_size2);
+            matrix<double> dataj(K, max_size2);
 
             int j;
             while (true) {
@@ -323,10 +387,22 @@ class SpliceMeanPrecSamplerThread
                     }
                 }
 
-                // sample precision
-                // TODO
+                for (size_t i = 0; i < K; ++i) {
+                    double data_sum = 0.0;
+                    for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
+                        meanj(j, k) = mean[condition[i]][j][k];
+                        dataj(j, k) = Q(i, tgroup_tids[tgroup][k]);
+                        data_sum += dataj(j, k);
+                    }
 
-                notify_queue.push(1);
+                    for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
+                        dataj(j, k) /= data_sum;
+                    }
+                }
+
+                precision[j] = precision_sampler.sample(
+                        precision[j], &meanj, splice_alpha, splice_beta,
+                        &dataj, K, tgroup_tids[tgroup].size());
             }
         }
 
@@ -347,19 +423,23 @@ class SpliceMeanPrecSamplerThread
         // what we are sampling over
         std::vector<std::vector<std::vector<double> > >& mean;
         std::vector<double>& precision;
+        const double& splice_alpha;
+        const double& splice_beta;
 
         // current transcript quantification
         const matrix<double>& Q;
 
         const std::vector<unsigned int>& spliced_tgroup_indexes;
         const std::vector<std::vector<unsigned int> >& tgroup_tids;
+        const std::vector<int>& condition;
         const std::vector<std::vector<int> >& condition_samples;
 
         Queue<int>& spliced_tgroup_queue;
         Queue<int>& notify_queue;
 
-        size_t C;
+        size_t C, K;
         BetaDistributionSampler betadist_sampler;
+        SplicePrecisionSampler precision_sampler;
         rng_t rng;
 
         boost::thread* thread;
@@ -581,6 +661,11 @@ Analyze::Analyze(size_t burnin,
     tgroup_beta_alpha  = 1.0;
     tgroup_alpha_beta  = 1.5;
     tgroup_beta_beta   = 1.0;
+
+    splice_alpha_alpha = 1.5;
+    splice_beta_alpha  = 1.0;
+    splice_alpha_beta  = 1.5;
+    splice_beta_beta   = 1.0;
 
     experiment_tgroup_mu0 = -10;
     experiment_tgroup_sigma0 = 5.0;
@@ -1117,9 +1202,11 @@ void Analyze::run()
     splice_mean_prec_sampler_threads.resize(constants::num_threads);
     BOOST_FOREACH (SpliceMeanPrecSamplerThread*& thread, splice_mean_prec_sampler_threads) {
         thread = new SpliceMeanPrecSamplerThread(
-                condition_splice_mean, splice_precision, Q,
+                condition_splice_mean, splice_precision,
+                splice_alpha, splice_beta, Q,
                 spliced_tgroup_indexes,
                 tgroup_tids,
+                condition,
                 condition_samples,
                 splice_mean_prec_sampler_tick_queue,
                 splice_mean_prec_sampler_notify_queue);
