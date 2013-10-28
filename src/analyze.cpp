@@ -685,15 +685,6 @@ Analyze::Analyze(size_t burnin,
         }
     }
 
-    condition_splice_mean.resize(C);
-    for (size_t i = 0; i < C; ++i) {
-        condition_splice_mean[i].resize(spliced_tgroup_indexes.size());
-        for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
-            condition_splice_mean[i][j].resize(
-                tgroup_tids[spliced_tgroup_indexes[j]].size());
-        }
-    }
-
     Logger::info("Number of transcripts: %u", N);
     Logger::info("Number of transcription groups: %u", T);
     Logger::info("Number of tgroup with multiple isoforms: %u",
@@ -1153,6 +1144,15 @@ void Analyze::run()
     tgroup_mu.resize(K, T);
     experiment_tgroup_mu.resize(T);
     experiment_tgroup_sigma.resize(T);
+
+    condition_splice_mean.resize(C);
+    for (size_t i = 0; i < C; ++i) {
+        condition_splice_mean[i].resize(spliced_tgroup_indexes.size());
+        for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
+            condition_splice_mean[i][j].resize(
+                tgroup_tids[spliced_tgroup_indexes[j]].size());
+        }
+    }
 
     choose_initial_values();
 
