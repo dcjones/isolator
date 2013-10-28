@@ -1,4 +1,9 @@
 
+include_directories(${isolator_SOURCE_DIR}/src
+                    ${Boost_INCLUDE_DIRS}
+                    ${HDF5_INCLUDE_DIRS}
+                    ${ZLIB_INCLUDE_DIRS})
+
 add_subdirectory(cblas)
 add_subdirectory(f2c)
 add_subdirectory(gtf)
@@ -29,11 +34,6 @@ add_executable(isolator
                sparse_mat.cpp
                transcripts.cpp)
 
-include_directories(${isolator_SOURCE_DIR}/src
-                    ${Boost_INCLUDE_DIRS}
-                    ${HDF5_INCLUDE_DIRS}
-                    ${ZLIB_INCLUDE_DIRS})
-
 target_link_libraries(isolator
                       loess
                       cblas
@@ -43,7 +43,6 @@ target_link_libraries(isolator
                       samtools
                       seqbias
                       sqlite3
-                      nlopt
                       ${Boost_SYSTEM_LIBRARY}
                       ${Boost_THREAD_LIBRARY}
                       ${Boost_TIMER_LIBRARY}

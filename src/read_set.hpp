@@ -162,7 +162,7 @@ class ReadSet
         /* Map aligned reads to number of occurances. */
         struct UniqueReadCountsCmp
         {
-            bool operator () (AlignedRead* const& a, AlignedRead* const& b)
+            bool operator () (AlignedRead* const& a, AlignedRead* const& b) const
             {
                 return *a < *b;
             }
