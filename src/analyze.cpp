@@ -359,17 +359,17 @@ class SpliceMeanPrecSamplerThread
                     for (size_t round = 0; round < 5 && round < ms.size(); ++round) {
                         unsigned int u =
                             boost::random::uniform_int_distribution<unsigned int>(
-                                    ms.size() - 1)(rng);
+                                    0, ms.size() - 1)(rng);
                         unsigned int v =
                             boost::random::uniform_int_distribution<unsigned int>(
-                                    ms.size() - 2)(rng);
+                                    0, ms.size() - 2)(rng);
 
-                        if (v == u) ++v;
+                         if (v == u) ++v;
 
                         unsigned int tidu = tgroup_tids[tgroup][u];
                         unsigned int tidv = tgroup_tids[tgroup][v];
 
-                        for (size_t k = 0; k < condition_samples[i].size(); ++j) {
+                        for (size_t k = 0; k < condition_samples[i].size(); ++k) {
                             size_t sample_num = condition_samples[i][k];
                             data[k] = Q(sample_num, tidu) / Q(sample_num, tidv);
                         }
