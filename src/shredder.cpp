@@ -304,8 +304,8 @@ double BetaLogPdf::df_dx(double alpha, double beta, double x)
 
 double BetaLogPdf::df_dgamma(double gamma, double c, double x)
 {
-    return c * (log(x / (1 - x)) +
-                boost::math::digamma(gamma * c) -
+    return c * (log(x / (1 - x)) -
+                boost::math::digamma(gamma * c) +
                 boost::math::digamma((1 - gamma) * c));
 }
 
@@ -353,8 +353,9 @@ double DirichletLogPdf::df_dalpha(double alpha,
     for (size_t i = 0; i < n; ++i) {
         double numerator = 0.0, denominator = 0.0;
         for (size_t j = 0; j < m; ++j) {
+            double mean_i_j = (*mean)(i, j);
             numerator += (*mean)(i, j) *
-                         gamma(alpha * (*mean)(i ,j)) *
+                         gamma(alpha * (*mean)(i, j)) *
                          boost::math::digamma(alpha * (*mean)(i, j));
             denominator += gamma(alpha * (*mean)(i, j));
         }

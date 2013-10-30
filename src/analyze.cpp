@@ -371,7 +371,8 @@ class SpliceMeanPrecSamplerThread
 
                         for (size_t k = 0; k < condition_samples[i].size(); ++k) {
                             size_t sample_num = condition_samples[i][k];
-                            data[k] = Q(sample_num, tidu) / Q(sample_num, tidv);
+                            data[k] = Q(sample_num, tidu) /
+                                (Q(sample_num, tidu) + Q(sample_num, tidv));
                         }
 
                         double x = betadist_sampler.sample(
@@ -390,19 +391,21 @@ class SpliceMeanPrecSamplerThread
                 for (size_t i = 0; i < K; ++i) {
                     double data_sum = 0.0;
                     for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
-                        meanj(j, k) = mean[condition[i]][j][k];
-                        dataj(j, k) = Q(i, tgroup_tids[tgroup][k]);
-                        data_sum += dataj(j, k);
+                        meanj(i, k) = mean[condition[i]][j][k];
+                        dataj(i, k) = Q(i, tgroup_tids[tgroup][k]);
+                        data_sum += dataj(i, k);
                     }
 
                     for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
-                        dataj(j, k) /= data_sum;
+                        dataj(i, k) /= data_sum;
                     }
                 }
 
                 precision[j] = precision_sampler.sample(
                         precision[j], &meanj, splice_alpha, splice_beta,
                         &dataj, K, tgroup_tids[tgroup].size());
+
+                notify_queue.push(1);
             }
         }
 
@@ -1154,6 +1157,8 @@ void Analyze::run()
         }
     }
 
+    splice_precision.resize(spliced_tgroup_indexes.size());
+
     choose_initial_values();
 
     setup_samplers();
@@ -1518,5 +1523,8 @@ void Analyze::choose_initial_values()
     tgroup_beta = 1.0;
     experiment_tgroup_alpha = 0.1;
     experiment_tgroup_beta = 1.0;
+
+    splice_alpha = 0.1;
+    splice_beta = 1.0;
 }
 
