@@ -53,7 +53,15 @@ double Shredder::find_slice_edge(double x0, double slice_height,
     double lp = lp0 - slice_height;
     double d = d0;
     double x = x0;
-    double x_bound = x0;
+    double x_bound_lower, x_bound_upper;
+    if (direction < 0) {
+        x_bound_lower = lower_limit;
+        x_bound_upper = x0;
+    }
+    else {
+        x_bound_lower = x0;
+        x_bound_upper = upper_limit;
+    }
 
     while (fabs(lp) > lp_eps && fabs(lp/d) > d_eps) {
         double x1 = x - lp / d;
@@ -63,36 +71,22 @@ double Shredder::find_slice_edge(double x0, double slice_height,
         if (direction < 0 && fabs(x - lower_limit) <= x_eps && (x1 < x || lp > 0.0)) break;
         if (direction > 0 && fabs(x - upper_limit) <= x_eps && (x1 > x || lp > 0.0)) break;
 
-        if (lp > 0) x_bound = x;
-
         // if we are moving in the wrong direction (i.e. toward the other root),
         // use bisection to correct course.
         if (direction < 0) {
-            if (x1 > x_bound) {
-                if (lp > 0) {
-                    x = finite(lower_limit) ?
-                            (lower_limit + x) / 2 : x - fabs(x - x1);
-                }
-                else {
-                    x = (x_bound + x) / 2;
-                }
-            }
-            else if (x1 < lower_limit) x = (lower_limit + x) / 2;
-            else x = x1;
+            if (lp > 0) x_bound_upper = x;
+            else        x_bound_lower = x;
         }
         else {
-            if (x1 < x_bound) {
-                if (lp > 0) {
-                    x = finite(upper_limit) ?
-                            (upper_limit + x) / 2 : x + fabs(x - x1);
-                }
-                else {
-                    x = (x_bound + x) / 2;
-                }
-            }
-            else if (x1 > upper_limit) x = (upper_limit + x) / 2;
-            else x = x1;
+            if (lp > 0) x_bound_lower = x;
+            else        x_bound_upper = x;
         }
+
+        // resort to binary search if we seem not to be making progress
+        if (x1 < x_bound_lower + x_eps || x1 > x_bound_upper - x_eps) {
+            x = (x_bound_lower + x_bound_upper) / 2;
+        }
+        else x = x1;
 
         lp = f(x, d) - slice_height;
     }
@@ -324,9 +318,9 @@ double DirichletLogPdf::f(double alpha,
 
     double part2 = 0.0;
     for (size_t i = 0; i < n; ++i) {
-        double part2i= 0.0;
+        double part2i = 0.0;
         for (size_t j = 0; j < m; ++j) {
-            part2i += gamma(alpha * (*mean)(i, j));
+            part2i += tgamma(alpha * (*mean)(i, j));
         }
         part2 += log(part2i);
     }
@@ -351,7 +345,7 @@ double DirichletLogPdf::df_dalpha(double alpha,
     for (size_t i = 0; i < n; ++i) {
         double numerator = 0.0, denominator = 0.0;
         for (size_t j = 0; j < m; ++j) {
-            double gamma_alpha_mean_i_j = gamma(alpha * (*mean)(i, j));
+            double gamma_alpha_mean_i_j = tgamma(alpha * (*mean)(i, j));
             numerator += (*mean)(i, j) *
                          gamma_alpha_mean_i_j *
                          boost::math::digamma(alpha * (*mean)(i, j));

@@ -1090,10 +1090,10 @@ void Analyze::qsampler_update_hyperparameters()
         for (size_t j = 0; j < T; ++j) {
             qsamplers[i]->hp.tgroup_mu[j] = tgroup_mu(c, j);
             qsamplers[i]->hp.tgroup_sigma[j] = tgroup_sigma[j];
-
-            std::fill(qsamplers[i]->hp.splice_param.begin(),
-                      qsamplers[i]->hp.splice_param.end(), 1.0);
         }
+
+    std::fill(qsamplers[i]->hp.splice_param.begin(),
+                  qsamplers[i]->hp.splice_param.end(), 1.0);
 
         for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
             unsigned int tgroup = spliced_tgroup_indexes[j];
