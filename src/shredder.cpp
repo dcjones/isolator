@@ -318,10 +318,9 @@ double DirichletLogPdf::f(double alpha,
     double part1 = 0.0;
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j < m; ++j) {
-            part1 += ((*mean)(i, j) - 1) * log((*data)(i, j));
+            part1 += (alpha * (*mean)(i, j) - 1) * log((*data)(i, j));
         }
     }
-    part1 *= alpha;
 
     double part2 = 0.0;
     for (size_t i = 0; i < n; ++i) {
@@ -344,20 +343,19 @@ double DirichletLogPdf::df_dalpha(double alpha,
     double part1 = 0.0;
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j < m; ++j) {
-            part1 += ((*mean)(i, j) - 1) * log((*data)(i, j));
+            part1 += (*mean)(i, j) * log((*data)(i, j));
         }
     }
-    part1 *= alpha;
 
     double part2 = 0.0;
     for (size_t i = 0; i < n; ++i) {
         double numerator = 0.0, denominator = 0.0;
         for (size_t j = 0; j < m; ++j) {
-            double mean_i_j = (*mean)(i, j);
+            double gamma_alpha_mean_i_j = gamma(alpha * (*mean)(i, j));
             numerator += (*mean)(i, j) *
-                         gamma(alpha * (*mean)(i, j)) *
+                         gamma_alpha_mean_i_j *
                          boost::math::digamma(alpha * (*mean)(i, j));
-            denominator += gamma(alpha * (*mean)(i, j));
+            denominator += gamma_alpha_mean_i_j;
         }
         part2 += numerator / denominator;
     }

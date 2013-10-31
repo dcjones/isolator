@@ -1093,12 +1093,13 @@ void Analyze::qsampler_update_hyperparameters()
 
             std::fill(qsamplers[i]->hp.splice_param.begin(),
                       qsamplers[i]->hp.splice_param.end(), 1.0);
-            for (size_t k = 0; k < spliced_tgroup_indexes.size(); ++k) {
-                unsigned int tgroup = spliced_tgroup_indexes[k];
-                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
-                    qsamplers[i]->hp.splice_param[tgroup_tids[tgroup][l]] =
-                        condition_splice_mean[c][k][l];
-                }
+        }
+
+        for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
+            unsigned int tgroup = spliced_tgroup_indexes[j];
+            for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
+                qsamplers[i]->hp.splice_param[tgroup_tids[tgroup][k]] =
+                    condition_splice_mean[c][j][k];
             }
         }
     }
