@@ -7,7 +7,6 @@
 #include "fragment_model.hpp"
 #include "gc.hpp"
 #include "queue.hpp"
-#include "sample_db.hpp"
 #include "sparse_mat.hpp"
 #include "transcripts.hpp"
 
@@ -71,8 +70,6 @@ class Sampler
                 TranscriptSet& ts, FragmentModel& fm,
                 bool run_gc_correction, bool use_priors=false);
         ~Sampler();
-
-        void run(unsigned int num_samples, SampleDB& out);
 
         // Called prior to any calls to iterate
         void start();

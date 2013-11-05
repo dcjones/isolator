@@ -21,7 +21,6 @@
 #include "fragment_model.hpp"
 #include "linalg.hpp"
 #include "logger.hpp"
-#include "sample_db.hpp"
 #include "sampler.hpp"
 #include "summarize.hpp"
 #include "transcripts.hpp"
@@ -40,186 +39,6 @@ static void print_logo()
 {
     printf("%s\n     Version: %s\n     Instruction set: %s\n\n",
            isolator_logo, VERSION, LINALG_INSTR_SET);
-}
-
-
-void print_quantify_usage(FILE* fout)
-{
-    fprintf(fout, "Usage: isolator quantify [options] genes.gtf reads.bam\n");
-}
-
-
-void print_quantify_help(FILE* fout)
-{
-    print_quantify_usage(fout);
-    fprintf(fout,
-            "\nOptions:\n"
-            "-h, --help                Print this help message\n"
-            "-v, --verbose             Print a bunch of information useful mainly for debugging.\n"
-            "-o, --out=FILE            Output results to the given file (default: fpkm.tab)\n"
-            "-g, --genomic-seq=FILE    Correct for sequence bias, given the a the sequence\n"
-            "                          against which the reads are aligned, in FAST format.\n"
-            "-p, --threads=N           number of threads to use.\n"
-            "    --no-gc-correction    disable post-hoc GC-content adjustments.\n"
-            "-T, --trans-ids=FILE      A file listing transcript id's of transcripts that\n"
-            "                          will be quantified (by default, every transcript).\n"
-            "-G, --gene-ids=FILE       A file listing gene id's of transcripts that\n"
-            "                          will be quantified (by default, every transcript).\n"
-            "-N, --num-samples         Generate this number of samples (by default: 250).\n\n"
-            "See 'isolator help quantify' for more.\n");
-}
-
-
-int isolator_quantify(int argc, char* argv[])
-{
-    static struct option long_options[] =
-    {
-        {"help",             no_argument,       NULL, 'h'},
-        {"verbose",          no_argument,       NULL, 'v'},
-        {"out",              required_argument, NULL, 'o'},
-        {"threads",          required_argument, NULL, 'p'},
-        {"no-gc-correction", no_argument,       NULL, 0},
-        {"trans-ids",        required_argument, NULL, 'T'},
-        {"gene-ids",         required_argument, NULL, 'G'},
-        {"genomic-seq",      required_argument, NULL, 'g'},
-        {"num-samples",      required_argument, NULL, 'N'},
-        {0, 0, 0, 0}
-    };
-
-    const char* fa_fn  = NULL;
-    const char* out_fn = "isolator.db";
-    constants::num_threads = boost::thread::hardware_concurrency();
-    unsigned int num_samples = 250;
-    Logger::level logger_level = Logger::INFO;
-    bool run_gc_correction = true;
-
-    int opt;
-    int optidx;
-
-    while (true) {
-        opt = getopt_long(argc, argv, "hvo:p:g:N:", long_options, &optidx);
-
-        if (opt == -1) break;
-
-        switch (opt) {
-            case 'h':
-                print_quantify_help(stdout);
-                return 0;
-
-            case 'v':
-                logger_level = Logger::DEBUG;
-                break;
-
-            case 'o':
-                out_fn = optarg;
-                break;
-
-            case 'p':
-                constants::num_threads = std::max(1, atoi(optarg));
-                break;
-
-            case 'g':
-                fa_fn = optarg;
-                break;
-
-            case 'N':
-                num_samples = strtoul(optarg, NULL, 10);
-                break;
-
-            case 0:
-                if (strcmp(long_options[optidx].name, "no-gc-correction") == 0) {
-                    run_gc_correction = false;
-                }
-                break;
-
-            case '?':
-                fprintf(stderr, "\n");
-                print_quantify_help(stderr);
-                return 1;
-
-            default:
-                abort();
-        }
-    }
-
-    /* no positional argumens */
-    if (optind == argc) {
-        print_quantify_usage(stdout);
-        return 0;
-    }
-
-    /* too few positional arguments */
-    else if (optind + 1 == argc) {
-        fprintf(stderr, "Too few arguments.\n\n");
-        print_quantify_usage(stderr);
-        return 1;
-    }
-
-    /* too many */
-    else if (optind + 2 > argc) {
-        fprintf(stderr, "Too many arguments.\n\n");
-        print_quantify_usage(stderr);
-        return 1;
-    }
-
-    print_logo();
-    Logger::start();
-    Logger::set_level(logger_level);
-
-    const char* gtf_fn = argv[optind];
-    const char* bam_fn = argv[optind + 1];
-
-    /* Read transcripts. */
-    TranscriptSet ts;
-    FILE* gtf_f = fopen(gtf_fn, "rb");
-    if (gtf_f == NULL) {
-        Logger::abort("Can't open file %s for reading.", gtf_fn);
-    }
-    ts.read_gtf(gtf_f);
-    fclose(gtf_f);
-
-    /* Prepare output database. */
-    SampleDB db(out_fn, true);
-    db.insert_meta("version", VERSION);
-    db.insert_meta("instruction_set", LINALG_INSTR_SET);
-
-    struct timeval t0, t1, elapsed_time;
-    gettimeofday(&t0, NULL);
-
-    time_t current_time = time(NULL);
-    tm current_time_struct;
-    localtime_r(&current_time, &current_time_struct);
-    char time_str[200];
-    strftime(time_str, sizeof(time_str), "%a, %d %b %Y %T %z",
-             &current_time_struct);
-    db.insert_meta("time", time_str);
-
-    // TODO: insert command line into meta
-    db.insert_param("num_samples", (double) num_samples);
-
-    /* Initialize the fragment model. */
-    FragmentModel* fm = new FragmentModel();
-    fm->estimate(ts, bam_fn, fa_fn);
-
-    /* Initialize the sampler. */
-    Sampler sampler(bam_fn, fa_fn, ts, *fm, run_gc_correction, false);
-    delete fm; /* free a little memory */
-    sampler.run(num_samples, db);
-
-    gettimeofday(&t1, NULL);
-    long tdiff = (t1.tv_usec + 1000000 * t1.tv_sec) -
-                 (t0.tv_usec + 1000000 * t0.tv_sec);
-    elapsed_time.tv_sec = tdiff / 1000000;
-    elapsed_time.tv_usec = tdiff % 1000000;
-    snprintf(time_str, sizeof(time_str), "%1ld.%0.6ld",
-             (long) elapsed_time.tv_sec,
-             (long) elapsed_time.tv_usec);
-    db.insert_meta("elapsed_seconds", time_str);
-
-    Logger::info("Finished. Have a nice day!");
-    Logger::end();
-
-    return EXIT_SUCCESS;
 }
 
 
@@ -580,10 +399,7 @@ int main(int argc, char* argv[])
         return isolator_help(argc, argv);
     }
 
-    if (strcmp(argv[0], "quantify") == 0) {
-        return isolator_quantify(argc, argv);
-    }
-    else if (strcmp(argv[0], "summarize") == 0) {
+    if (strcmp(argv[0], "summarize") == 0) {
         return isolator_summarize(argc, argv);
     }
     else if (strcmp(argv[0], "analyze") == 0) {

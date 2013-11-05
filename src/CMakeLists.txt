@@ -11,7 +11,6 @@ add_subdirectory(hat-trie)
 add_subdirectory(loess)
 add_subdirectory(samtools)
 add_subdirectory(seqbias)
-add_subdirectory(sqlite3)
 
 add_executable(isolator
                analyze.cpp
@@ -27,7 +26,6 @@ add_executable(isolator
                logger.cpp
                pos_table.cpp
                read_set.cpp
-               sample_db.cpp
                sampler.cpp
                shredder.cpp
                summarize.cpp
@@ -42,7 +40,6 @@ target_link_libraries(isolator
                       hat-trie
                       samtools
                       seqbias
-                      sqlite3
                       ${Boost_SYSTEM_LIBRARY}
                       ${Boost_THREAD_LIBRARY}
                       ${Boost_TIMER_LIBRARY}
