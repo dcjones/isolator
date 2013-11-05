@@ -356,9 +356,8 @@ void print_usage(FILE* fout)
             "Where <command> is one of:\n"
             "    analyze           Quantify and test for differential expression\n"
             "                      and splicing, among other things.\n"
-            "    quantify          Quantify transcript abundance.\n"
             "    summarize         Summarize a sampler run.\n"
-            "    report            Generate useful output from an quantify run.\n"
+            "    report            Generate useful output from an analyze run.\n"
             "    help              Become enlightened.\n",
             VERSION, LINALG_INSTR_SET);
 }
