@@ -23,6 +23,7 @@ class ExperimentTgroupMuSigmaSamplerThread;
 class AlphaSampler;
 class BetaSampler;
 class SpliceMeanPrecSamplerThread;
+class ExperimentSpliceMeanPrecSamplerThread;
 
 
 class Analyze
@@ -92,6 +93,8 @@ class Analyze
         AlphaSampler* alpha_sampler;
         BetaSampler* beta_sampler;
         std::vector<SpliceMeanPrecSamplerThread*> splice_mean_prec_sampler_threads;
+        std::vector<ExperimentSpliceMeanPrecSamplerThread*>
+            experiment_splice_mean_prec_sampler_threads;
 
         // queues to send work to sampler threads, and be notified on completion
         // of ticks.
@@ -100,7 +103,9 @@ class Analyze
                    experiment_musigma_sampler_tick_queue,
                    experiment_musigma_sampler_notify_queue,
                    splice_mean_prec_sampler_tick_queue,
-                   splice_mean_prec_sampler_notify_queue;
+                   splice_mean_prec_sampler_notify_queue,
+                   experiment_splice_mean_prec_sampler_tick_queue,
+                   experiment_splice_mean_prec_sampler_notify_queue;
 
         // matrix containing relative transcript abundance samples, indexed by:
         //   sample -> transcript (tid)
@@ -147,11 +152,23 @@ class Analyze
         // according to spliced_tgroup_indexes and tgroup_tids
         std::vector<std::vector<std::vector<double> > > condition_splice_mean;
 
+        // per-spliced-tgroup experiment wide dirichlet mean
+        std::vector<std::vector<double> > experiment_splice_mean;
+
+        // symmetrical dirichlet prior on experiment_splice_mean
+        double experiment_splice_mean_prior;
+
+        // per-spliced-tgroup experiment precision
+        std::vector<double> experiment_splice_precision;
+
         // splicing precision, indexed by spliced tgroup
         std::vector<double> splice_precision;
 
         // parameters for the gamma prior on splice_precision
         double splice_alpha, splice_beta;
+
+        // gamma priors on experiment-wide splice distributions
+        double experiment_splice_alpha, experiment_splice_beta;
 
         // paramaters for the inverse gamma priors on splice_alpha and
         // splice_beta

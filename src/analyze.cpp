@@ -300,6 +300,9 @@ class SpliceMeanPrecSamplerThread
                         std::vector<std::vector<std::vector<double> > >&
                             mean,
                         std::vector<double>& precision,
+                        const std::vector<std::vector<double> >&
+                            experiment_mean,
+                        const std::vector<double>& experiment_precision,
                         const double& splice_alpha,
                         const double& splice_beta,
                         const matrix<double>& Q,
@@ -311,6 +314,8 @@ class SpliceMeanPrecSamplerThread
                         Queue<int>& notify_queue)
             : mean(mean)
             , precision(precision)
+            , experiment_mean(experiment_mean)
+            , experiment_precision(experiment_precision)
             , splice_alpha(splice_alpha)
             , splice_beta(splice_beta)
             , Q(Q)
@@ -334,7 +339,7 @@ class SpliceMeanPrecSamplerThread
                 data.resize(std::max(data.size(), samples.size()));
             }
 
-            // temporary space for
+            // temporary space for sampling precision
             size_t max_size2 = 0;
             BOOST_FOREACH (const std::vector<unsigned int>& tids, tgroup_tids) {
                 max_size2 = std::max<size_t>(tids.size(), max_size2);
@@ -372,10 +377,14 @@ class SpliceMeanPrecSamplerThread
                                 (Q(sample_num, tidu) + Q(sample_num, tidv));
                         }
 
+                        double mean_prior_u =
+                            experiment_mean[j][u] * experiment_precision[j];
+                        double mean_prior_v =
+                            experiment_mean[j][v] * experiment_precision[j];
+
                         double x = betadist_sampler.sample(
                                 mean[i][j][u], mean[i][j][v], precision[j],
-                                // TODO: prior on mean
-                                1.0, 1.0,
+                                mean_prior_u, mean_prior_v,
                                 &data.at(0), condition_samples[i].size());
                         assert(0.0 <= x && x <= 1.0);
 
@@ -424,6 +433,10 @@ class SpliceMeanPrecSamplerThread
         // what we are sampling over
         std::vector<std::vector<std::vector<double> > >& mean;
         std::vector<double>& precision;
+
+        const std::vector<std::vector<double> >& experiment_mean;
+        const std::vector<double>& experiment_precision;
+
         const double& splice_alpha;
         const double& splice_beta;
 
@@ -446,6 +459,135 @@ class SpliceMeanPrecSamplerThread
         boost::thread* thread;
 };
 
+
+class ExperimentSpliceMeanPrecSamplerThread
+{
+    public:
+        ExperimentSpliceMeanPrecSamplerThread(
+                std::vector<std::vector<double> >& experiment_mean,
+                std::vector<double>& experiment_precision,
+                const std::vector<std::vector<std::vector<double> > >&
+                    condition_mean,
+                const std::vector<unsigned int>& spliced_tgroup_indexes,
+                const std::vector<std::vector<unsigned int> >& tgroup_tids,
+                double condition_mean_prior,
+                double experiment_splice_alpha,
+                double experiment_splice_beta,
+                Queue<int>& spliced_tgroup_queue,
+                Queue<int>& notify_queue)
+            : experiment_mean(experiment_mean)
+            , experiment_precision(experiment_precision)
+            , condition_mean(condition_mean)
+            , spliced_tgroup_indexes(spliced_tgroup_indexes)
+            , tgroup_tids(tgroup_tids)
+            , condition_mean_prior(condition_mean_prior)
+            , experiment_splice_alpha(experiment_splice_alpha)
+            , experiment_splice_beta(experiment_splice_beta)
+            , spliced_tgroup_queue(spliced_tgroup_queue)
+            , notify_queue(notify_queue)
+            , thread(NULL)
+        {
+            C = condition_mean.size();
+        }
+
+        void run()
+        {
+            // temporary space for marginals
+            std::vector<double> data(C);
+
+            // temporary space for sampling precision
+            size_t max_size2 = 0;
+            BOOST_FOREACH (const std::vector<unsigned int>& tids, tgroup_tids) {
+                max_size2 = std::max<size_t>(tids.size(), max_size2);
+            }
+            matrix<double> meanj(C, max_size2);
+            matrix<double> dataj(C, max_size2);
+
+            int j;
+            while (true) {
+                if ((j = spliced_tgroup_queue.pop()) == -1) break;
+
+                size_t tgroup = spliced_tgroup_indexes[j];
+                std::vector<double>& ms = experiment_mean[j];
+
+                // TODO: constant
+                for (size_t round = 0; round < 5 && round < ms.size(); ++round) {
+                    unsigned int u =
+                        boost::random::uniform_int_distribution<unsigned int>(
+                                0, ms.size() - 1)(rng);
+                    unsigned int v =
+                        boost::random::uniform_int_distribution<unsigned int>(
+                                0, ms.size() - 2)(rng);
+
+                     if (v == u) ++v;
+
+                    for (size_t k = 0; k < C; ++k) {
+                        data[k] = condition_mean[k][j][u] /
+                            (condition_mean[k][j][u] + condition_mean[k][j][v]);
+                    }
+
+                    double x = betadist_sampler.sample(
+                        experiment_mean[j][u], experiment_mean[j][v],
+                        experiment_precision[j],
+                        condition_mean_prior, condition_mean_prior,
+                        &data.at(0), C);
+
+                    double meansum = experiment_mean[j][u] + experiment_mean[j][v];
+                    experiment_mean[j][u] = x * meansum;
+                    experiment_mean[j][v] = (1.0 - x) * meansum;
+                }
+
+                for (size_t i = 0; i < C; ++i) {
+                    for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
+                        meanj(i, k) = experiment_mean[j][k];
+                        dataj(i, k) = condition_mean[i][j][k];
+                    }
+                }
+
+                // sample precision
+                experiment_precision[j] = precision_sampler.sample(
+                    experiment_precision[j], &meanj,
+                    experiment_splice_alpha,
+                    experiment_splice_beta, &dataj, C,
+                    tgroup_tids[tgroup].size());
+
+                notify_queue.push(1);
+            }
+        }
+
+        void start()
+        {
+            thread = new boost::thread(
+                boost::bind(&ExperimentSpliceMeanPrecSamplerThread::run, this));
+        }
+
+        void join()
+        {
+            thread->join();
+            delete thread;
+            thread = NULL;
+        }
+
+    private:
+        std::vector<std::vector<double> >& experiment_mean;
+        std::vector<double>& experiment_precision;
+        const std::vector<std::vector<std::vector<double> > >&
+            condition_mean;
+        const std::vector<unsigned int>& spliced_tgroup_indexes;
+        const std::vector<std::vector<unsigned int> >& tgroup_tids;
+        double condition_mean_prior;
+        double experiment_splice_alpha;
+        double experiment_splice_beta;
+        Queue<int>& spliced_tgroup_queue;
+        Queue<int>& notify_queue;
+
+        size_t C;
+        BetaDistributionSampler betadist_sampler;
+        SplicePrecisionSampler precision_sampler;
+        rng_t rng;
+
+        boost::thread* thread;
+};
 
 
 class AlphaSampler : public Shredder
@@ -1154,6 +1296,12 @@ void Analyze::run()
         }
     }
 
+    experiment_splice_mean.resize(spliced_tgroup_indexes.size());
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        experiment_splice_mean.resize(
+                tgroup_tids[spliced_tgroup_indexes[i]].size());
+    }
+
     splice_precision.resize(spliced_tgroup_indexes.size());
 
     choose_initial_values();
@@ -1205,6 +1353,7 @@ void Analyze::run()
     BOOST_FOREACH (SpliceMeanPrecSamplerThread*& thread, splice_mean_prec_sampler_threads) {
         thread = new SpliceMeanPrecSamplerThread(
                 condition_splice_mean, splice_precision,
+                experiment_splice_mean, experiment_splice_precision,
                 splice_alpha, splice_beta, Q,
                 spliced_tgroup_indexes,
                 tgroup_tids,
@@ -1212,6 +1361,23 @@ void Analyze::run()
                 condition_samples,
                 splice_mean_prec_sampler_tick_queue,
                 splice_mean_prec_sampler_notify_queue);
+        thread->start();
+    }
+
+    experiment_splice_mean_prec_sampler_threads.resize(constants::num_threads);
+    BOOST_FOREACH (ExperimentSpliceMeanPrecSamplerThread*& thread,
+                   experiment_splice_mean_prec_sampler_threads) {
+        thread = new ExperimentSpliceMeanPrecSamplerThread(
+                experiment_splice_mean,
+                experiment_splice_precision,
+                condition_splice_mean,
+                spliced_tgroup_indexes,
+                tgroup_tids,
+                experiment_splice_mean_prior,
+                experiment_splice_alpha,
+                experiment_splice_beta,
+                experiment_splice_mean_prec_sampler_tick_queue,
+                experiment_splice_mean_prec_sampler_notify_queue);
         thread->start();
     }
 
@@ -1237,6 +1403,7 @@ void Analyze::run()
         musigma_sampler_tick_queue.push(-1);
         experiment_musigma_sampler_tick_queue.push(-1);
         splice_mean_prec_sampler_tick_queue.push(-1);
+        experiment_splice_mean_prec_sampler_tick_queue.push(-1);
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -1244,6 +1411,7 @@ void Analyze::run()
         musigma_sampler_threads[i]->join();
         experiment_musigma_sampler_threads[i]->join();
         splice_mean_prec_sampler_threads[i]->join();
+        experiment_splice_mean_prec_sampler_threads[i]->join();
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -1251,6 +1419,7 @@ void Analyze::run()
         delete musigma_sampler_threads[i];
         delete experiment_musigma_sampler_threads[i];
         delete splice_mean_prec_sampler_threads[i];
+        delete experiment_splice_mean_prec_sampler_threads[i];
     }
 
     H5Dclose(h5_experiment_mean_dataset);
@@ -1312,6 +1481,15 @@ void Analyze::warmup()
         }
     }
     std::fill(splice_precision.begin(), splice_precision.end(), 1.0);
+
+    // initialially flat values for experiment splicing
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        std::fill(experiment_splice_mean[i].begin(),
+                  experiment_splice_mean[i].end(),
+                  1.0 / experiment_splice_mean.size());
+    }
+    std::fill(experiment_splice_precision.begin(),
+              experiment_splice_precision.end(), 1.0);
 
     // ml estimates for experiment_tgroup_mu
     for (size_t j = 0; j < T; ++j) {
@@ -1376,6 +1554,14 @@ void Analyze::sample()
 
     for (size_t i = 0; i < T; ++i) {
         experiment_musigma_sampler_notify_queue.pop();
+    }
+
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        experiment_splice_mean_prec_sampler_tick_queue.push(i);
+    }
+
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        experiment_splice_mean_prec_sampler_notify_queue.pop();
     }
 
     experiment_tgroup_alpha =
@@ -1537,5 +1723,9 @@ void Analyze::choose_initial_values()
 
     splice_alpha = 0.1;
     splice_beta = 1.0;
+
+    experiment_splice_mean_prior = 1.0;
+    experiment_splice_alpha = 0.1;
+    experiment_splice_beta = 1.0;
 }
 
