@@ -21,7 +21,7 @@ using namespace boost::accumulators;
 
 static void assert_finite(double x)
 {
-    if (!finite(x)) {
+    if (!isfinite(x)) {
         Logger::abort("%f found where finite value expected.", x);
     }
 }
@@ -188,7 +188,6 @@ class TgroupMuSigmaSamplerThread
 {
     public:
         TgroupMuSigmaSamplerThread(const matrix<double>& ts,
-                                   double nu,
                                    matrix<double>& mu,
                                    const std::vector<double>& experiment_tgroup_mu,
                                    const std::vector<double>& experiment_tgroup_sigma,
@@ -200,7 +199,6 @@ class TgroupMuSigmaSamplerThread
                                    Queue<int>& tgroup_queue,
                                    Queue<int>& notify_queue)
             : ts(ts)
-            , nu(nu)
             , mu(mu)
             , experiment_tgroup_mu(experiment_tgroup_mu)
             , experiment_tgroup_sigma(experiment_tgroup_sigma)
@@ -264,7 +262,6 @@ class TgroupMuSigmaSamplerThread
 
     private:
         const matrix<double>& ts;
-        double nu;
         matrix<double>& mu;
         const std::vector<double>& experiment_tgroup_mu;
         const std::vector<double>& experiment_tgroup_sigma;
@@ -401,6 +398,7 @@ class SpliceMeanPrecSamplerThread
                     }
                 }
 
+                // sample precision
                 precision[j] = precision_sampler.sample(
                         precision[j], &meanj, splice_alpha, splice_beta,
                         &dataj, K, tgroup_tids[tgroup].size());
@@ -659,7 +657,6 @@ Analyze::Analyze(size_t burnin,
     T = transcripts.num_tgroups();
 
     // TODO: constants (also maybe command line options eventually)
-    tgroup_nu = 100.0;
     tgroup_alpha_alpha = 1.5;
     tgroup_beta_alpha  = 1.0;
     tgroup_alpha_beta  = 1.5;
@@ -1084,7 +1081,6 @@ void Analyze::qsampler_update_hyperparameters()
 {
     for (size_t i = 0; i < K; ++i) {
         qsamplers[i]->hp.scale = scale[i];
-        qsamplers[i]->hp.tgroup_nu = tgroup_nu;
 
         size_t c = condition[i];
         for (size_t j = 0; j < T; ++j) {
@@ -1184,7 +1180,7 @@ void Analyze::run()
 
     musigma_sampler_threads.resize(constants::num_threads);
     BOOST_FOREACH (TgroupMuSigmaSamplerThread*& thread, musigma_sampler_threads) {
-        thread = new TgroupMuSigmaSamplerThread(ts, tgroup_nu, tgroup_mu,
+        thread = new TgroupMuSigmaSamplerThread(ts, tgroup_mu,
                                                 experiment_tgroup_mu, experiment_tgroup_sigma,
                                                 tgroup_sigma,
                                                 tgroup_alpha, tgroup_beta,
@@ -1397,6 +1393,20 @@ void Analyze::sample()
                              &experiment_tgroup_sigma.at(0), T);
 
     assert_finite(experiment_tgroup_beta);
+
+    splice_alpha =
+        alpha_sampler->sample(splice_alpha, splice_beta,
+                              splice_alpha_alpha, splice_beta_alpha,
+                              &splice_precision.at(0), splice_precision.size());
+
+    assert_finite(splice_alpha);
+
+    splice_beta =
+        beta_sampler->sample(splice_beta, splice_alpha,
+                             splice_alpha_beta, splice_beta_beta,
+                             &splice_precision.at(0), splice_precision.size());
+
+    assert_finite(splice_beta);
 }
 
 

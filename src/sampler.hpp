@@ -99,9 +99,6 @@ class Sampler
             // Normalization factor accounting for sequencing depth
             double scale;
 
-            // Degrees-of-freedom parameter for tgroup abundance prior
-            double tgroup_nu;
-
             // Location parameter for tgroup abundance prior
             std::vector<double> tgroup_mu;
 

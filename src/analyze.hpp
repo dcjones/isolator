@@ -183,7 +183,6 @@ class Analyze
         unsigned int T;
 
         // Hyperparams for inverse gamma prior on tgroup_alpha/tgroup_beta
-        double tgroup_nu;
         double tgroup_alpha_alpha, tgroup_beta_alpha;
         double tgroup_alpha_beta, tgroup_beta_beta;
 
