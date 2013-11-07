@@ -1093,7 +1093,6 @@ void Analyze::setup_output(hid_t file_id)
         delete [] tgroup_data;
     }
 
-
     // sample quantification
     // ---------------------
     {
@@ -1134,7 +1133,6 @@ void Analyze::setup_output(hid_t file_id)
         }
     }
 
-
     // experiment parameters
     // ---------------------
     {
@@ -1168,16 +1166,33 @@ void Analyze::setup_output(hid_t file_id)
             Logger::abort("HDF5 dataset creation failed.");
         }
 
-        H5Pclose(dataset_create_property);
-
         hsize_t tgroup_row_dims = T;
         h5_tgroup_row_mem_dataspace = H5Screate_simple(1, &tgroup_row_dims, NULL);
 
         hsize_t tgroup_row_start = 0;
         status = H5Sselect_hyperslab(h5_tgroup_row_mem_dataspace, H5S_SELECT_SET,
                                      &tgroup_row_start, NULL, &tgroup_row_dims, NULL);
-    }
 
+        // splicing parameters
+        h5_splice_param_type = H5Tvlen_create(H5T_NATIVE_FLOAT);
+        if (h5_splice_param_type < 0) {
+            Logger::abort("HDF5 type creation failed.");
+        }
+
+        dims[1] = spliced_tgroup_indexes.size();
+        h5_experiment_splicing_dataspace = H5Screate_simple(2, dims, NULL);
+        h5_splicing_mem_dataspace = H5Screate_simple(1, &dims[1], NULL);
+
+        h5_experiment_splicing_dataset =
+            H5Dcreate2(file_id, "/experiment/splicing", h5_splice_param_type,
+                       h5_experiment_splicing_dataspace, H5P_DEFAULT,
+                       dataset_create_property, H5P_DEFAULT);
+        if (h5_experiment_splicing_dataset < 0) {
+            Logger::abort("HDF5 dataset creation failed.");
+        }
+
+        H5Pclose(dataset_create_property);
+    }
 
     // condition parameters
     // --------------------
@@ -1205,7 +1220,25 @@ void Analyze::setup_output(hid_t file_id)
             Logger::abort("HDF5 dataset creation failed.");
         }
 
+        dims[2] = spliced_tgroup_indexes.size();
+        h5_condition_splicing_dataspace = H5Screate_simple(3, dims, NULL);
+
+        h5_condition_splicing_dataset =
+            H5Dcreate2(file_id, "/condition/splicing", h5_splice_param_type,
+                       h5_condition_splicing_dataspace, H5P_DEFAULT,
+                       dataset_create_property, H5P_DEFAULT);
+        if (h5_condition_splicing_dataset < 0) {
+            Logger::abort("HDF5 dataset creation failed.");
+        }
+
         H5Pclose(dataset_create_property);
+    }
+
+    h5_splice_work = new hvl_t[spliced_tgroup_indexes.size()];
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        size_t num_tids = tgroup_tids[spliced_tgroup_indexes[i]].size();
+        h5_splice_work[i].len = num_tids;
+        h5_splice_work[i].p = new float[num_tids];
     }
 }
 
@@ -1429,16 +1462,26 @@ void Analyze::run()
         delete experiment_splice_mean_prec_sampler_threads[i];
     }
 
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        delete [] h5_splice_work;
+    }
+    delete [] h5_splice_work;
     H5Dclose(h5_experiment_mean_dataset);
     H5Dclose(h5_experiment_sd_dataset);
     H5Sclose(h5_experiment_tgroup_dataspace);
     H5Dclose(h5_condition_mean_dataset);
     H5Sclose(h5_condition_tgroup_dataspace);
     H5Dclose(h5_sample_quant_dataset);
+    H5Dclose(h5_experiment_splicing_dataset);
+    H5Dclose(h5_condition_splicing_dataset);
     H5Sclose(h5_sample_quant_dataspace);
     H5Sclose(h5_sample_quant_mem_dataspace);
     H5Sclose(h5_tgroup_row_mem_dataspace);
+    H5Sclose(h5_experiment_splicing_dataspace);
+    H5Sclose(h5_condition_splicing_dataspace);
+    H5Sclose(h5_splicing_mem_dataspace);
     H5Fclose(output_file_id);
+    H5Tclose(h5_splice_param_type);
 
     Logger::pop_task(task_name);
     cleanup();
@@ -1678,6 +1721,63 @@ void Analyze::write_output(size_t sample_num)
 
     if (status < 0) {
         Logger::abort("HDF5 write operation failed.");
+    }
+
+    // write experiment and condition splicing parameters
+    hsize_t experiment_splicing_start[2] = {sample_num, 0};
+    hsize_t experiment_splicing_count[2] = {1, spliced_tgroup_indexes.size()};
+
+    status = H5Sselect_hyperslab(h5_experiment_splicing_dataspace,
+                                 H5S_SELECT_SET,
+                                 experiment_splicing_start, NULL,
+                                 experiment_splicing_count, NULL);
+    if (status < 0) {
+        Logger::abort("HDF5 dataspace selection failed.");
+    }
+
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        float* xs = reinterpret_cast<float*>(h5_splice_work[i].p);
+        for (size_t j = 0; j < h5_splice_work[i].len; ++j) {
+            xs[j] = experiment_splice_precision[i] *
+                    experiment_splice_mean[i][j];
+        }
+    }
+
+    status = H5Dwrite(h5_condition_splicing_dataset, h5_splice_param_type,
+                      h5_splicing_mem_dataspace, h5_experiment_splicing_dataspace,
+                      H5P_DEFAULT, h5_splice_work);
+    if (status < 0) {
+        Logger::abort("HDF5 write operation failed.");
+    }
+
+    hsize_t condition_splicing_start[3] = {sample_num, 0, 0};
+    hsize_t condition_splicing_count[3] = {1, 1, spliced_tgroup_indexes.size()};
+
+
+    for (size_t i = 0; i < C; ++i) {
+        for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
+            float* xs = reinterpret_cast<float*>(h5_splice_work[j].p);
+            for (size_t k = 0; k < h5_splice_work[j].len; ++k) {
+                xs[k] = splice_precision[j] * condition_splice_mean[i][j][k];
+            }
+        }
+
+        condition_splicing_start[1] = i;
+        status = H5Sselect_hyperslab(h5_condition_splicing_dataspace,
+                                     H5S_SELECT_SET,
+                                     condition_splicing_start, NULL,
+                                     condition_splicing_count, NULL);
+        if (status < 0) {
+            Logger::abort("HDF5 dataspace selection failed.");
+        }
+
+        status = H5Dwrite(h5_condition_splicing_dataset, h5_splice_param_type,
+                          h5_splicing_mem_dataspace, h5_condition_splicing_dataset,
+                          H5P_DEFAULT, h5_splice_work);
+
+        if (status < 0) {
+            Logger::abort("HDF5 write operation failed.");
+        }
     }
 }
 
