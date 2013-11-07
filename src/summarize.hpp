@@ -32,6 +32,7 @@ class Summarize
                                 unsigned int condition_a,
                                 unsigned int condition_b);
 
+        void condition_splicing(FILE* output);
 
     private:
         void median_transcript_expression(
@@ -57,8 +58,14 @@ class Summarize
         // gene_id indexed by tid
         std::vector<std::string> gene_ids;
 
-        // tgroup indeed by tid
+        // tgroup indexed by tid
         std::vector<unsigned int> tgroup;
+
+        // tids belonging to each tgroup
+        std::vector<std::vector<unsigned int> > tgroup_tids;
+
+        // indexes of tgroups with multiple transcripts
+        std::vector<unsigned int> spliced_tgroup_indexes;
 };
 
 

@@ -87,18 +87,7 @@ int isolator_summarize(int argc, char* argv[])
 
     int opt;
     int opt_idx;
-
-    const char* strategy_names[] = {
-        "median_transcript_expression",
-        "median_gene_expression",
-        "condition_tgroup_mean",
-        "experiment_tgroup_sd",
-        "tgroup_fold_change",
-        NULL
-    };
-    const char** s; // used in a couple places below
-
-    size_t strategy = 0;
+    const char* strategy = "median_transcript_expression";
 
     while (true) {
         opt = getopt_long(argc, argv, "hvo:s:l", long_options, &opt_idx);
@@ -119,29 +108,17 @@ int isolator_summarize(int argc, char* argv[])
                 break;
 
             case 'l':
-                s = strategy_names;
-                printf("Available strategies:\n");
-                while (*s) {
-                    printf("  %s\n", *s);
-                    ++s;
-                }
+                printf("Available strategies:\n"
+                       "  median_transcript_expression\n"
+                       "  median_gene_expression\n"
+                       "  condition_splicing\n"
+                       "  condition_tgroup_mean\n"
+                       "  experiment_tgroup_sd\n"
+                       "  tgroup_fold_change\n");
                 return 0;
 
             case 's':
-                s = strategy_names;
-                strategy = 0;
-                while (*s) {
-                    if (strcmp(*s, optarg) == 0) {
-                        break;
-                    }
-                    ++strategy;
-                    ++s;
-                }
-
-                if (!*s) {
-                    Logger::abort("No such strategy: %s", optarg);
-                    return 1;
-                }
+                strategy = optarg;
                 break;
 
             case 'a':
@@ -161,8 +138,6 @@ int isolator_summarize(int argc, char* argv[])
                 abort();
         }
     }
-
-    Logger::info("Outputing %s", strategy_names[strategy]);
 
     /* no positional argumens */
     if (optind == argc) {
@@ -188,20 +163,26 @@ int isolator_summarize(int argc, char* argv[])
     const char* in_fn = argv[optind];
 
     Summarize summarize(in_fn);
-    if (strategy == 0) {
+    if (strcmp(strategy, "median_transcript_expression") == 0) {
         summarize.median_transcript_expression(out_f);
     }
-    else if (strategy == 1) {
+    else if (strcmp(strategy, "median_gene_expression") == 0) {
         summarize.median_gene_expression(out_f);
     }
-    else if (strategy == 2) {
+    else if (strcmp(strategy, "condition_splicing")) {
+        summarize.condition_splicing(out_f);
+    }
+    else if (strcmp(strategy, "condition_tgroup_mean") == 0) {
         summarize.median_condition_tgroup_expression(out_f);
     }
-    else if (strategy == 3) {
+    else if (strcmp(strategy, "experiment_tgroup_sd") == 0) {
         summarize.median_experiment_tgroup_sd(out_f);
     }
-    else if (strategy == 4) {
+    else if (strcmp(strategy, "tgroup_fold_change") == 0) {
         summarize.tgroup_fold_change(out_f, condition_a, condition_b);
+    }
+    else {
+        Logger::abort("No such summarization strategy: %s", strategy);
     }
 
     fclose(out_f);
