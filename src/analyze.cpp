@@ -1174,6 +1174,9 @@ void Analyze::setup_output(hid_t file_id)
                                      &tgroup_row_start, NULL, &tgroup_row_dims, NULL);
 
         // splicing parameters
+        chunk_dims[1] = spliced_tgroup_indexes.size();
+        H5Pset_chunk(dataset_create_property, 2, chunk_dims);
+
         h5_splice_param_type = H5Tvlen_create(H5T_NATIVE_FLOAT);
         if (h5_splice_param_type < 0) {
             Logger::abort("HDF5 type creation failed.");
@@ -1219,6 +1222,10 @@ void Analyze::setup_output(hid_t file_id)
         if (h5_condition_mean_dataset < 0) {
             Logger::abort("HDF5 dataset creation failed.");
         }
+
+        // splicing
+        chunk_dims[2] = spliced_tgroup_indexes.size();
+        H5Pset_chunk(dataset_create_property, 3, chunk_dims);
 
         dims[2] = spliced_tgroup_indexes.size();
         h5_condition_splicing_dataspace = H5Screate_simple(3, dims, NULL);
