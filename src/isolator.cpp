@@ -222,6 +222,7 @@ void print_analyze_help(FILE* fout)
     fprintf(fout,
         "\nOptions:\n"
         "-h, --help                Print this help message\n"
+        "-o, --output=FILE         File to write HDF5 output to (default: isolator_output.hdf5)\n"
         "-v, --verbose             Print a bunch of information useful mainly for debugging\n"
         "-g, --genomic-seq=FILE    Correct for sequence bias, given the a the sequence\n"
         "                          against which the reads are aligned, in FAST format.\n"
@@ -238,6 +239,7 @@ int isolator_analyze(int argc, char* argv[])
     static struct option long_options[] =
     {
         {"help",             no_argument,       NULL, 'h'},
+        {"output",           required_argument, NULL, 'o'},
         {"verbose",          no_argument,       NULL, 'v'},
         {"genomic-seq",      required_argument, NULL, 'g'},
         {"threads",          required_argument, NULL, 'p'},
@@ -253,11 +255,12 @@ int isolator_analyze(int argc, char* argv[])
     bool run_gc_correction = true;
     constants::num_threads = boost::thread::hardware_concurrency();
     const char* fa_fn  = NULL;
+    const char* output_fn = "isolator_output.hdf5";
 
     int opt;
     int optidx;
     while (true) {
-        opt = getopt_long(argc, argv, "hvg:p:N:", long_options, &optidx);
+        opt = getopt_long(argc, argv, "ho:vg:p:N:", long_options, &optidx);
 
         if (opt == -1) break;
 
@@ -265,6 +268,10 @@ int isolator_analyze(int argc, char* argv[])
             case 'h':
                 print_analyze_help(stdout);
                 return 0;
+
+            case 'o':
+                output_fn = optarg;
+                break;
 
             case 'v':
                 logger_level = Logger::DEBUG;
@@ -338,7 +345,7 @@ int isolator_analyze(int argc, char* argv[])
         ++condition_num;
     }
 
-    analyze.run();
+    analyze.run(output_fn);
 
     Logger::info("Finished. Have a nice day!");
     Logger::end();

@@ -1320,7 +1320,7 @@ void Analyze::compute_xs()
 }
 
 
-void Analyze::run()
+void Analyze::run(const char* output_filename)
 {
     C = condition_index.size();
     Q.resize(K, N);
@@ -1355,7 +1355,6 @@ void Analyze::run()
 
     setup_samplers();
 
-    const char* output_filename = "output.hdf5";
     hid_t output_file_id = H5Fcreate(output_filename, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
     if (output_file_id < 0) {
         Logger::abort("Unable to open %s for writing.", output_filename);

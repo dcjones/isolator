@@ -40,7 +40,7 @@ class Analyze
         void add_sample(const char* condition_name,
                         const char* filename);
 
-        void run();
+        void run(const char* output_filename);
 
     private:
         void setup_samplers();
