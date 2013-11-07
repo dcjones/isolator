@@ -1,14 +1,15 @@
 
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/statistics/extended_p_square.hpp>
+#include <boost/accumulators/statistics/median.hpp>
+#include <boost/accumulators/statistics/stats.hpp>
+#include <boost/accumulators/statistics/tail_quantile.hpp>
+#include <boost/array.hpp>
 #include <boost/foreach.hpp>
+#include <boost/math/special_functions/fpclassify.hpp>
 #include <boost/numeric/ublas/matrix_proxy.hpp>
 #include <boost/random/normal_distribution.hpp>
-#include <boost/array.hpp>
 #include <boost/thread.hpp>
-#include <boost/accumulators/accumulators.hpp>
-#include <boost/accumulators/statistics/stats.hpp>
-#include <boost/accumulators/statistics/median.hpp>
-#include <boost/accumulators/statistics/tail_quantile.hpp>
-#include <boost/accumulators/statistics/extended_p_square.hpp>
 
 #include "analyze.hpp"
 #include "constants.hpp"
@@ -21,7 +22,7 @@ using namespace boost::accumulators;
 
 static void assert_finite(double x)
 {
-    if (!isfinite(x)) {
+    if (!boost::math::isfinite(x)) {
         Logger::abort("%f found where finite value expected.", x);
     }
 }
@@ -63,17 +64,14 @@ class BetaDistributionSampler : public Shredder
             double fx = 0.0;
             d = 0.0;
 
-            double a = x * (a0 + b0);
-            double b = (1 - x) * (a0 + b0);
-
             // prior
             fx += beta_logpdf.f(a_prior, b_prior, x);
             d += beta_logpdf.df_dx(a_prior, b_prior, x);
 
             // likelihood
             for (size_t i = 0; i < n; ++i) {
-                fx += beta_logpdf.f(a * prec, b * prec, data[i]);
-                d += beta_logpdf.df_dgamma(x, (a0 + b0) * prec, data[i]);
+                fx += beta_logpdf.f(x * prec, (1.0 - x) * prec, data[i]);
+                d += beta_logpdf.df_dgamma(x, prec, data[i]);
             }
 
             return fx;
@@ -101,7 +99,10 @@ class SplicePrecisionSampler : public Shredder
             this->n = n;
             this->m = m;
 
-            return Shredder::sample(prec);
+            double prec1 = Shredder::sample(prec);
+            return prec1;
+
+            //return Shredder::sample(prec);
         }
 
     private:
@@ -378,9 +379,11 @@ class SpliceMeanPrecSamplerThread
                         }
 
                         double mean_prior_u =
-                            experiment_mean[j][u] * experiment_precision[j];
+                            experiment_precision[j] * experiment_mean[j][u] /
+                                (experiment_mean[j][u] + experiment_mean[j][v]);
                         double mean_prior_v =
-                            experiment_mean[j][v] * experiment_precision[j];
+                            experiment_precision[j] * experiment_mean[j][v] /
+                                (experiment_mean[j][u] + experiment_mean[j][v]);
 
                         double x = betadist_sampler.sample(
                                 mean[i][j][u], mean[i][j][v], precision[j],
@@ -519,7 +522,7 @@ class ExperimentSpliceMeanPrecSamplerThread
                         boost::random::uniform_int_distribution<unsigned int>(
                                 0, ms.size() - 2)(rng);
 
-                     if (v == u) ++v;
+                    if (v == u) ++v;
 
                     for (size_t k = 0; k < C; ++k) {
                         data[k] = condition_mean[k][j][u] /
@@ -653,7 +656,9 @@ class BetaSampler : public Shredder
             this->beta_beta = beta_beta;
             this->sigmas = sigmas;
             this->n = n;
-            return Shredder::sample(beta0);
+            double ans = Shredder::sample(beta0);
+            return ans;
+            //return Shredder::sample(beta0);
         }
 
     private:
@@ -1296,13 +1301,15 @@ void Analyze::run()
         }
     }
 
+    splice_precision.resize(spliced_tgroup_indexes.size());
+
     experiment_splice_mean.resize(spliced_tgroup_indexes.size());
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
-        experiment_splice_mean.resize(
+        experiment_splice_mean[i].resize(
                 tgroup_tids[spliced_tgroup_indexes[i]].size());
     }
 
-    splice_precision.resize(spliced_tgroup_indexes.size());
+    experiment_splice_precision.resize(spliced_tgroup_indexes.size());
 
     choose_initial_values();
 
@@ -1486,7 +1493,7 @@ void Analyze::warmup()
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
         std::fill(experiment_splice_mean[i].begin(),
                   experiment_splice_mean[i].end(),
-                  1.0 / experiment_splice_mean.size());
+                  1.0 / experiment_splice_mean[i].size());
     }
     std::fill(experiment_splice_precision.begin(),
               experiment_splice_precision.end(), 1.0);

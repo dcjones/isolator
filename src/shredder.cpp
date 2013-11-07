@@ -1,9 +1,18 @@
 
 #include <cmath>
 #include <boost/math/special_functions/digamma.hpp>
+#include <boost/math/special_functions/fpclassify.hpp>
 
 #include "logger.hpp"
 #include "shredder.hpp"
+
+
+static void assert_finite(double x)
+{
+    if (!boost::math::isfinite(x)) {
+        Logger::abort("%f found where finite value expected.", x);
+    }
+}
 
 
 Shredder::Shredder(double lower_limit, double upper_limit)
@@ -22,6 +31,7 @@ double Shredder::sample(double x0)
 {
     double d0;
     double lp0 = f(x0, d0);
+    assert_finite(lp0);
 
     double slice_height = log(random_uniform_01(rng)) + lp0;
 
@@ -46,8 +56,8 @@ double Shredder::sample(double x0)
 double Shredder::find_slice_edge(double x0, double slice_height,
                                  double lp0, double d0, int direction)
 {
-    const double lp_eps = 1e-4;
-    const double d_eps  = 1e-8;
+    const double lp_eps = 1e-3;
+    const double d_eps  = 1e-5;
     const double x_eps  = 1e-6;
 
     double lp = lp0 - slice_height;
@@ -63,8 +73,14 @@ double Shredder::find_slice_edge(double x0, double slice_height,
         x_bound_upper = upper_limit;
     }
 
-    while (fabs(lp) > lp_eps && fabs(lp/d) > d_eps) {
-        double x1 = x - lp / d;
+    while (fabs(lp) > lp_eps && fabs(x_bound_upper - x_bound_lower) > x_eps) {
+        double x1;
+        if (fabs(d) < d_eps) {
+            x1 = (x_bound_lower + x_bound_upper) / 2;
+        }
+        else {
+            x1 = x - lp / d;
+        }
 
         // if we are very close to the boundry, and this iteration moves us past
         // the boundry, just give up.
@@ -82,14 +98,34 @@ double Shredder::find_slice_edge(double x0, double slice_height,
             else        x_bound_upper = x;
         }
 
-        // resort to binary search if we seem not to be making progress
-        if (x1 < x_bound_lower + x_eps || x1 > x_bound_upper - x_eps) {
-            x = (x_bound_lower + x_bound_upper) / 2;
-        }
-        else x = x1;
+        bool bisect = x1 < x_bound_lower + x_eps || x1 > x_bound_upper - x_eps;
 
-        lp = f(x, d) - slice_height;
+        // try using the gradient
+        if (!bisect) {
+            x = x1;
+            lp = f(x, d) - slice_height;
+            bisect = !boost::math::isfinite(lp) || !boost::math::isfinite(d);
+        }
+
+        // resort to binary search if we seem not to be making progress
+        if (bisect) {
+            while (true) {
+                x = (x_bound_lower + x_bound_upper) / 2;
+                lp = f(x, d) - slice_height;
+
+                if (boost::math::isinf(lp) || boost::math::isinf(d)) {
+                    if (direction < 0) x_bound_lower = x;
+                    else               x_bound_upper = x;
+                }
+                else break;
+            };
+        }
+
+        assert_finite(lp);
+        assert_finite(d);
     }
+
+    assert_finite(x);
 
     return x;
 }
@@ -309,23 +345,15 @@ double DirichletLogPdf::f(double alpha,
                           const boost::numeric::ublas::matrix<double>* data,
                           size_t n, size_t m)
 {
-    double part1 = 0.0;
+    double part = 0.0;
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j < m; ++j) {
-            part1 += (alpha * (*mean)(i, j) - 1) * log((*data)(i, j));
+            double am = alpha * (*mean)(i, j);
+            part += (am - 1) * log((*data)(i, j)) - lgamma(am);
         }
     }
 
-    double part2 = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        double part2i = 0.0;
-        for (size_t j = 0; j < m; ++j) {
-            part2i += tgamma(alpha * (*mean)(i, j));
-        }
-        part2 += log(part2i);
-    }
-
-    return n * lgamma(alpha) - part2 + part1;
+    return n * lgamma(alpha) + part;
 }
 
 
@@ -334,27 +362,15 @@ double DirichletLogPdf::df_dalpha(double alpha,
                                   const boost::numeric::ublas::matrix<double>* data,
                                   size_t n, size_t m)
 {
-    double part1 = 0.0;
+    double part = 0.0;
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j < m; ++j) {
-            part1 += (*mean)(i, j) * log((*data)(i, j));
+            part += (*mean)(i, j) * (log((*data)(i, j)) -
+                                     boost::math::digamma(alpha * (*mean)(i, j)));
         }
     }
 
-    double part2 = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        double numerator = 0.0, denominator = 0.0;
-        for (size_t j = 0; j < m; ++j) {
-            double gamma_alpha_mean_i_j = tgamma(alpha * (*mean)(i, j));
-            numerator += (*mean)(i, j) *
-                         gamma_alpha_mean_i_j *
-                         boost::math::digamma(alpha * (*mean)(i, j));
-            denominator += gamma_alpha_mean_i_j;
-        }
-        part2 += numerator / denominator;
-    }
-
-    return n * boost::math::digamma(alpha) - part2 + part1;
+    return boost::math::digamma(alpha) + part;
 }
 
 

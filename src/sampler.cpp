@@ -1,8 +1,9 @@
 
 #include <boost/foreach.hpp>
+#include <boost/math/special_functions/fpclassify.hpp>
+#include <boost/random.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
-#include <boost/random.hpp>
 #include <climits>
 
 #include "constants.hpp"
@@ -1119,7 +1120,7 @@ float FragWeightEstimationThread::transcript_weight(const Transcript& t)
         tw += frag_len_pr * ws[frag_len];
     }
 
-    if (!isfinite(tw) ||
+    if (!boost::math::isfinite(tw) ||
         frag_len_c(trans_len) <= constants::min_transcript_fraglen_acceptance ||
         tw <= constants::min_transcript_weight) {
         tw = 0.0;
@@ -1379,7 +1380,7 @@ float AbundanceSamplerThread::compute_component_probability(unsigned int c, floa
 
             lp += cmix_prior.f(mu, sigma, &x, 1);
 
-            if (!isfinite(lp)) {
+            if (!boost::math::isfinite(lp)) {
                 Logger::abort("non-finite log-likelihood encountered");
             }
         }
@@ -1688,7 +1689,7 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
     float z0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
 
     float z, s0, s1;
-    if (isfinite(slice_height)) {
+    if (boost::math::isfinite(slice_height)) {
         s0 = transcript_slice_sample_search(slice_height, u, v, z0, p0, true, bu, bv);
         s1 = transcript_slice_sample_search(slice_height, u, v, z0, p0, false, bu, bv);
         if (s1 - s0 < constants::zero_eps || s0 > z0 || s1 < z0) {
@@ -2377,7 +2378,7 @@ void Sampler::sample_abundance()
     // check for numerical errors
     for (unsigned int i = 0; i < num_components; ++i) {
         for (unsigned int j = 0; j < component_frag[i + 1] - component_frag[i]; ++j ) {
-            if (!isfinite(frag_probs[i][j])) {
+            if (!boost::math::isfinite(frag_probs[i][j])) {
                 Logger::warn("numerical error: %f", frag_probs[i][j]);
             }
         }
