@@ -1245,7 +1245,7 @@ void Analyze::setup_output(hid_t file_id)
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
         size_t num_tids = tgroup_tids[spliced_tgroup_indexes[i]].size();
         h5_splice_work[i].len = num_tids;
-        h5_splice_work[i].p = new float[num_tids];
+        h5_splice_work[i].p = reinterpret_cast<void*>(new float[num_tids]);
     }
 }
 
@@ -1469,7 +1469,7 @@ void Analyze::run(const char* output_filename)
     }
 
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
-        delete [] h5_splice_work;
+        delete [] reinterpret_cast<float*>(h5_splice_work[i].p);
     }
     delete [] h5_splice_work;
     H5Dclose(h5_experiment_mean_dataset);
