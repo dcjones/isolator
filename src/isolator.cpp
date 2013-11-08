@@ -169,7 +169,7 @@ int isolator_summarize(int argc, char* argv[])
     else if (strcmp(strategy, "median_gene_expression") == 0) {
         summarize.median_gene_expression(out_f);
     }
-    else if (strcmp(strategy, "condition_splicing")) {
+    else if (strcmp(strategy, "condition_splicing") == 0) {
         summarize.condition_splicing(out_f);
     }
     else if (strcmp(strategy, "condition_tgroup_mean") == 0) {

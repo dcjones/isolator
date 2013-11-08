@@ -147,7 +147,7 @@ void Summarize::median_condition_tgroup_expression(FILE* output)
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[3]; // dims are: num_samples, C, T
     H5Sget_simple_extent_dims(dataspace, dims, NULL);
-    C = dims[1];
+    size_t C = dims[1];
     size_t num_samples = dims[0];
 
     hsize_t mem_dataspace_dims[1] = { T };
@@ -446,7 +446,7 @@ void Summarize::tgroup_fold_change(FILE* output,
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[3]; // dims are: num_samples, C, T
     H5Sget_simple_extent_dims(dataspace, dims, NULL);
-    C = dims[1];
+    size_t C = dims[1];
     size_t num_samples = dims[0];
 
     if (condition_a > C || condition_b > C) {
@@ -562,8 +562,9 @@ void Summarize::condition_splicing(FILE* output)
 
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[3]; // dims are: num_samples, C, spliced_tgroups
-    size_t num_samples = dims[0];
     H5Sget_simple_extent_dims(dataspace, dims, NULL);
+    size_t num_samples = dims[0];
+    size_t C = dims[1];
 
     if (dims[2] != spliced_tgroup_indexes.size()) {
         Logger::abort("The /condition/splicing dataset is of incorrect size.");
@@ -585,7 +586,8 @@ void Summarize::condition_splicing(FILE* output)
     // indexed by spliced tgroup
     std::vector<marray_t> splicing(dims[2]);
     for (size_t i = 0; i < dims[2]; ++i) {
-        splicing[i].resize(boost::extents[dims[0]][dims[1]][tgroup_tids[i].size()]);
+        size_t tgroup = spliced_tgroup_indexes[i];
+        splicing[i].resize(boost::extents[dims[0]][dims[1]][tgroup_tids[tgroup].size()]);
     }
 
     for (size_t i = 0; i < num_samples; ++i) {
@@ -606,9 +608,20 @@ void Summarize::condition_splicing(FILE* output)
             }
 
             for (size_t k = 0; k < dims[2]; ++k) {
-                for (size_t l = 0; l < tgroup_tids[k].size(); ++l) {
+                size_t tgroup = spliced_tgroup_indexes[k];
+                if (buffer[k].len != tgroup_tids[tgroup].size()) {
+                    Logger::abort("Spliced tgroup has an inconsistent transcript count.");
+                }
+
+                float sum = 0.0;
+                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
                     splicing[k][i][j][l] =
                         reinterpret_cast<float*>(buffer[k].p)[l];
+                    sum += splicing[k][i][j][l];
+                }
+
+                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
+                    splicing[k][i][j][l] /= sum;
                 }
             }
         }
@@ -631,7 +644,7 @@ void Summarize::condition_splicing(FILE* output)
             fprintf(output, "%s\t", transcript_ids[tgroup_tids[tgroup][j]].c_str());
             for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                 if (k != 0) fputc(',', output);
-                fprintf(output, "%s\t", transcript_ids[tgroup_tids[tgroup][k]].c_str());
+                fprintf(output, "%s", transcript_ids[tgroup_tids[tgroup][k]].c_str());
             }
 
             for (size_t k = 0; k < C; ++k) {
@@ -645,11 +658,11 @@ void Summarize::condition_splicing(FILE* output)
                         (double) work[lround(work.size() * upper_quantile)],
                         (double) work[work.size()/2]);
             }
+            fputc('\n', output);
         }
-        fputc('\n', output);
     }
 
-    H5Dvlen_reclaim(memtype, dataspace, H5P_DEFAULT, buffer);
+    H5Dvlen_reclaim(memtype, mem_dataspace, H5P_DEFAULT, buffer);
     delete [] buffer;
     H5Sclose(mem_dataspace);
     H5Tclose(memtype);

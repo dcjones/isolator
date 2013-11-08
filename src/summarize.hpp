@@ -49,9 +49,6 @@ class Summarize
         // number of tgroups
         size_t T;
 
-        // numebr of conditions
-        size_t C;
-
         // transcript_id indexed by tid
         std::vector<std::string> transcript_ids;
 
