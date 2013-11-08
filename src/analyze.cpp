@@ -1750,7 +1750,7 @@ void Analyze::write_output(size_t sample_num)
         }
     }
 
-    status = H5Dwrite(h5_condition_splicing_dataset, h5_splice_param_type,
+    status = H5Dwrite(h5_experiment_splicing_dataset, h5_splice_param_type,
                       h5_splicing_mem_dataspace, h5_experiment_splicing_dataspace,
                       H5P_DEFAULT, h5_splice_work);
     if (status < 0) {
@@ -1779,7 +1779,7 @@ void Analyze::write_output(size_t sample_num)
         }
 
         status = H5Dwrite(h5_condition_splicing_dataset, h5_splice_param_type,
-                          h5_splicing_mem_dataspace, h5_condition_splicing_dataset,
+                          h5_splicing_mem_dataspace, h5_condition_splicing_dataspace,
                           H5P_DEFAULT, h5_splice_work);
 
         if (status < 0) {
