@@ -219,20 +219,22 @@ int isolator_analyze(int argc, char* argv[])
 {
     static struct option long_options[] =
     {
-        {"help",             no_argument,       NULL, 'h'},
-        {"output",           required_argument, NULL, 'o'},
-        {"verbose",          no_argument,       NULL, 'v'},
-        {"genomic-seq",      required_argument, NULL, 'g'},
-        {"threads",          required_argument, NULL, 'p'},
-        {"no-gc-correction", no_argument,       NULL, 0},
-        {"num-samples",      required_argument, NULL, 'N'},
-        {"burnin",           required_argument, NULL, 'B'},
+        {"help",                 no_argument,       NULL, 'h'},
+        {"output",               required_argument, NULL, 'o'},
+        {"verbose",              no_argument,       NULL, 'v'},
+        {"genomic-seq",          required_argument, NULL, 'g'},
+        {"threads",              required_argument, NULL, 'p'},
+        {"no-gc-correction",     no_argument,       NULL, 0},
+        {"num-samples",          required_argument, NULL, 'N'},
+        {"burnin",               required_argument, NULL, 'B'},
+        {"tss-cluster-distance", required_argument, NULL, 0},
         {0, 0, 0, 0}
     };
 
     Logger::level logger_level = Logger::INFO;
     unsigned int burnin = 100;
     unsigned int num_samples = 250;
+    pos_t tss_cluster_dist = 30;
     bool run_gc_correction = true;
     constants::num_threads = boost::thread::hardware_concurrency();
     const char* fa_fn  = NULL;
@@ -278,6 +280,9 @@ int isolator_analyze(int argc, char* argv[])
                 if (strcmp(long_options[optidx].name, "no-gc-correction") == 0) {
                     run_gc_correction = false;
                 }
+                else if (strcmp(long_options[optidx].name, "tss-cluster-distance") == 0) {
+                    tss_cluster_dist = strtod(optarg, NULL);
+                }
                 break;
 
             case '?':
@@ -307,7 +312,7 @@ int isolator_analyze(int argc, char* argv[])
     if (gtf_f == NULL) {
         Logger::abort("Can't open file %s for reading.", gtf_fn);
     }
-    ts.read_gtf(gtf_f);
+    ts.read_gtf(gtf_f, tss_cluster_dist);
     fclose(gtf_f);
 
     // initialize
@@ -345,7 +350,6 @@ void print_usage(FILE* fout)
             "    analyze           Quantify and test for differential expression\n"
             "                      and splicing, among other things.\n"
             "    summarize         Summarize a sampler run.\n"
-            "    report            Generate useful output from an analyze run.\n"
             "    help              Become enlightened.\n",
             VERSION, LINALG_INSTR_SET);
 }

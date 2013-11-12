@@ -55,6 +55,9 @@ class Transcript : public std::set<Exon>
         /* Return the length of the spliced transcritpt sequence. */
         pos_t exonic_length() const;
 
+        /* Position of the transcript's start site */
+        pos_t tss_position() const;
+
         /* Extract the sequence of the spliced transcript from the full
          * reference sequence.
          *
@@ -101,6 +104,13 @@ class Transcript : public std::set<Exon>
 };
 
 
+/* Comparator to order transcripts by transcription start site. */
+struct TranscriptCmpTSS
+{
+    bool operator()(const Transcript&, const Transcript& b) const;
+};
+
+
 enum IntronExonType {
     EXONIC_INTERVAL_TYPE,
     INTRONIC_INTERVAL_TYPE
@@ -142,7 +152,7 @@ class TranscriptSet
          * Args:
          *   f: A file, opened for reading, containg GTF data.
          */
-        void read_gtf(FILE* f);
+        void read_gtf(FILE* f, pos_t tgroup_max_tss_dist);
 
         /* Number of transcripts held in the set. */
         size_t size() const;

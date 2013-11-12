@@ -84,6 +84,12 @@ pos_t Transcript::exonic_length() const
 }
 
 
+pos_t Transcript::tss_position() const
+{
+    return strand == strand_pos ? min_start : max_end;
+}
+
+
 void Transcript::get_sequence(twobitseq& dest, const twobitseq& src,
                               pos_t lpad, pos_t rpad) const
 {
@@ -150,6 +156,24 @@ bool Transcript::overlaps(SeqName seqname, pos_t start, pos_t end) const
     return this->seqname == seqname &&
            this->min_start <= end &&
            this->max_end   >= start;
+}
+
+
+bool TranscriptCmpTSS::operator()(const Transcript& a, const Transcript& b) const
+{
+    pos_t a_tss_pos = a.strand == strand_pos ? a.min_start : a.max_end;
+    pos_t b_tss_pos = b.strand == strand_pos ? b.min_start : b.max_end;
+
+    int c;
+    if ((c = seqname_compare(a.seqname.get().c_str(),
+                             b.seqname.get().c_str()))) return c < 0;
+
+    else if (a.strand    != b.strand)    return a.strand        < b.strand;
+    else if (a_tss_pos   != b_tss_pos)   return a_tss_pos       < b_tss_pos;
+    else if (a.min_start != b.min_start) return a.min_start     < b.min_start;
+    else if (a.max_end   != b.max_end)   return a.max_end       < b.max_end;
+    else if (a.gene_id   != b.gene_id)   return a.gene_id       < b.gene_id;
+    else                                 return a.transcript_id < b.transcript_id;
 }
 
 
@@ -240,7 +264,7 @@ std::vector<std::vector<unsigned int> > TranscriptSet::tgroup_tids() const
 }
 
 
-void TranscriptSet::read_gtf(FILE* f)
+void TranscriptSet::read_gtf(FILE* f, pos_t tss_cluster_distance)
 {
     const char* task_name = "Parsing GTF";
 
@@ -332,24 +356,35 @@ void TranscriptSet::read_gtf(FILE* f)
          ++t) {
         sorted_transcripts.push_back(*t->second);
     }
-    std::sort(sorted_transcripts.begin(), sorted_transcripts.end());
+    /* Ok, I need to do clustering of transcription start sites. I can't just
+     * index by tss. How can I go about that?
+     */
 
+
+    // assign tids
+    std::sort(sorted_transcripts.begin(), sorted_transcripts.end());
     unsigned int next_id = 0;
     BOOST_FOREACH (Transcript& t, sorted_transcripts) {
         t.id = next_id++;
-        pos_t tss_pos = t.strand == strand_pos ?  t.min_start : t.max_end;
-        Interval tss(t.seqname, tss_pos, tss_pos, t.strand);
-        tss_group[tss].push_back(t.id);
     }
 
-    unsigned int tgroup = 0;
-    BOOST_FOREACH (const TSMapItem& i, tss_group) {
-        BOOST_FOREACH (const unsigned int& j, i.second) {
-            sorted_transcripts[j].tgroup = tgroup;
+    // assign tgroups
+    std::sort(sorted_transcripts.begin(), sorted_transcripts.end(),
+              TranscriptCmpTSS());
+    unsigned int next_tgroup = 0;
+    for (size_t i = 0; i < sorted_transcripts.size(); ++i) {
+        if (i > 0 &&
+            sorted_transcripts[i].seqname == sorted_transcripts[i-1].seqname &&
+            sorted_transcripts[i].strand  == sorted_transcripts[i-1].strand &&
+            labs(sorted_transcripts[i].tss_position() -
+                 sorted_transcripts[i-1].tss_position()) <= tss_cluster_distance) {
+            sorted_transcripts[i].tgroup = sorted_transcripts[i-1].tgroup;
         }
-        ++tgroup;
+        else {
+            sorted_transcripts[i].tgroup = next_tgroup++;
+        }
     }
-    _num_tgroups = tgroup;
+    _num_tgroups = next_tgroup;
 
     // optionally extend the ends of transcripts before inserting them into the
     // set
