@@ -114,7 +114,8 @@ int isolator_summarize(int argc, char* argv[])
                        "  condition_splicing\n"
                        "  condition_tgroup_mean\n"
                        "  experiment_tgroup_sd\n"
-                       "  tgroup_fold_change\n");
+                       "  tgroup_fold_change\n"
+                       "  expression_samples\n");
                 return 0;
 
             case 's':
@@ -180,6 +181,9 @@ int isolator_summarize(int argc, char* argv[])
     }
     else if (strcmp(strategy, "tgroup_fold_change") == 0) {
         summarize.tgroup_fold_change(out_f, condition_a, condition_b);
+    }
+    else if (strcmp(strategy, "expression_samples") == 0) {
+        summarize.expression_samples(out_f);
     }
     else {
         Logger::abort("No such summarization strategy: %s", strategy);

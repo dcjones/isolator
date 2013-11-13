@@ -670,6 +670,55 @@ void Summarize::condition_splicing(FILE* output)
 }
 
 
+void Summarize::expression_samples(FILE* output)
+{
+    hid_t dataset = H5Dopen2(h5_file, "/transcript_quantification", H5P_DEFAULT);
+    if (dataset < 0) {
+        Logger::abort("Failed to open the /transcript_quant dataset");
+    }
+
+    hid_t dataspace = H5Dget_space(dataset);
+    hsize_t dims[3]; // dims are num_samples, K, N
+    H5Sget_simple_extent_dims(dataspace, dims, NULL);
+    size_t num_samples = dims[0];
+
+    typedef boost::multi_array<float, 3> marray_t;
+    marray_t Q(boost::extents[dims[0]][dims[1]][dims[2]]);
+
+    hsize_t file_dataspace_start[3] = {0, 0, 0};
+    H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
+                        file_dataspace_start, NULL,
+                        dims, NULL);
+    herr_t status = H5Dread(dataset, H5T_NATIVE_FLOAT, dataspace, dataspace,
+                            H5P_DEFAULT, &Q.data()[0]);
+
+    if (status < 0) {
+        Logger::abort("Reading the /transcript_quantification dataset failed.");
+    }
+
+    fprintf(output, "transcript_id");
+    for (size_t i = 0; i < K; ++i) {
+        fprintf(output, "\tsample%lu", (unsigned long) i);
+    }
+    fputc('\n', output);
+
+    for (size_t i = 0; i < N; ++i) {
+        fputs(transcript_ids[i].c_str(), output);
+        for (size_t j = 0; j < K; ++j) {
+            fputc('\t', output);
+            for (size_t k = 0; k < num_samples; ++k) {
+                if (k != 0) fputc(',', output);
+                fprintf(output, "%f", (double) Q[k][j][i]);
+            }
+        }
+        fputc('\n', output);
+    }
+
+    H5Sclose(dataspace);
+    H5Dclose(dataspace);
+}
+
+
 Summarize::~Summarize()
 {
     H5Fclose(h5_file);

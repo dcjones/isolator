@@ -33,6 +33,7 @@ class Summarize
                                 unsigned int condition_b);
 
         void condition_splicing(FILE* output);
+        void expression_samples(FILE* output);
 
     private:
         void median_transcript_expression(
