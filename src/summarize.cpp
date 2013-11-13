@@ -708,14 +708,14 @@ void Summarize::expression_samples(FILE* output)
             fputc('\t', output);
             for (size_t k = 0; k < num_samples; ++k) {
                 if (k != 0) fputc(',', output);
-                fprintf(output, "%f", (double) Q[k][j][i]);
+                fprintf(output, "%e", (double) Q[k][j][i]);
             }
         }
         fputc('\n', output);
     }
 
     H5Sclose(dataspace);
-    H5Dclose(dataspace);
+    H5Dclose(dataset);
 }
 
 
