@@ -1663,7 +1663,8 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
     if (S.use_priors) {
         if (tgu == tgv) {
             p0 += splice_prior.f(S.hp.splice_param[u], S.hp.splice_param[v],
-                                 S.tgroup_tmix[u]);
+                                 S.tgroup_tmix[u] /
+                                    (S.tgroup_tmix[u] + S.tgroup_tmix[v]));
         }
         else {
             // maginalize to get beta parameters
