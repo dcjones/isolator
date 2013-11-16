@@ -118,7 +118,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
                     else               x_bound_upper = x;
                 }
                 else break;
-            };
+            }
         }
 
         assert_finite(lp);

@@ -1403,7 +1403,6 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
     unsigned int c = S.transcript_component[u];
     assert(c == S.transcript_component[v]);
 
-
     acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0, (f1 - f0) * sizeof(float));
 
     asxpy(S.frag_probs_prop[c],
@@ -1432,6 +1431,10 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
     *d *= tmixu + tmixv;
     *d /= M_LN2;
 
+    if (!boost::math::isfinite(*d)) {
+        Logger::abort("Non-finite derivative.");
+    }
+
     double prior_lp_delta = 0.0;
     if (S.use_priors && tgu != tgv) {
         // some hairy stuff to avoid fully computing the normal log-pdf.
@@ -1451,6 +1454,10 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
 
         *d += (xu1 - mu_u) / (sigma_u * sigma_u);
         *d += (xv1 - mu_v) / (sigma_v * sigma_v);
+
+        if (!boost::math::isfinite(*d)) {
+            Logger::abort("Non-finite derivative.");
+        }
     }
 
     // splicing priors
@@ -1462,8 +1469,12 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
 
         *d += splice_prior.df_dx(a, b, x);
         p0 += (a - 1) * log(x / x0) + (b - 1) * log((1 - x) / (1 - x0));
+
+        if (!boost::math::isfinite(*d)) {
+            Logger::abort("Non-finite derivative.");
+        }
     }
-    else {
+    else if (S.use_priors) {
         double a, x, x0;
 
         // super secret trick for recomputing tgroup_tmix[u]
@@ -1478,6 +1489,10 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
         a = S.hp.splice_param[v];
         *d += splice_prior.df_dx(a, bv, x);
         p0 += (a - 1) * log(x / x0) + (bv - 1) * log((1 - x) / (1 - x0));
+
+        if (!boost::math::isfinite(*d)) {
+            Logger::abort("Non-finite derivative.");
+        }
     }
 
     return p0 - pf01
@@ -1535,60 +1550,69 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
     /* derivative */
     float d;
 
+    float z_bound_lower, z_bound_upper;
+    if (left) {
+        z_bound_lower = 0.0;
+        z_bound_upper = z;
+    }
+    else {
+        z_bound_lower = z;
+        z_bound_upper = 1.0;
+    }
+
     z = z0;
     p = recompute_intra_component_probability(
             u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, bu, bv, &d);
     p -= slice_height;
 
-    /* upper or lower bound on z (depending on 'left') */
-    float z_bound = z0;
-
-    unsigned int iter = 0;
-    while (fabs(p) > peps && fabs(p/d) > deps) {
-        float z1 = z - p / d;
-
-        // Handle the case when the zero is out of bounds.
-        if (left && z <= zeps && (z1 < z || p > 0.0)) break;
-        if (!left && z >= 1.0 - zeps && (z1 > z || p > 0.0)) break;
-
-        if (p > 0) z_bound = z;
-
-        // Try to void converging to the wrong zero, use bisection when newton
-        // tells us to go too far.
-        if (left) {
-            if (z1 > z0) {
-                if (p > 0) {
-                    z /= 2.0;
-                }
-                else {
-                    z = (z + z_bound) / 2.0;
-                }
-            }
-            else if (z1 < 0.0) {
-                z /= 2.0;
-            }
-            else z = z1;
+    while (fabs(p) > peps && fabs(z_bound_upper - z_bound_lower) > zeps) {
+        double z1;
+        if (fabs(d) < deps) {
+            z1 = (z_bound_lower + z_bound_upper) / 2;
         }
         else {
-            if (z1 < z0) {
-                if (p > 0) {
-                    z = (z + 1.0) / 2.0;
-                }
-                else {
-                    z = (z + z_bound) / 2.0;
-                }
-            }
-            else if (z1 > 1.0) {
-                z = (z + 1.0) / 2.0;
-            }
-            else z = z1;
+            z1 = z - p / d;
         }
 
-        p = recompute_intra_component_probability(
-                u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, bu, bv, &d);
-        p -= slice_height;
+        // if we are very close to the boundry, and this iteration moves us past
+        // the boundry, just give up.
+        if (left  && z       <= zeps && (z1 < z || p > 0.0)) break;
+        if (!left && 1.0 - z <= zeps && (z1 > z || p > 0.0)) break;
 
-        if (++iter > constants::max_newton_iter) break;
+        if (left) {
+            if (p > 0) z_bound_upper = z;
+            else       z_bound_lower = z;
+        }
+        else {
+            if (p > 0) z_bound_lower = z;
+            else       z_bound_upper = z;
+        }
+
+        bool bisect = z1 < z_bound_lower + zeps || z1 > z_bound_upper - zeps;
+
+        // try using the gradient
+        if (!bisect) {
+            z = z1;
+            p = recompute_intra_component_probability(
+                    u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, bu, bv, &d);
+            p -= slice_height;
+            bisect = !boost::math::isfinite(p) || !boost::math::isfinite(d);
+        }
+
+        // resort to binary search if we seem not to be making progress
+        if (bisect) {
+            while (true) {
+                z = (z_bound_lower + z_bound_upper) / 2;
+                p = recompute_intra_component_probability(
+                        u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, bu, bv, &d);
+                p -= slice_height;
+                if (boost::math::isinf(p) || boost::math::isinf(d)) {
+                    if (left) z_bound_lower = z;
+                    else      z_bound_upper = z;
+                }
+                else break;
+            }
+        }
     }
 
     return z;
@@ -2158,6 +2182,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     hp.tgroup_mu.resize(ts.num_tgroups(), 0.0);
     hp.tgroup_sigma.resize(ts.num_tgroups(), 0.0);
     hp.splice_param.resize(ts.size());
+    std::fill(hp.splice_param.begin(), hp.splice_param.end(), 1.0);
 
     if (fm.sb[0] && run_gc_correction) {
         gc_correct = new GCCorrection(ts, transcript_gc);
