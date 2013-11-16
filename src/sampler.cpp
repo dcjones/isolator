@@ -1431,10 +1431,6 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
     *d *= tmixu + tmixv;
     *d /= M_LN2;
 
-    if (!boost::math::isfinite(*d)) {
-        Logger::abort("Non-finite derivative.");
-    }
-
     double prior_lp_delta = 0.0;
     if (S.use_priors && tgu != tgv) {
         // some hairy stuff to avoid fully computing the normal log-pdf.
@@ -1454,10 +1450,6 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
 
         *d += (xu1 - mu_u) / (sigma_u * sigma_u);
         *d += (xv1 - mu_v) / (sigma_v * sigma_v);
-
-        if (!boost::math::isfinite(*d)) {
-            Logger::abort("Non-finite derivative.");
-        }
     }
 
     // splicing priors
@@ -1469,10 +1461,6 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
 
         *d += splice_prior.df_dx(a, b, x);
         p0 += (a - 1) * log(x / x0) + (b - 1) * log((1 - x) / (1 - x0));
-
-        if (!boost::math::isfinite(*d)) {
-            Logger::abort("Non-finite derivative.");
-        }
     }
     else if (S.use_priors) {
         double a, x, x0;
@@ -1489,10 +1477,6 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
         a = S.hp.splice_param[v];
         *d += splice_prior.df_dx(a, bv, x);
         p0 += (a - 1) * log(x / x0) + (bv - 1) * log((1 - x) / (1 - x0));
-
-        if (!boost::math::isfinite(*d)) {
-            Logger::abort("Non-finite derivative.");
-        }
     }
 
     return p0 - pf01
@@ -1553,10 +1537,10 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
     float z_bound_lower, z_bound_upper;
     if (left) {
         z_bound_lower = 0.0;
-        z_bound_upper = z;
+        z_bound_upper = z0;
     }
     else {
-        z_bound_lower = z;
+        z_bound_lower = z0;
         z_bound_upper = 1.0;
     }
 
@@ -2263,7 +2247,7 @@ void Sampler::start()
             }
         }
 
-        double eps = 1e-5;
+        double eps = 1e-2;
 
         tmix[component_transcripts[i][j_max]] =
             1.0 - component_num_transcripts[i] * eps;
