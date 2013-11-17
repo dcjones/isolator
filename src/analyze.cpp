@@ -83,7 +83,7 @@ class SplicePrecisionSampler : public Shredder
 {
     public:
         SplicePrecisionSampler()
-            : Shredder(1e-16, 100000.0)
+            : Shredder(1.0, 100000.0)
         {}
 
         // mean and dat are both matrices indexed by sample then transcript
@@ -804,15 +804,15 @@ Analyze::Analyze(size_t burnin,
     T = transcripts.num_tgroups();
 
     // TODO: constants (also maybe command line options eventually)
-    tgroup_alpha_alpha = 1.5;
-    tgroup_beta_alpha  = 1.0;
-    tgroup_alpha_beta  = 1.5;
-    tgroup_beta_beta   = 1.0;
+    tgroup_alpha_alpha = 1.0;
+    tgroup_beta_alpha  = 5.0;
+    tgroup_alpha_beta  = 1.0;
+    tgroup_beta_beta   = 5.0;
 
-    splice_alpha_alpha = 1.5;
-    splice_beta_alpha  = 1.0;
-    splice_alpha_beta  = 1.5;
-    splice_beta_beta   = 1.0;
+    splice_alpha_alpha = 1.0;
+    splice_beta_alpha  = 5.0;
+    splice_alpha_beta  = 1.0;
+    splice_beta_beta   = 5.0;
 
     experiment_tgroup_mu0 = -10;
     experiment_tgroup_sigma0 = 5.0;
@@ -1834,8 +1834,8 @@ void Analyze::choose_initial_values()
     experiment_tgroup_alpha = 0.1;
     experiment_tgroup_beta = 1.0;
 
-    splice_alpha = 0.1;
-    splice_beta = 1.0;
+    splice_alpha = 2.0;
+    splice_beta = 2.0;
 
     experiment_splice_mean_prior = 1.0;
     experiment_splice_alpha = 0.1;
