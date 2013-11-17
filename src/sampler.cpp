@@ -1493,7 +1493,7 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
                                                  double bu, double bv)
 {
     static const float peps = 1e-2f;
-    static const float zeps = 1e-6f;
+    static const float zeps = 1e-4f;
     static const float deps = 1e-8f;
 
     if (fabs(p0 - slice_height) <= peps) return z0;
@@ -1563,13 +1563,16 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
         if (left  && z       <= zeps && (z1 < z || p > 0.0)) break;
         if (!left && 1.0 - z <= zeps && (z1 > z || p > 0.0)) break;
 
-        if (left) {
-            if (p > 0) z_bound_upper = z;
-            else       z_bound_lower = z;
-        }
-        else {
-            if (p > 0) z_bound_lower = z;
-            else       z_bound_upper = z;
+        // avoid using extreme values
+        if (boost::math::isfinite(p) && fabs(p) < 1e12) {
+            if (left) {
+                if (p > 0) z_bound_upper = z;
+                else       z_bound_lower = z;
+            }
+            else {
+                if (p > 0) z_bound_lower = z;
+                else       z_bound_upper = z;
+            }
         }
 
         bool bisect = z1 < z_bound_lower + zeps || z1 > z_bound_upper - zeps;
@@ -1585,6 +1588,7 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
 
         // resort to binary search if we seem not to be making progress
         if (bisect) {
+            size_t iteration_count = 0;
             while (true) {
                 z = (z_bound_lower + z_bound_upper) / 2;
                 p = recompute_intra_component_probability(
@@ -1595,6 +1599,10 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
                     else      z_bound_upper = z;
                 }
                 else break;
+
+                if (++iteration_count > 50) {
+                    Logger::abort("Slice sampler edge-finding is not making progress.");
+                }
             }
         }
     }
