@@ -109,6 +109,10 @@ namespace constants
      * after optimization. */
     extern float zero_eps;
 
+    /* When pesudo transcripts are formed to analyze alternative exons, add
+     * flanking exons of this length. */
+    extern pos_t alt_exon_flank_length;
+
     /* To account for imprecision in the transcription start and terminotation
      * sites, we extent the 5p and 3p ends of each transcript. */
     extern pos_t transcript_5p_extension;

@@ -152,7 +152,10 @@ class TranscriptSet
          * Args:
          *   f: A file, opened for reading, containg GTF data.
          */
-        void read_gtf(FILE* f, pos_t tgroup_max_tss_dist);
+        void read_gtf(const char* filename, pos_t tgroup_max_tss_dist);
+
+        /* Read annotated alternative exons from a BED file. */
+        void read_bed(const char* filename);
 
         /* Number of transcripts held in the set. */
         size_t size() const;

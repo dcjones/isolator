@@ -1,6 +1,8 @@
 
 #include <boost/foreach.hpp>
+#include <cstring>
 #include <deque>
+#include <fstream>
 
 #include "constants.hpp"
 #include "gtf/gtf_parse.h"
@@ -264,8 +266,13 @@ std::vector<std::vector<unsigned int> > TranscriptSet::tgroup_tids() const
 }
 
 
-void TranscriptSet::read_gtf(FILE* f, pos_t tss_cluster_distance)
+void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance)
 {
+    FILE* f = fopen(filename, "r");
+    if (!f) {
+        Logger::abort("Can't open %s for reading.", filename);
+    }
+
     const char* task_name = "Parsing GTF";
 
     long fsize = 0;
@@ -341,6 +348,7 @@ void TranscriptSet::read_gtf(FILE* f, pos_t tss_cluster_distance)
 
     gtf_row_free(row);
     gtf_file_free(gtf_file);
+    fclose(f);
 
 
     // set transcripts ids and default transcription groups
@@ -423,6 +431,166 @@ void TranscriptSet::read_gtf(FILE* f, pos_t tss_cluster_distance)
     Logger::pop_task(task_name);
     Logger::info("Transcripts: %lu", (unsigned long) size());
 }
+
+
+void TranscriptSet::read_bed(const char* filename)
+{
+    // TODO: An option to parse exons rather than introns.
+
+    const char* task_name = "Parsing BED";
+    Logger::push_task(task_name);
+
+    // Read a list of flanking introns
+    std::ifstream in;
+    try {
+        in.open(filename);
+    }
+    catch (std::ifstream::failure e) {
+        Logger::abort("Can't open %s for reading.", filename);
+    }
+
+    typedef std::map<std::string, std::vector<Interval> > IntronIdx;
+    IntronIdx introns;
+
+    std::string line, seqname, name;
+    pos_t start, end;
+    strand_t strand;
+    size_t cline_size = 1024;
+    char* cline = new char[cline_size];
+    unsigned int bedline = 0;
+
+    while (std::getline(in, line)) {
+        ++bedline;
+        if (line.size() + 1 > cline_size) {
+            cline_size = line.size() + 1;
+            delete [] cline;
+            cline = new char[cline_size];
+        }
+        std::copy(line.c_str(), line.c_str() + line.size() + 1, cline);
+
+        strand = strand_na;
+        char delim;
+        char* token;
+
+        token = strtok(cline, "\t");
+        if (!token) goto bed_parse_failure;
+        seqname = token;
+
+        token = strtok(NULL, "\t");
+        if (!token) goto bed_parse_failure;
+        start = strtol(token, NULL, 10);
+        if (start == 0 && errno == EINVAL) {
+            Logger::abort("Start position \"%s\" on line %u of BED file %s in not a valid number.",
+                          token, bedline, filename);
+        }
+
+        token = strtok(NULL, "\t");
+        if (!token) goto bed_parse_failure;
+        end = strtol(token, NULL, 10);
+        if (end == 0 && errno == EINVAL) {
+            Logger::abort("End position \"%s\" on line %u of BED file %s in not a valid number.",
+                          token, bedline, filename);
+        }
+
+        token = strtok(NULL, "\t\n");
+        if (!token) goto bed_parse_failure;
+        delim = line[token - cline + strlen(token)];
+        name = token;
+        if (delim == '\n') goto bed_parse_success;
+
+        // score field (which we don't care about)
+        token = strtok(NULL, "\t\n");
+        if (!token) goto bed_parse_success;
+        delim = line[token - cline + strlen(token)];
+        if (delim == '\n') goto bed_parse_success;
+
+        token = strtok(NULL, "\t\n");
+        if (!token) goto bed_parse_success;
+        if (strlen(token) >= 1) {
+            if      (token[0] == '+') strand = strand_pos;
+            else if (token[0] == '-') strand = strand_neg;
+        }
+
+bed_parse_success:
+        introns[name].push_back(Interval(seqname.c_str(), start, end, strand));
+        continue;
+
+bed_parse_failure:
+        Logger::abort("Unable to parse line %u of BED file %s.", bedline, filename);
+    }
+
+    // Arrange flanking introns into pseudo-transcripts
+    std::vector<Transcript> transcripts;
+    unsigned int next_tgroup = 0;
+    BOOST_FOREACH (const IntronIdx::value_type& keyval, introns) {
+        const std::string& exonname = keyval.first;
+        const std::vector<Interval>& intronflanks = keyval.second;
+
+        // TODO: We should allow any number of introns to be given and include
+        // each implied exon as a pseudo-transcript.
+        if (intronflanks.size() != 2) {
+            Logger::abort("Two flanking introns are expected for exon %s, but got %lu.",
+                          exonname.c_str(), (unsigned long) intronflanks.size());
+        }
+
+        const Interval& flankA = intronflanks[0] < intronflanks[1] ?
+            intronflanks[0] : intronflanks[1];
+        const Interval& flankB = intronflanks[0] < intronflanks[1] ?
+            intronflanks[1] : intronflanks[0];
+
+        if (flankA.seqname != flankB.seqname || flankA.strand != flankB.strand) {
+            Logger::abort("Flanking introns for exon %s are not on the same sequence or strand.",
+                          exonname.c_str());
+        }
+
+        if (flankA.end + 1 >= flankB.start) {
+            Logger::abort("Flanking introns for exon %s are overlapping.",
+                          exonname.c_str());
+        }
+
+        // inclusion form
+        Transcript included_transcript;
+        included_transcript.seqname = flankA.seqname;
+        included_transcript.gene_id = name;
+        included_transcript.transcript_id = name + "-included";
+        included_transcript.strand = strand;
+        included_transcript.source = "AlternativeExon";
+        included_transcript.tgroup = next_tgroup;
+
+        included_transcript.add(std::max<pos_t>(0, flankA.start - constants::alt_exon_flank_length),
+                                std::max<pos_t>(0, flankA.start - 1));
+        included_transcript.add(flankA.end + 1, flankB.start - 1);
+        included_transcript.add(flankB.end + 1, flankB.end + constants::alt_exon_flank_length);
+        transcripts.push_back(included_transcript);
+
+        // exclusion form
+        Transcript excluded_transcript;
+        excluded_transcript.seqname = flankA.seqname;
+        excluded_transcript.gene_id = name;
+        excluded_transcript.transcript_id = name + "-excluded";
+        excluded_transcript.strand = strand;
+        excluded_transcript.source = "AlternativeExon";
+        excluded_transcript.tgroup = next_tgroup;
+
+        excluded_transcript.add(std::max<pos_t>(0, flankA.start - constants::alt_exon_flank_length),
+                                std::max<pos_t>(0, flankA.start - 1));
+        excluded_transcript.add(flankB.end + 1, flankB.end + constants::alt_exon_flank_length);
+        transcripts.push_back(excluded_transcript);
+
+        ++next_tgroup;
+    }
+
+    // assign tids
+    unsigned int next_tid = 0;
+    std::sort(transcripts.begin(), transcripts.end());
+    BOOST_FOREACH (Transcript& t, transcripts) {
+        t.id = next_tid++;
+        this->transcripts.insert(t);
+    }
+
+    Logger::pop_task(task_name);
+}
+
 
 
 /* Given a list of exons on one strand, reduce it to a list of disjoint

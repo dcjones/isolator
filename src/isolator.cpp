@@ -208,6 +208,8 @@ void print_analyze_help(FILE* fout)
         "\nOptions:\n"
         "-h, --help                Print this help message\n"
         "-o, --output=FILE         File to write HDF5 output to (default: isolator_output.hdf5)\n"
+        "    --introns             Input consists of a BED file containing introns."
+        "    --exons               Input consists of a BED file containing exons."
         "-v, --verbose             Print a bunch of information useful mainly for debugging\n"
         "-g, --genomic-seq=FILE    Correct for sequence bias, given the a the sequence\n"
         "                          against which the reads are aligned, in FAST format.\n"
@@ -225,6 +227,8 @@ int isolator_analyze(int argc, char* argv[])
     {
         {"help",                 no_argument,       NULL, 'h'},
         {"output",               required_argument, NULL, 'o'},
+        {"introns",              no_argument,       NULL, 0},
+        {"exons",                no_argument,       NULL, 0},
         {"verbose",              no_argument,       NULL, 'v'},
         {"genomic-seq",          required_argument, NULL, 'g'},
         {"threads",              required_argument, NULL, 'p'},
@@ -243,6 +247,8 @@ int isolator_analyze(int argc, char* argv[])
     constants::num_threads = boost::thread::hardware_concurrency();
     const char* fa_fn  = NULL;
     const char* output_fn = "isolator_output.hdf5";
+    bool use_introns = false;
+    bool use_exons = false;
 
     int opt;
     int optidx;
@@ -287,6 +293,13 @@ int isolator_analyze(int argc, char* argv[])
                 else if (strcmp(long_options[optidx].name, "tss-cluster-distance") == 0) {
                     tss_cluster_dist = strtod(optarg, NULL);
                 }
+                else if (strcmp(long_options[optidx].name, "introns") == 0) {
+                    use_introns = true;
+                }
+                else if (strcmp(long_options[optidx].name, "exons") == 0) {
+                    use_exons = true;
+                    return 1;
+                }
                 break;
 
             case '?':
@@ -310,14 +323,22 @@ int isolator_analyze(int argc, char* argv[])
     Logger::set_level(logger_level);
 
     // read transcripts
-    const char* gtf_fn = argv[optind++];
+    const char* annotation_filename = argv[optind++];
     TranscriptSet ts;
-    FILE* gtf_f = fopen(gtf_fn, "rb");
-    if (gtf_f == NULL) {
-        Logger::abort("Can't open file %s for reading.", gtf_fn);
+
+    // TODO: parse a bed file if the right option is set
+    if (use_introns && use_exons) {
+        Logger::abort("'--introns' and '--exons' arguments are mutually exclusize.");
     }
-    ts.read_gtf(gtf_f, tss_cluster_dist);
-    fclose(gtf_f);
+    else if (use_introns) {
+        ts.read_bed(annotation_filename);
+    }
+    else if (use_exons) {
+        Logger::abort("Reading exons from BED files is not yet supported.");
+    }
+    else {
+        ts.read_gtf(annotation_filename, tss_cluster_dist);
+    }
 
     // initialize
     Analyze analyze(burnin, num_samples, ts, fa_fn, run_gc_correction);

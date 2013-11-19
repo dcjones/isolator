@@ -24,6 +24,7 @@ double               constants::frag_len_mu                  = 200.0;
 double               constants::frag_len_sd                  = 20.0;
 float                constants::min_frag_weight              = 1e-5;
 float                constants::zero_eps                     = 1e-10;
+pos_t                constants::alt_exon_flank_length        = 250;
 pos_t                constants::transcript_5p_extension      = 0;
 pos_t                constants::transcript_3p_extension      = 0;
 float                constants::min_transcript_weight        = 1.0;
