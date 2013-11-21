@@ -233,6 +233,29 @@ double GammaLogPdf::df_dx(double alpha, double beta, const double* xs, size_t n)
     return part - n * beta;
 }
 
+
+double GammaLogPdf::df_dalpha(double alpha, double beta, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += log(xs[i]);
+    }
+
+    return n * (log(beta) - boost::math::digamma(alpha)) + part;
+}
+
+
+double GammaLogPdf::df_dbeta(double alpha, double beta, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += xs[i];
+    }
+
+    return n * (alpha / beta) - part;
+}
+
+
 double InvGammaLogPdf::f(double alpha, double beta, const double* xs, size_t n)
 {
     double part = 0.0;
@@ -375,7 +398,7 @@ double DirichletLogPdf::df_dalpha(double alpha,
         }
     }
 
-    return boost::math::digamma(alpha) + part;
+    return n * boost::math::digamma(alpha) + part;
 }
 
 

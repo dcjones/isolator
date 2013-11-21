@@ -20,8 +20,10 @@
 class SamplerTickThread;
 class TgroupMuSigmaSamplerThread;
 class ExperimentTgroupMuSigmaSamplerThread;
-class AlphaSampler;
-class BetaSampler;
+class TgroupAlphaSampler;
+class TgroupBetaSampler;
+class SpliceAlphaSampler;
+class SpliceBetaSampler;
 class SpliceMeanPrecSamplerThread;
 class ExperimentSpliceMeanPrecSamplerThread;
 
@@ -90,8 +92,10 @@ class Analyze
         std::vector<SamplerTickThread*> qsampler_threads;
         std::vector<TgroupMuSigmaSamplerThread*> musigma_sampler_threads;
         std::vector<ExperimentTgroupMuSigmaSamplerThread*> experiment_musigma_sampler_threads;
-        AlphaSampler* alpha_sampler;
-        BetaSampler* beta_sampler;
+        TgroupAlphaSampler* tgroup_alpha_sampler;
+        TgroupBetaSampler* tgroup_beta_sampler;
+        SpliceAlphaSampler* splice_alpha_sampler;
+        SpliceBetaSampler* splice_beta_sampler;
         std::vector<SpliceMeanPrecSamplerThread*> splice_mean_prec_sampler_threads;
         std::vector<ExperimentSpliceMeanPrecSamplerThread*>
             experiment_splice_mean_prec_sampler_threads;

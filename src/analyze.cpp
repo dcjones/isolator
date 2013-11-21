@@ -83,7 +83,7 @@ class SplicePrecisionSampler : public Shredder
 {
     public:
         SplicePrecisionSampler()
-            : Shredder(1.0, 100000.0)
+            : Shredder(1.0, 1000.0)
         {}
 
         // mean and dat are both matrices indexed by sample then transcript
@@ -120,11 +120,12 @@ class SplicePrecisionSampler : public Shredder
             double fx = 0.0;
             d = 0.0;
 
+            // XXX: Is the prior the problem?
             fx += prior_logpdf.f(prior_alpha, prior_beta, &prec, 1);
             d += prior_logpdf.df_dx(prior_alpha, prior_beta, &prec, 1);
 
-            fx += likelihood_logpdf.f(prec, mean, data, n, m);
-            d += likelihood_logpdf.df_dalpha(prec, mean, data, n, m);
+            fx += likelihood_logpdf.f(m * prec, mean, data, n, m);
+            d += likelihood_logpdf.df_dalpha(m * prec, mean, data, n, m);
 
             return fx;
         }
@@ -378,15 +379,25 @@ class SpliceMeanPrecSamplerThread
                                 (Q(sample_num, tidu) + Q(sample_num, tidv));
                         }
 
+                        // XXX: This seemed wrong
+                        //double mean_prior_u =
+                            //experiment_precision[j] * experiment_mean[j][u] /
+                                //(experiment_mean[j][u] + experiment_mean[j][v]);
+                        //double mean_prior_v =
+                            //experiment_precision[j] * experiment_mean[j][v] /
+                                //(experiment_mean[j][u] + experiment_mean[j][v]);
+
                         double mean_prior_u =
-                            experiment_precision[j] * experiment_mean[j][u] /
-                                (experiment_mean[j][u] + experiment_mean[j][v]);
+                            ms.size() * experiment_precision[j] * experiment_mean[j][u];
                         double mean_prior_v =
-                            experiment_precision[j] * experiment_mean[j][v] /
-                                (experiment_mean[j][u] + experiment_mean[j][v]);
+                            ms.size() * experiment_precision[j] * experiment_mean[j][v];
+
+                        // Let's try with a fixed flat prior
+                        //double mean_prior_u = 1.0;
+                        //double mean_prior_v = 1.0;
 
                         double x = betadist_sampler.sample(
-                                mean[i][j][u], mean[i][j][v], precision[j],
+                                mean[i][j][u], mean[i][j][v], ms.size() * precision[j],
                                 mean_prior_u, mean_prior_v,
                                 &data.at(0), condition_samples[i].size());
                         assert(0.0 <= x && x <= 1.0);
@@ -531,7 +542,7 @@ class ExperimentSpliceMeanPrecSamplerThread
 
                     double x = betadist_sampler.sample(
                         experiment_mean[j][u], experiment_mean[j][v],
-                        experiment_precision[j],
+                        ms.size() * experiment_precision[j],
                         condition_mean_prior, condition_mean_prior,
                         &data.at(0), C);
 
@@ -593,10 +604,10 @@ class ExperimentSpliceMeanPrecSamplerThread
 };
 
 
-class AlphaSampler : public Shredder
+class TgroupAlphaSampler : public Shredder
 {
     public:
-        AlphaSampler()
+        TgroupAlphaSampler()
             : Shredder(1e-16, 1e5)
         {
         }
@@ -640,10 +651,10 @@ class AlphaSampler : public Shredder
 };
 
 
-class BetaSampler : public Shredder
+class TgroupBetaSampler : public Shredder
 {
     public:
-        BetaSampler()
+        TgroupBetaSampler()
             : Shredder(1e-16, 1e5)
         {}
 
@@ -686,6 +697,101 @@ class BetaSampler : public Shredder
             return fx;
         }
 };
+
+
+class SpliceAlphaSampler : public Shredder
+{
+    public:
+        SpliceAlphaSampler()
+            : Shredder(1e-16, 1e5)
+        {}
+
+        double sample(double alpha0, double beta,
+                      double alpha_alpha, double beta_alpha,
+                      const double* precisions, size_t n)
+        {
+            this->beta = beta;
+            this->alpha_alpha = alpha_alpha;
+            this->beta_alpha = beta_alpha;
+            this->precisions = precisions;
+            this->n = n;
+            return Shredder::sample(alpha0);
+        }
+
+    private:
+        double beta;
+        double alpha_alpha;
+        double beta_alpha;
+        const double* precisions;
+        size_t n;
+
+        InvGammaLogPdf prior_logpdf;
+        GammaLogPdf likelihood_logpdf;
+
+    protected:
+        double f(double alpha, double &d)
+        {
+            d = 0.0;
+            double fx = 0.0;
+
+            d += prior_logpdf.df_dx(alpha_alpha, beta_alpha, &alpha, 1);
+            fx += prior_logpdf.f(alpha_alpha, beta_alpha, &alpha, 1);
+
+            d += likelihood_logpdf.df_dalpha(alpha, beta, precisions, n);
+            fx += likelihood_logpdf.f(alpha, beta, precisions, n);
+
+            return fx;
+        }
+};
+
+
+class SpliceBetaSampler : public Shredder
+{
+    public:
+        SpliceBetaSampler()
+            : Shredder(1e-16, 1e5)
+        {}
+
+        double sample(double beta0, double alpha,
+                      double alpha_beta, double beta_beta,
+                      const double* precisions, size_t n)
+        {
+            this->alpha = alpha;
+            this->alpha_beta = alpha_beta;
+            this->beta_beta = beta_beta;
+            this->precisions= precisions;
+            this->n = n;
+            double ans = Shredder::sample(beta0);
+            return ans;
+            //return Shredder::sample(beta0);
+        }
+
+    private:
+        double alpha;
+        double alpha_beta;
+        double beta_beta;
+        const double* precisions;
+        size_t n;
+
+        InvGammaLogPdf prior_logpdf;
+        GammaLogPdf likelihood_logpdf;
+
+    protected:
+        double f(double beta, double &d)
+        {
+            d = 0.0;
+            double fx = 0.0;
+
+            d += prior_logpdf.df_dx(alpha_beta, beta_beta, &beta, 1);
+            fx += prior_logpdf.f(alpha_beta, beta_beta, &beta, 1);
+
+            d += likelihood_logpdf.df_dbeta(alpha, beta, precisions, n);
+            fx += likelihood_logpdf.f(alpha, beta, precisions, n);
+
+            return fx;
+        }
+};
+
 
 
 class ExperimentTgroupMuSigmaSamplerThread
@@ -821,8 +927,11 @@ Analyze::Analyze(size_t burnin,
     tgroup_row_data.resize(T);
     scale_work.resize(N);
 
-    alpha_sampler = new AlphaSampler();
-    beta_sampler = new BetaSampler();
+    tgroup_alpha_sampler = new TgroupAlphaSampler();
+    tgroup_beta_sampler = new TgroupBetaSampler();
+
+    splice_alpha_sampler = new SpliceAlphaSampler();
+    splice_beta_sampler = new SpliceBetaSampler();
 
     tgroup_tids = transcripts.tgroup_tids();
 
@@ -842,8 +951,10 @@ Analyze::Analyze(size_t burnin,
 
 Analyze::~Analyze()
 {
-    delete alpha_sampler;
-    delete beta_sampler;
+    delete tgroup_alpha_sampler;
+    delete tgroup_beta_sampler;
+    delete splice_alpha_sampler;
+    delete splice_beta_sampler;
 }
 
 
@@ -1283,7 +1394,7 @@ void Analyze::qsampler_update_hyperparameters()
             unsigned int tgroup = spliced_tgroup_indexes[j];
             for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                 qsamplers[i]->hp.splice_param[tgroup_tids[tgroup][k]] =
-                    splice_precision[j] * condition_splice_mean[c][j][k];
+                    tgroup_tids[tgroup].size() * splice_precision[j] * condition_splice_mean[c][j][k];
             }
         }
     }
@@ -1585,14 +1696,14 @@ void Analyze::sample()
         musigma_sampler_notify_queue.pop();
     }
 
-    tgroup_alpha = alpha_sampler->sample(tgroup_alpha, tgroup_beta,
-                                         tgroup_alpha_alpha, tgroup_beta_alpha,
-                                         &tgroup_sigma.at(0), T);
+    tgroup_alpha = tgroup_alpha_sampler->sample(tgroup_alpha, tgroup_beta,
+                                                tgroup_alpha_alpha, tgroup_beta_alpha,
+                                                &tgroup_sigma.at(0), T);
     assert_finite(tgroup_alpha);
 
-    tgroup_beta = beta_sampler->sample(tgroup_beta, tgroup_alpha,
-                                       tgroup_alpha_beta, tgroup_beta_beta,
-                                       &tgroup_sigma.at(0), T);
+    tgroup_beta = tgroup_beta_sampler->sample(tgroup_beta, tgroup_alpha,
+                                              tgroup_alpha_beta, tgroup_beta_beta,
+                                              &tgroup_sigma.at(0), T);
     assert_finite(tgroup_beta);
 
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
@@ -1622,32 +1733,32 @@ void Analyze::sample()
     }
 
     experiment_tgroup_alpha =
-        alpha_sampler->sample(experiment_tgroup_alpha,
-                              experiment_tgroup_beta,
-                              tgroup_alpha_alpha, tgroup_beta_alpha,
-                              &experiment_tgroup_sigma.at(0), T);
+        tgroup_alpha_sampler->sample(experiment_tgroup_alpha,
+                                     experiment_tgroup_beta,
+                                     tgroup_alpha_alpha, tgroup_beta_alpha,
+                                     &experiment_tgroup_sigma.at(0), T);
 
     assert_finite(experiment_tgroup_alpha);
 
     experiment_tgroup_beta =
-        beta_sampler->sample(experiment_tgroup_beta,
-                             experiment_tgroup_alpha,
-                             tgroup_alpha_beta, tgroup_beta_beta,
-                             &experiment_tgroup_sigma.at(0), T);
+        tgroup_beta_sampler->sample(experiment_tgroup_beta,
+                                    experiment_tgroup_alpha,
+                                    tgroup_alpha_beta, tgroup_beta_beta,
+                                    &experiment_tgroup_sigma.at(0), T);
 
     assert_finite(experiment_tgroup_beta);
 
     splice_alpha =
-        alpha_sampler->sample(splice_alpha, splice_beta,
-                              splice_alpha_alpha, splice_beta_alpha,
-                              &splice_precision.at(0), splice_precision.size());
+        splice_alpha_sampler->sample(splice_alpha, splice_beta,
+                                     splice_alpha_alpha, splice_beta_alpha,
+                                     &splice_precision.at(0), splice_precision.size());
 
     assert_finite(splice_alpha);
 
     splice_beta =
-        beta_sampler->sample(splice_beta, splice_alpha,
-                             splice_alpha_beta, splice_beta_beta,
-                             &splice_precision.at(0), splice_precision.size());
+        splice_beta_sampler->sample(splice_beta, splice_alpha,
+                                     splice_alpha_beta, splice_beta_beta,
+                                    &splice_precision.at(0), splice_precision.size());
 
     assert_finite(splice_beta);
 }

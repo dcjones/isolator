@@ -60,6 +60,8 @@ class GammaLogPdf
     public:
         double f(double alpha, double beta, const double* xs, size_t n);
         double df_dx(double alpha, double beta, const double* xs, size_t n);
+        double df_dalpha(double alpha, double beta, const double* xs, size_t n);
+        double df_dbeta(double alpha, double beta, const double* xs, size_t n);
 };
 
 
