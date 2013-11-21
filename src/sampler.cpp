@@ -1465,18 +1465,22 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
     else if (S.use_priors) {
         double a, x, x0;
 
-        // super secret trick for recomputing tgroup_tmix[u]
-        x = tmixu / (tmixu - S.tmix[u] + (S.tmix[u]/S.tgroup_tmix[u]));
-        x0 = S.tgroup_tmix[u];
-        a = S.hp.splice_param[u];
-        *d += splice_prior.df_dx(a, bu, x);
-        p0 += (a - 1) * log(x / x0) + (bu - 1) * log((1 - x) / (1 - x0));
+        if (bu > 0.0) {
+            // super secret trick for recomputing tgroup_tmix[u]
+            x = tmixu / (tmixu - S.tmix[u] + (S.tmix[u]/S.tgroup_tmix[u]));
+            x0 = S.tgroup_tmix[u];
+            a = S.hp.splice_param[u];
+            *d += splice_prior.df_dx(a, bu, x);
+            p0 += (a - 1) * log(x / x0) + (bu - 1) * log((1 - x) / (1 - x0));
+        }
 
-        x = tmixv / (tmixv - S.tmix[v] + (S.tmix[v]/S.tgroup_tmix[v]));
-        x0 = S.tgroup_tmix[v];
-        a = S.hp.splice_param[v];
-        *d += splice_prior.df_dx(a, bv, x);
-        p0 += (a - 1) * log(x / x0) + (bv - 1) * log((1 - x) / (1 - x0));
+        if (bv > 0.0) {
+            x = tmixv / (tmixv - S.tmix[v] + (S.tmix[v]/S.tgroup_tmix[v]));
+            x0 = S.tgroup_tmix[v];
+            a = S.hp.splice_param[v];
+            *d += splice_prior.df_dx(a, bv, x);
+            p0 += (a - 1) * log(x / x0) + (bv - 1) * log((1 - x) / (1 - x0));
+        }
     }
 
     return p0 - pf01
@@ -1686,19 +1690,23 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
             // maginalize to get beta parameters
             double a;
 
-            a = S.hp.splice_param[u];
-            bu = 0.0;
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgu]) {
-                if (tid != u) bu += S.hp.splice_param[tid];
+            if (S.tgroup_tids[tgu].size() > 1) {
+                a = S.hp.splice_param[u];
+                bu = 0.0;
+                BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgu]) {
+                    if (tid != u) bu += S.hp.splice_param[tid];
+                }
+                p0 += splice_prior.f(a, bu, S.tgroup_tmix[u]);
             }
-            p0 += splice_prior.f(a, bu, S.tgroup_tmix[u]);
 
-            a = S.hp.splice_param[v];
-            bv = 0.0;
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgv]) {
-                if (tid != v) bv += S.hp.splice_param[tid];
+            if (S.tgroup_tids[tgv].size() > 1) {
+                a = S.hp.splice_param[v];
+                bv = 0.0;
+                BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgv]) {
+                    if (tid != v) bv += S.hp.splice_param[tid];
+                }
+                p0 += splice_prior.f(a, bv, S.tgroup_tmix[v]);
             }
-            p0 += splice_prior.f(a, bv, S.tgroup_tmix[v]);
         }
     }
 

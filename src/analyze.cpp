@@ -836,6 +836,7 @@ Analyze::Analyze(size_t burnin,
     Logger::info("Number of transcription groups: %u", T);
     Logger::info("Number of tgroup with multiple isoforms: %u",
                   spliced_tgroup_indexes.size());
+
 }
 
 
@@ -1282,7 +1283,7 @@ void Analyze::qsampler_update_hyperparameters()
             unsigned int tgroup = spliced_tgroup_indexes[j];
             for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                 qsamplers[i]->hp.splice_param[tgroup_tids[tgroup][k]] =
-                    condition_splice_mean[c][j][k];
+                    splice_precision[j] * condition_splice_mean[c][j][k];
             }
         }
     }
