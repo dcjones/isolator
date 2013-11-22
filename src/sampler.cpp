@@ -1301,13 +1301,17 @@ class AbundanceSamplerThread
                                               float tmixu, float tmixv,
                                               unsigned int f0, unsigned int f1,
                                               float pf01, float p0,
-                                              float bu, float bv, float *d);
+                                              float bu, float bv,
+                                              float tgroupmix_u,
+                                              float tgroupmix_v,
+                                              float *d);
 
         float transcript_slice_sample_search(float slice_height,
                                              unsigned int u, unsigned int v,
                                              float z0, float p0, bool left,
-                                             double bu, double bv);
-
+                                             double bu, double bv,
+                                             double wtgroupmix_u,
+                                             double wtgroupmix_v);
 
         NormalLogPdf cmix_prior;
         BetaLogPdf splice_prior;
@@ -1395,7 +1399,10 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
                                                   float tmixu, float tmixv,
                                                   unsigned int f0, unsigned int f1,
                                                   float pf01, float p0,
-                                                  float bu, float bv, float* d)
+                                                  float bu, float bv,
+                                                  float wtgroupmix_u,
+                                                  float wtgroupmix_v,
+                                                  float* d)
 {
     unsigned int tgu = S.transcript_tgroup[u];
     unsigned int tgv = S.transcript_tgroup[v];
@@ -1453,9 +1460,11 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
     }
 
     // splicing priors
+    double twu = S.transcript_weights[u];
+    double twv = S.transcript_weights[v];
     if (S.use_priors && tgu == tgv) {
-        double x0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
-        double x = tmixu / (tmixu + tmixv);
+        double x0 = (S.tmix[u] / twu) / (S.tmix[u] / twu + S.tmix[v] / twv);
+        double x = (tmixu / twu) / (tmixu / twu + tmixv / twv);
         double a = S.hp.splice_param[u];
         double b = S.hp.splice_param[v];
 
@@ -1467,16 +1476,18 @@ float AbundanceSamplerThread::recompute_intra_component_probability(
 
         if (bu > 0.0) {
             // super secret trick for recomputing tgroup_tmix[u]
-            x = tmixu / (tmixu - S.tmix[u] + (S.tmix[u]/S.tgroup_tmix[u]));
-            x0 = S.tgroup_tmix[u];
+            x = (tmixu/twu) / (wtgroupmix_u - (S.tmix[u]/twu) + (tmixu/twu));
+            x0 = (S.tgroup_tmix[u] / twu) / wtgroupmix_u;
+
             a = S.hp.splice_param[u];
             *d += splice_prior.df_dx(a, bu, x);
             p0 += (a - 1) * log(x / x0) + (bu - 1) * log((1 - x) / (1 - x0));
         }
 
         if (bv > 0.0) {
-            x = tmixv / (tmixv - S.tmix[v] + (S.tmix[v]/S.tgroup_tmix[v]));
-            x0 = S.tgroup_tmix[v];
+            x = (tmixv/twv) / (wtgroupmix_v - (S.tmix[v]/twv) + (tmixv/twv));
+            x0 = (S.tgroup_tmix[v] / twv) / wtgroupmix_v;
+
             a = S.hp.splice_param[v];
             *d += splice_prior.df_dx(a, bv, x);
             p0 += (a - 1) * log(x / x0) + (bv - 1) * log((1 - x) / (1 - x0));
@@ -1494,7 +1505,9 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
                                                  float slice_height,
                                                  unsigned int u, unsigned int v,
                                                  float z0, float p0, bool left,
-                                                 double bu, double bv)
+                                                 double bu, double bv,
+                                                 double wtgroupmix_u,
+                                                 double wtgroupmix_v)
 {
     static const float peps = 1e-2f;
     static const float zeps = 1e-4f;
@@ -1550,7 +1563,8 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
 
     z = z0;
     p = recompute_intra_component_probability(
-            u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, bu, bv, &d);
+            u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0,
+            bu, bv, wtgroupmix_u, wtgroupmix_v, &d);
     p -= slice_height;
 
     while (fabs(p) > peps && fabs(z_bound_upper - z_bound_lower) > zeps) {
@@ -1585,7 +1599,8 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
         if (!bisect) {
             z = z1;
             p = recompute_intra_component_probability(
-                    u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, bu, bv, &d);
+                    u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0,
+                    bu, bv, wtgroupmix_u, wtgroupmix_v, &d);
             p -= slice_height;
             bisect = !boost::math::isfinite(p) || !boost::math::isfinite(d);
         }
@@ -1596,7 +1611,8 @@ float AbundanceSamplerThread::transcript_slice_sample_search(
             while (true) {
                 z = (z_bound_lower + z_bound_upper) / 2;
                 p = recompute_intra_component_probability(
-                        u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0, bu, bv, &d);
+                        u, v, z * tmixuv, (1.0f - z) * tmixuv, f0, f1, pf01, p0,
+                        bu, bv, wtgroupmix_u, wtgroupmix_v, &d);
                 p -= slice_height;
                 if (boost::math::isinf(p) || boost::math::isinf(d)) {
                     if (left) z_bound_lower = z;
@@ -1680,11 +1696,14 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
     }
 
     double bu = 0.0, bv = 0.0;
+    double wtgroupmix_u = 0.0, wtgroupmix_v = 0.0;
     if (S.use_priors) {
+        double wtmixu = S.tgroup_tmix[u] / S.transcript_weights[u];
+        double wtmixv = S.tgroup_tmix[v] / S.transcript_weights[v];
+
         if (tgu == tgv) {
             p0 += splice_prior.f(S.hp.splice_param[u], S.hp.splice_param[v],
-                                 S.tgroup_tmix[u] /
-                                    (S.tgroup_tmix[u] + S.tgroup_tmix[v]));
+                                 wtmixu / (wtmixu + wtmixv));
         }
         else {
             // maginalize to get beta parameters
@@ -1695,8 +1714,9 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
                 bu = 0.0;
                 BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgu]) {
                     if (tid != u) bu += S.hp.splice_param[tid];
+                    wtgroupmix_u += S.tgroup_tmix[tid] / S.transcript_weights[tid];
                 }
-                p0 += splice_prior.f(a, bu, S.tgroup_tmix[u]);
+                p0 += splice_prior.f(a, bu, wtmixu / wtgroupmix_u);
             }
 
             if (S.tgroup_tids[tgv].size() > 1) {
@@ -1704,8 +1724,9 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
                 bv = 0.0;
                 BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgv]) {
                     if (tid != v) bv += S.hp.splice_param[tid];
+                    wtgroupmix_v += S.tgroup_tmix[tid] / S.transcript_weights[tid];
                 }
-                p0 += splice_prior.f(a, bv, S.tgroup_tmix[v]);
+                p0 += splice_prior.f(a, bv, wtmixv / wtgroupmix_v);
             }
         }
     }
@@ -1715,8 +1736,10 @@ void AbundanceSamplerThread::run_inter_transcript(unsigned int u, unsigned int v
 
     float z, s0, s1;
     if (boost::math::isfinite(slice_height)) {
-        s0 = transcript_slice_sample_search(slice_height, u, v, z0, p0, true, bu, bv);
-        s1 = transcript_slice_sample_search(slice_height, u, v, z0, p0, false, bu, bv);
+        s0 = transcript_slice_sample_search(slice_height, u, v, z0, p0, true,
+                                            bu, bv, wtgroupmix_u, wtgroupmix_v);
+        s1 = transcript_slice_sample_search(slice_height, u, v, z0, p0, false,
+                                            bu, bv, wtgroupmix_u, wtgroupmix_v);
         if (s1 - s0 < constants::zero_eps || s0 > z0 || s1 < z0) {
             return;
         }
