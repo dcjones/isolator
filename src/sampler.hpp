@@ -237,6 +237,8 @@ class Sampler
         friend class InferenceThread;
         friend class AbundanceSamplerThread;
         friend class MultireadSamplerThread;
+        friend class InterTgroupSampler;
+        friend class InterTranscriptSampler;
 };
 
 
