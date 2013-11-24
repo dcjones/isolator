@@ -102,8 +102,11 @@ class Sampler
             // Scale parameter for the tgroup abundance prior
             std::vector<double> tgroup_sigma;
 
-            // Dirichlet parameters for splicing priors, indexed by tid
-            std::vector<double> splice_param;
+            // Logisitic-normal mean
+            std::vector<double> splice_mu;
+
+            // Logistic-normal sigma
+            std::vector<double> splice_sigma;
         } hp;
 
     private:

@@ -24,8 +24,8 @@ class TgroupAlphaSampler;
 class TgroupBetaSampler;
 class SpliceAlphaSampler;
 class SpliceBetaSampler;
-class SpliceMeanPrecSamplerThread;
-class ExperimentSpliceMeanPrecSamplerThread;
+class SpliceMuSigmaSamplerThread;
+class ExperimentMuSigmaPrecSamplerThread;
 
 
 class Analyze
@@ -96,9 +96,9 @@ class Analyze
         TgroupBetaSampler* tgroup_beta_sampler;
         SpliceAlphaSampler* splice_alpha_sampler;
         SpliceBetaSampler* splice_beta_sampler;
-        std::vector<SpliceMeanPrecSamplerThread*> splice_mean_prec_sampler_threads;
+        std::vector<SpliceMeanPrecSamplerThread*> splice_mu_sigma_sampler_threads;
         std::vector<ExperimentSpliceMeanPrecSamplerThread*>
-            experiment_splice_mean_prec_sampler_threads;
+            experiment_splice_mu_sigma_sampler_threads;
 
         // queues to send work to sampler threads, and be notified on completion
         // of ticks.
@@ -106,10 +106,10 @@ class Analyze
                    musigma_sampler_tick_queue, musigma_sampler_notify_queue,
                    experiment_musigma_sampler_tick_queue,
                    experiment_musigma_sampler_notify_queue,
-                   splice_mean_prec_sampler_tick_queue,
-                   splice_mean_prec_sampler_notify_queue,
-                   experiment_splice_mean_prec_sampler_tick_queue,
-                   experiment_splice_mean_prec_sampler_notify_queue;
+                   splice_mu_sigma_sampler_tick_queue,
+                   splice_mu_sigma_sampler_notify_queue,
+                   experiment_splice_mu_sigma_sampler_tick_queue,
+                   experiment_splice_mu_sigma_sampler_notify_queue;
 
         // matrix containing relative transcript abundance samples, indexed by:
         //   sample -> transcript (tid)
@@ -159,14 +159,15 @@ class Analyze
         // per-spliced-tgroup experiment wide dirichlet mean
         std::vector<std::vector<double> > experiment_splice_mean;
 
-        // symmetrical dirichlet prior on experiment_splice_mean
-        double experiment_splice_mean_prior;
+        // symmetrical logistic normal prior on experiment_splice_mean
+        double experiment_splice_mean_prior_mu;
+        double experiment_splice_mean_prior_sigma;
 
         // per-spliced-tgroup experiment precision
-        std::vector<double> experiment_splice_precision;
+        std::vector<std::vector<double> > experiment_splice_sigma;
 
         // splicing precision, indexed by spliced tgroup
-        std::vector<double> splice_precision;
+        std::vector<std::vector<double> > condition_splice_sigma;
 
         // parameters for the gamma prior on splice_precision
         double splice_alpha, splice_beta;

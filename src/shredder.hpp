@@ -109,5 +109,18 @@ class DirichletLogPdf
 };
 
 
+// 1-d logistic normal
+class LogisticNormalLogPdf
+{
+    public:
+        double f(double mu, double sigma, double x);
+        double df_dx(double mu, double sigma, double x);
+
+        // TODO: do these when we need them
+        //double df_dmu(double x, double mu, double sigma);
+        //double df_dsigma(double x, double mu ,double sigma);
+};
+
+
 #endif
 

@@ -553,7 +553,7 @@ bed_parse_failure:
         included_transcript.seqname = flankA.seqname;
         included_transcript.gene_id = name;
         included_transcript.transcript_id = name + "-included";
-        included_transcript.strand = strand;
+        included_transcript.strand = flankA.strand;
         included_transcript.source = "AlternativeExon";
         included_transcript.tgroup = next_tgroup;
 
@@ -568,7 +568,7 @@ bed_parse_failure:
         excluded_transcript.seqname = flankA.seqname;
         excluded_transcript.gene_id = name;
         excluded_transcript.transcript_id = name + "-excluded";
-        excluded_transcript.strand = strand;
+        excluded_transcript.strand = flankA.strand;
         excluded_transcript.source = "AlternativeExon";
         excluded_transcript.tgroup = next_tgroup;
 

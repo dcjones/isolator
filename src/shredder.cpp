@@ -402,3 +402,16 @@ double DirichletLogPdf::df_dalpha(double alpha,
 }
 
 
+double LogisticNormalLogPdf::f(double mu, double sigma, double x)
+{
+    return -log(sigma) - log(sqrt(2*M_PI)) - sq(log(x / (1 - x)) - mu) / (2 * sq(sigma));
+}
+
+
+double LogisticNormalLogPdf::df_dx(double mu, double sigma, double x)
+{
+    double y = log(x / (1 - x));
+    return (y - mu) / (sq(sigma) * (x - 1) * x);
+}
+
+
