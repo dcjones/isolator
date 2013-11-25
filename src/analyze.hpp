@@ -20,12 +20,10 @@
 class SamplerTickThread;
 class TgroupMuSigmaSamplerThread;
 class ExperimentTgroupMuSigmaSamplerThread;
-class TgroupAlphaSampler;
-class TgroupBetaSampler;
-class SpliceAlphaSampler;
-class SpliceBetaSampler;
+class AlphaSampler;
+class BetaSampler;
 class SpliceMuSigmaSamplerThread;
-class ExperimentMuSigmaPrecSamplerThread;
+class ExperimentSpliceMuSigmaSamplerThread;
 
 
 class Analyze
@@ -92,12 +90,10 @@ class Analyze
         std::vector<SamplerTickThread*> qsampler_threads;
         std::vector<TgroupMuSigmaSamplerThread*> musigma_sampler_threads;
         std::vector<ExperimentTgroupMuSigmaSamplerThread*> experiment_musigma_sampler_threads;
-        TgroupAlphaSampler* tgroup_alpha_sampler;
-        TgroupBetaSampler* tgroup_beta_sampler;
-        SpliceAlphaSampler* splice_alpha_sampler;
-        SpliceBetaSampler* splice_beta_sampler;
-        std::vector<SpliceMeanPrecSamplerThread*> splice_mu_sigma_sampler_threads;
-        std::vector<ExperimentSpliceMeanPrecSamplerThread*>
+        AlphaSampler* alpha_sampler;
+        BetaSampler* beta_sampler;
+        std::vector<SpliceMuSigmaSamplerThread*> splice_mu_sigma_sampler_threads;
+        std::vector<ExperimentSpliceMuSigmaSamplerThread*>
             experiment_splice_mu_sigma_sampler_threads;
 
         // queues to send work to sampler threads, and be notified on completion
@@ -154,20 +150,23 @@ class Analyze
 
         // condition slice mean indexed by condition, spliced tgroup, transcript
         // according to spliced_tgroup_indexes and tgroup_tids
-        std::vector<std::vector<std::vector<double> > > condition_splice_mean;
+        std::vector<std::vector<std::vector<double> > > condition_splice_mu;
 
-        // per-spliced-tgroup experiment wide dirichlet mean
-        std::vector<std::vector<double> > experiment_splice_mean;
+        // per-spliced-tgroup experiment wide logistic-normal mean
+        std::vector<std::vector<double> > experiment_splice_mu;
 
-        // symmetrical logistic normal prior on experiment_splice_mean
-        double experiment_splice_mean_prior_mu;
-        double experiment_splice_mean_prior_sigma;
+        // prior parameters for experimient_splice_mu
+        double experiment_splice_mu0, experiment_splice_sigma0;
 
         // per-spliced-tgroup experiment precision
         std::vector<std::vector<double> > experiment_splice_sigma;
 
         // splicing precision, indexed by spliced tgroup
         std::vector<std::vector<double> > condition_splice_sigma;
+
+        // flattened condition_splice_sigma used for sampling alpha, beta
+        // params.
+        std::vector<double> condition_splice_sigma_work;
 
         // parameters for the gamma prior on splice_precision
         double splice_alpha, splice_beta;
@@ -216,8 +215,9 @@ class Analyze
         hid_t h5_tgroup_row_mem_dataspace;
         hid_t h5_sample_quant_dataspace;
         hid_t h5_sample_quant_mem_dataspace;
-        hid_t h5_experiment_splicing_dataspace;
-        hid_t h5_condition_splicing_dataspace;
+        hid_t h5_experiment_splice_dataspace;
+        hid_t h5_condition_splice_mu_dataspace;
+        hid_t h5_condition_splice_sigma_dataspace;
         hid_t h5_splicing_mem_dataspace;
 
         // datasets
@@ -225,8 +225,10 @@ class Analyze
         hid_t h5_experiment_sd_dataset;
         hid_t h5_condition_mean_dataset;
         hid_t h5_sample_quant_dataset;
-        hid_t h5_experiment_splicing_dataset;
-        hid_t h5_condition_splicing_dataset;
+        hid_t h5_experiment_splice_mu_dataset;
+        hid_t h5_experiment_splice_sigma_dataset;
+        hid_t h5_condition_splice_mu_dataset;
+        hid_t h5_condition_splice_sigma_dataset;
 
         // variable length array for splicing paramaters
         hid_t h5_splice_param_type;
