@@ -56,9 +56,9 @@ double Shredder::sample(double x0)
 double Shredder::find_slice_edge(double x0, double slice_height,
                                  double lp0, double d0, int direction)
 {
-    const double lp_eps = 1e-3;
+    const double lp_eps = 1e-2;
     const double d_eps  = 1e-5;
-    const double x_eps  = 1e-4;
+    const double x_eps  = 1e-3;
 
     double lp = lp0 - slice_height;
     double d = d0;
@@ -114,7 +114,8 @@ double Shredder::find_slice_edge(double x0, double slice_height,
                 x = (x_bound_lower + x_bound_upper) / 2;
                 lp = f(x, d) - slice_height;
 
-                if (boost::math::isinf(lp) || boost::math::isinf(d)) {
+                //if (boost::math::isinf(lp) || boost::math::isinf(d)) {
+                if (!boost::math::isfinite(lp) || !boost::math::isfinite(d)) {
                     if (direction < 0) x_bound_lower = x;
                     else               x_bound_upper = x;
                 }

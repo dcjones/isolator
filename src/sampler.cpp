@@ -1336,6 +1336,7 @@ class InterTgroupSampler : public Shredder
             }
 
             // gradient
+            // TODO: These gradients seem wrong. They don't depend on "x" at all.
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
                 for (unsigned int i = 0; i < S.weight_matrix->rowlens[tid]; ++i) {
                     unsigned int idx = S.weight_matrix->idxs[tid][i];
@@ -1346,7 +1347,6 @@ class InterTgroupSampler : public Shredder
                         S.weight_matrix->rows[tid][i];
                     d_i /= S.frag_probs_prop[c][idx - S.component_frag[c]];
                     d += d_i;
-                    assert_finite(d);
                 }
             }
 
@@ -1360,7 +1360,6 @@ class InterTgroupSampler : public Shredder
                         S.weight_matrix->rows[tid][i];
                     d_i /= S.frag_probs_prop[c][idx - S.component_frag[c]];
                     d -= d_i;
-                    assert_finite(d);
                 }
             }
 
@@ -1409,7 +1408,7 @@ class InterTranscriptSampler : public Shredder
 {
     public:
         InterTranscriptSampler(Sampler& S)
-            : Shredder(constants::zero_eps, constants::zero_eps)
+            : Shredder(constants::zero_eps, 1.0 - constants::zero_eps)
             , S(S)
         {
         }
@@ -1733,7 +1732,7 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
 
     if (S.component_tgroups[c].size() > 1) {
         // TODO: constant
-        for (unsigned int i = 0; i < std::min<size_t>(5, S.component_tgroups[c].size()); ++i) {
+        for (unsigned int i = 0; i < std::min<size_t>(5, S.component_tgroups[c].size() - 1); ++i) {
             double r = random_uniform_01(rng);
             unsigned int u = 0;
             BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
@@ -1817,7 +1816,7 @@ void AbundanceSamplerThread::sample_intra_tgroup(unsigned int tgroup)
 {
     if (S.tgroup_tids[tgroup].size() > 1) {
         // TODO: constant
-        for (unsigned int i = 0; i < std::min<size_t>(5, S.tgroup_tids[tgroup].size()); ++i) {
+        for (unsigned int i = 0; i < std::min<size_t>(5, S.tgroup_tids[tgroup].size() - 1); ++i) {
             double r = random_uniform_01(rng);
             unsigned int u = 0.0;
             while (u < S.tgroup_tids[tgroup].size() - 1 &&
