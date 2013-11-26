@@ -1332,7 +1332,6 @@ void Analyze::run(const char* output_filename)
     condition_splice_mu.resize(C);
     for (size_t i = 0; i < C; ++i) {
         condition_splice_mu[i].resize(spliced_tgroup_indexes.size());
-        condition_splice_sigma[i].resize(spliced_tgroup_indexes.size());
         for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
             condition_splice_mu[i][j].resize(
                 tgroup_tids[spliced_tgroup_indexes[j]].size());
@@ -1350,6 +1349,7 @@ void Analyze::run(const char* output_filename)
                   condition_splice_sigma[j].end(), 1.0);
         flattened_sigma_size += condition_splice_sigma[j].size() - 1;
     }
+    Logger::info("flattened_sigma_size = %lu", (unsigned long) flattened_sigma_size);
 
     condition_splice_sigma_work.resize(flattened_sigma_size);
 
@@ -1659,7 +1659,7 @@ void Analyze::sample()
     assert_finite(experiment_tgroup_beta);
 
     for (size_t i = 0, j = 0; j < condition_splice_sigma.size(); ++j) {
-        for (size_t k = 0; k < condition_splice_sigma[j].size(); ++k) {
+        for (size_t k = 0; k < condition_splice_sigma[j].size() - 1; ++k) {
             condition_splice_sigma_work[i++] = condition_splice_sigma[j][k];
         }
     }

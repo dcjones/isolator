@@ -56,6 +56,14 @@ T* realloc_or_die(T* xs, size_t n)
 }
 
 
+void assert_finite(double x)
+{
+    if (!boost::math::isfinite(x)) {
+        Logger::abort("Unexpected non-finite value.");
+    }
+}
+
+
 struct MultireadFrag
 {
     MultireadFrag(unsigned int multiread_num,
@@ -1338,6 +1346,7 @@ class InterTgroupSampler : public Shredder
                         S.weight_matrix->rows[tid][i];
                     d_i /= S.frag_probs_prop[c][idx - S.component_frag[c]];
                     d += d_i;
+                    assert_finite(d);
                 }
             }
 
@@ -1351,6 +1360,7 @@ class InterTgroupSampler : public Shredder
                         S.weight_matrix->rows[tid][i];
                     d_i /= S.frag_probs_prop[c][idx - S.component_frag[c]];
                     d -= d_i;
+                    assert_finite(d);
                 }
             }
 
@@ -1429,10 +1439,11 @@ class InterTranscriptSampler : public Shredder
                 marginal_splice_mu = S.hp.splice_mu[u] - log(wtmixv/wtmixlast);
                 prior_lp0 += splice_prior.f(marginal_splice_mu, S.hp.splice_sigma[u], wtmixu);
                 lp0 += prior_lp0;
+                assert_finite(prior_lp0);
             }
 
             f0 = S.component_frag[c+1];
-            f1 = S.component_frag[c+1];
+            f1 = S.component_frag[c];
             if (S.weight_matrix->rowlens[u] > 0) {
                 f0 = S.weight_matrix->idxs[u][0];
                 f1 = 1 + S.weight_matrix->idxs[u][S.weight_matrix->rowlens[u] - 1];
@@ -1446,7 +1457,12 @@ class InterTranscriptSampler : public Shredder
             if (f0 > f1) f0 = f1 = S.component_frag[c];
             f0 -= S.component_frag[c];
             f1 -= S.component_frag[c];
+
+            // Round f0 down to the nearst 32-byte boundry so we can use avx/sse.
+            f0 &= 0xfffffff8;
+
             lpf01 = dotlog(S.frag_counts[c] + f0, S.frag_probs[c] + f0, f1 - f0);
+            assert_finite(lpf01);
 
             this->u = u;
             this->v = v;
@@ -1702,7 +1718,7 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
         BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
             S.tgroupmix[tgroup] += S.tmix[tid];
         }
-        if (S.tgroupmix[tgroup] <= 0.0) {
+        if (!boost::math::isfinite(S.tgroupmix[tgroup]) || S.tgroupmix[tgroup] <= 0.0) {
             Logger::abort("A non-positive tgroup mixture occurred.");
         }
         component_tmix += S.tgroupmix[tgroup];
@@ -1715,22 +1731,33 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
     acopy(S.frag_probs_prop[c], S.frag_probs[c],
           (S.component_frag[c + 1] - S.component_frag[c]) * sizeof(float));
 
-    // TODO: constant
-    for (unsigned int i = 0; i < std::min<size_t>(5, S.component_tgroups[c].size()); ++i) {
-        double r = random_uniform_01(rng);
-        unsigned int u = 0.0;
-        while (u < S.component_tgroups[c].size() &&
-               r > S.tgroupmix[u]) {
-            r -= S.tgroupmix[u];
-            ++u;
+    if (S.component_tgroups[c].size() > 1) {
+        // TODO: constant
+        for (unsigned int i = 0; i < std::min<size_t>(5, S.component_tgroups[c].size()); ++i) {
+            double r = random_uniform_01(rng);
+            unsigned int u = 0;
+            BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
+                if (r <= S.tgroupmix[tgroup]) break;
+                r -= S.tgroupmix[tgroup];
+                ++u;
+            }
+            if (u == S.component_tgroups[c].size()) --u;
+
+            random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
+                        0, S.component_tgroups[c].size() - 2));
+            unsigned int v = random_uniform_int(rng);
+            if (v >= u) ++ v;
+
+            unsigned int tgroupu = 0, tgroupv = 0;
+            unsigned int j = 0;
+            BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
+                if (u == j) tgroupu = tgroup;
+                if (v == j) tgroupv = tgroup;
+                ++j;
+            }
+
+            sample_inter_tgroup(c, tgroupu, tgroupv);
         }
-
-        random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
-                    0, S.component_tgroups[c].size() - 2));
-        unsigned int v = random_uniform_int(rng);
-        if (v >= u) ++ v;
-
-        sample_inter_tgroup(c, u, v);
     }
 
     // sample transcript abundance within tgroups
@@ -1750,6 +1777,9 @@ void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u,
 
     double u_delta = tgroupmix_u / S.tgroupmix[u];
     double v_delta = tgroupmix_v / S.tgroupmix[v];
+
+    assert_finite(tgroupmix_u);
+    assert_finite(tgroupmix_v);
 
     S.tgroupmix[u] = tgroupmix_u;
     S.tgroupmix[v] = tgroupmix_v;
@@ -1773,27 +1803,37 @@ void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u,
               S.weight_matrix->rowlens[tid]);
         S.tmix[tid] *= v_delta;
     }
+
+    size_t component_size = S.component_frag[c+1] - S.component_frag[c];
+    for (size_t i = 0; i < component_size; ++i) {
+        if (S.frag_probs[c][i] <= 0 || !boost::math::isfinite(S.frag_probs[c][i])) {
+            Logger::abort("Non-positive fragment probability while doing inter tgroup sampling.");
+        }
+    }
 }
 
 
 void AbundanceSamplerThread::sample_intra_tgroup(unsigned int tgroup)
 {
-    // TODO: constant
-    for (unsigned int i = 0; i < std::min<size_t>(5, S.tgroup_tids[tgroup].size()); ++i) {
-        double r = random_uniform_01(rng);
-        unsigned int u = 0.0;
-        while (u < S.tgroup_tids[tgroup].size() &&
-               r > S.tgroup_tmix[u]) {
-            r -= S.tgroup_tmix[u];
-            ++u;
+    if (S.tgroup_tids[tgroup].size() > 1) {
+        // TODO: constant
+        for (unsigned int i = 0; i < std::min<size_t>(5, S.tgroup_tids[tgroup].size()); ++i) {
+            double r = random_uniform_01(rng);
+            unsigned int u = 0.0;
+            while (u < S.tgroup_tids[tgroup].size() - 1 &&
+                   r > S.tgroup_tmix[S.tgroup_tids[tgroup][u]]) {
+                r -= S.tgroup_tmix[S.tgroup_tids[tgroup][u]];
+                ++u;
+            }
+
+            random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
+                        0, S.tgroup_tids[tgroup].size() - 2));
+            unsigned int v = random_uniform_int(rng);
+            if (v >= u) ++ v;
+
+            sample_inter_transcript(S.tgroup_tids[tgroup][u],
+                                    S.tgroup_tids[tgroup][v]);
         }
-
-        random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
-                    0, S.tgroup_tids[tgroup].size() - 2));
-        unsigned int v = random_uniform_int(rng);
-        if (v >= u) ++ v;
-
-        sample_inter_transcript(u, v);
     }
 }
 
@@ -1832,6 +1872,13 @@ void AbundanceSamplerThread::sample_inter_transcript(unsigned int u, unsigned in
           S.weight_matrix->idxs[v],
           S.component_frag[c],
           S.weight_matrix->rowlens[v]);
+
+    size_t component_size = S.component_frag[c+1] - S.component_frag[c];
+    for (size_t i = 0; i < component_size; ++i) {
+        if (S.frag_probs[c][i] <= 0 || !boost::math::isfinite(S.frag_probs[c][i])) {
+            Logger::abort("Non-positive fragment probability while doing inter transcript sampling.");
+        }
+    }
 
     S.tgroup_tmix[u] = tmixu / S.tgroupmix[tgroup];
     S.tgroup_tmix[v] = tmixv / S.tgroupmix[tgroup];
@@ -2512,6 +2559,17 @@ void Sampler::init_frag_probs()
               weight_matrix->idxs[i],
               component_frag[c],
               weight_matrix->rowlens[i]);
+
+    }
+
+    // just checking
+    for (unsigned int i = 0; i < num_components; ++i) {
+        unsigned component_size = component_frag[i + 1] - component_frag[i];
+        for (unsigned int j = 0; j < component_size; ++j) {
+            if (!boost::math::isfinite(frag_probs[i][j]) || frag_probs[i][j] <= 0.0) {
+                Logger::abort("Non-positive initial fragment probability.");
+            }
+        }
     }
 }
 
