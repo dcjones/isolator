@@ -112,6 +112,7 @@ int isolator_summarize(int argc, char* argv[])
                        "  median_transcript_expression\n"
                        "  median_gene_expression\n"
                        "  condition_splicing\n"
+                       "  condition_pairwise_splicing\n"
                        "  condition_tgroup_mean\n"
                        "  experiment_tgroup_sd\n"
                        "  tgroup_fold_change\n"
@@ -172,6 +173,9 @@ int isolator_summarize(int argc, char* argv[])
     }
     else if (strcmp(strategy, "condition_splicing") == 0) {
         summarize.condition_splicing(out_f);
+    }
+    else if (strcmp(strategy, "condition_pairwise_splicing") == 0) {
+        summarize.condition_pairwise_splicing(out_f);
     }
     else if (strcmp(strategy, "condition_tgroup_mean") == 0) {
         summarize.median_condition_tgroup_expression(out_f);
