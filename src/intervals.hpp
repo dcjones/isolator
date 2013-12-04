@@ -22,5 +22,17 @@ struct Interval
 };
 
 
+struct IntervalPair
+{
+    IntervalPair();
+    IntervalPair(const Interval& first, const Interval& second);
+
+    bool operator < (const IntervalPair&) const;
+    bool operator == (const IntervalPair&) const;
+
+    Interval first, second;
+};
+
+
 #endif
 

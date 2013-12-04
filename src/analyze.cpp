@@ -1263,7 +1263,7 @@ void Analyze::compute_xs()
 }
 
 
-void Analyze::run(const char* output_filename)
+void Analyze::run(hid_t output_file_id)
 {
     C = condition_index.size();
     Q.resize(K, N);
@@ -1315,11 +1315,6 @@ void Analyze::run(const char* output_filename)
     choose_initial_values();
 
     setup_samplers();
-
-    hid_t output_file_id = H5Fcreate(output_filename, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-    if (output_file_id < 0) {
-        Logger::abort("Unable to open %s for writing.", output_filename);
-    }
     setup_output(output_file_id);
 
     BOOST_FOREACH (Sampler* qsampler, qsamplers) {
@@ -1451,7 +1446,6 @@ void Analyze::run(const char* output_filename)
     H5Sclose(h5_condition_splice_mu_dataspace);
     H5Sclose(h5_condition_splice_sigma_dataspace);
     H5Sclose(h5_splicing_mem_dataspace);
-    H5Fclose(output_file_id);
     H5Tclose(h5_splice_param_type);
 
     Logger::pop_task(task_name);

@@ -183,6 +183,11 @@ class TranscriptSet
                                       std::vector<Interval>& consensus_5p_exons,
                                       std::vector<Interval>& consensus_3p_exons);
 
+        /* Find all cassette exons, along with transcripts that exclude or
+         * include them. */
+        void get_cassette_exons(std::vector<Interval>& cassette_exons,
+                                std::vector<std::vector<unsigned int> >& including_tids,
+                                std::vector<std::vector<unsigned int> >& excluding_tids);
 
         /* Acess to std::set::iterator */
         typedef std::set<Transcript>::const_iterator iterator;

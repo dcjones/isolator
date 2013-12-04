@@ -2,16 +2,17 @@
 //#include <google/profiler.h>
 
 #include <boost/accumulators/accumulators.hpp>
-#include <boost/accumulators/statistics/stats.hpp>
-#include <boost/accumulators/statistics/median.hpp>
 #include <boost/accumulators/statistics/mean.hpp>
+#include <boost/accumulators/statistics/median.hpp>
+#include <boost/accumulators/statistics/stats.hpp>
 #include <boost/accumulators/statistics/variance.hpp>
 #include <boost/foreach.hpp>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <getopt.h>
-#include <boost/foreach.hpp>
+#include <hdf5.h>
+#include <hdf5_hl.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -225,6 +226,223 @@ void print_analyze_help(FILE* fout)
 }
 
 
+static void write_metadata(hid_t file_id)
+{
+    /* TODO: Here's what we'd like to output.
+     *
+     * 1. Command line
+     * 2. Program version
+     * 3. Cassette exons
+     * 4. ???
+     *
+     */
+
+
+
+
+}
+
+
+// Write a table with cassette exon information, which should look something
+// like:
+//   seqname, start, end, strand, inclusion_tids, exclusion_tids
+//
+static void write_cassette_exon_data(hid_t file_id, TranscriptSet& ts)
+{
+    std::vector<Interval> cassette_exons;
+    std::vector<std::vector<unsigned int> > including_tids, excluding_tids;
+    ts.get_cassette_exons(cassette_exons, including_tids, excluding_tids);
+    size_t n = cassette_exons.size();
+    Logger::info("%lu cassette exons", (unsigned long) n);
+
+    herr_t status;
+
+    // create types for each field
+    hid_t varstring_type = H5Tcopy(H5T_C_S1);
+    if (varstring_type < 0 || H5Tset_size(varstring_type, H5T_VARIABLE) < 0) {
+        Logger::abort("HDF5 type creation failed.");
+    }
+
+    hid_t tids_type = H5Tvlen_create(H5T_NATIVE_LONG);
+    if (tids_type < 0) {
+        Logger::abort("HDF5 type creation failed.");
+    }
+
+    if (H5Gcreate1(file_id, "/cassette_exons", 0) < 0) {
+        Logger::abort("HDF5 group creation failed.");
+    }
+
+    hsize_t dims[1] = { n };
+    hid_t cassette_exon_dataspace = H5Screate_simple(1, dims, NULL);
+    if (cassette_exon_dataspace < 0) {
+        Logger::abort("HDF5 dataspace creation failed.");
+    }
+
+    hid_t dataset_create_property = H5Pcreate(H5P_DATASET_CREATE);
+    H5Pset_layout(dataset_create_property, H5D_CHUNKED);
+    H5Pset_chunk(dataset_create_property, 1, dims);
+    H5Pset_deflate(dataset_create_property, 7);
+
+    // write sequence names
+    hid_t seqname_id = H5Dcreate2(file_id, "/cassette_exons/seqname",
+                                  varstring_type, cassette_exon_dataspace,
+                                  H5P_DEFAULT, dataset_create_property,
+                                  H5P_DEFAULT);
+    if (seqname_id < 0) {
+        Logger::abort("HDF5 dataset creation failed.");
+    }
+
+    char** string_data = new char* [n];
+    for (size_t i = 0; i < n; ++i) {
+        const std::string& seqname = cassette_exons[i].seqname.get();
+        string_data[i] = new char[seqname.size() + 1];
+        memcpy(string_data[i], seqname.c_str(), seqname.size() + 1);
+    }
+
+    status = H5Dwrite(seqname_id, varstring_type, H5S_ALL, H5S_ALL,
+                      H5P_DEFAULT, string_data);
+    if (status < 0) Logger::abort("HDF5 write failed.");
+
+    for (size_t i = 0; i < n; ++i) {
+        delete [] string_data[i];
+    }
+    delete [] string_data;
+
+    H5Dclose(seqname_id);
+
+    // write start positions
+    hid_t start_id = H5Dcreate2(file_id, "/cassette_exons/start",
+                                H5T_NATIVE_LONG, cassette_exon_dataspace,
+                                H5P_DEFAULT, dataset_create_property,
+                                H5P_DEFAULT);
+
+    if (start_id < 0) {
+        Logger::abort("HDF5 dataset creation failed.");
+    }
+
+    long* long_data = new long [n];
+    for (size_t i = 0; i < n; ++i) {
+        long_data[i] = cassette_exons[i].start;
+    }
+
+    status = H5Dwrite(start_id, H5T_NATIVE_LONG, H5S_ALL, H5S_ALL,
+                      H5P_DEFAULT, long_data);
+    if (status < 0) Logger::abort("HDF5 write failed.");
+
+    H5Dclose(start_id);
+
+    // write end positions
+    hid_t end_id = H5Dcreate2(file_id, "/cassette_exons/end",
+                              H5T_NATIVE_LONG, cassette_exon_dataspace,
+                              H5P_DEFAULT, dataset_create_property,
+                              H5P_DEFAULT);
+
+    if (end_id < 0) {
+        Logger::abort("HDF5 dataset creation failed.");
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        long_data[i] = cassette_exons[i].end;
+    }
+
+    status = H5Dwrite(end_id, H5T_NATIVE_LONG, H5S_ALL, H5S_ALL,
+                      H5P_DEFAULT, long_data);
+    if (status < 0) Logger::abort("HDF5 write failed.");
+
+    H5Dclose(end_id);
+
+    delete[] long_data;
+
+    // write strands
+    hid_t strand_id = H5Dcreate2(file_id, "/cassette_exons/strand",
+                                 H5T_NATIVE_CHAR, cassette_exon_dataspace,
+                                 H5P_DEFAULT, dataset_create_property,
+                                 H5P_DEFAULT);
+    if (strand_id < 0) {
+        Logger::abort("HDF5 dataset creation failed.");
+    }
+
+    char* char_data = new char[n];
+    for (size_t i = 0; i < n; ++i) {
+        if (cassette_exons[i].strand == strand_pos) {
+            char_data[i] = '+';
+        }
+        else if (cassette_exons[i].strand == strand_neg) {
+            char_data[i] = '-';
+        }
+        else {
+            char_data[i] = '.';
+        }
+    }
+
+    status = H5Dwrite(strand_id, H5T_NATIVE_CHAR, H5S_ALL, H5S_ALL,
+                      H5P_DEFAULT, char_data);
+    if (status < 0) Logger::abort("HDF5 write failed.");
+
+    delete [] char_data;
+    H5Dclose(strand_id);
+
+
+    // write including tids
+    hid_t including_tids_id = H5Dcreate2(file_id, "/cassette_exons/including_tids",
+                                         tids_type, cassette_exon_dataspace,
+                                         H5P_DEFAULT, dataset_create_property,
+                                         H5P_DEFAULT);
+    if (including_tids_id < 0) {
+        Logger::abort("HDF5 dataset creation failed.");
+    }
+
+    hvl_t* vlen_data = new hvl_t [n];
+    for (size_t i = 0; i < n; ++i) {
+        vlen_data[i].len = including_tids[i].size();
+        unsigned int* ptids = new unsigned int [including_tids[i].size()];
+        for (size_t j = 0; j < including_tids[i].size(); ++j) {
+            ptids[j] = including_tids[i][j];
+        }
+        vlen_data[i].p = reinterpret_cast<void*>(ptids);
+    }
+
+    status = H5Dwrite(including_tids_id, tids_type, H5S_ALL, H5S_ALL,
+                      H5P_DEFAULT, vlen_data);
+    if (status < 0) Logger::abort("HDF5 write failed.");
+
+    H5Dclose(including_tids_id);
+
+    // write excluding tids
+    hid_t excluding_tids_id = H5Dcreate2(file_id, "/cassette_exons/excluding_tids",
+                                         tids_type, cassette_exon_dataspace,
+                                         H5P_DEFAULT, dataset_create_property,
+                                         H5P_DEFAULT);
+    if (excluding_tids_id < 0) {
+        Logger::abort("HDF5 dataset creation failed.");
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        vlen_data[i].len = excluding_tids[i].size();
+        unsigned int* ptids = new unsigned int [excluding_tids[i].size()];
+        for (size_t j = 0; j < excluding_tids[i].size(); ++j) {
+            ptids[j] = excluding_tids[i][j];
+        }
+        delete [] reinterpret_cast<unsigned int*>(vlen_data[i].p);
+        vlen_data[i].p = reinterpret_cast<void*>(ptids);
+    }
+
+    status = H5Dwrite(excluding_tids_id, tids_type, H5S_ALL, H5S_ALL,
+                      H5P_DEFAULT, vlen_data);
+    if (status < 0) Logger::abort("HDF5 write failed.");
+
+    H5Dclose(excluding_tids_id);
+
+    for (size_t i = 0; i < n; ++i) {
+        delete [] reinterpret_cast<unsigned int*>(vlen_data[i].p);
+    }
+    delete [] vlen_data;
+
+    H5Tclose(varstring_type);
+    H5Tclose(tids_type);
+}
+
+
 int isolator_analyze(int argc, char* argv[])
 {
     static struct option long_options[] =
@@ -247,10 +465,11 @@ int isolator_analyze(int argc, char* argv[])
     unsigned int burnin = 100;
     unsigned int num_samples = 250;
     pos_t tss_cluster_dist = 30;
-    bool run_gc_correction = true;
+    // TODO: this should default to true when we fix gc correction
+    bool run_gc_correction = false;
     constants::num_threads = boost::thread::hardware_concurrency();
     const char* fa_fn  = NULL;
-    const char* output_fn = "isolator_output.hdf5";
+    const char* output_filename = "isolator_output.h5";
     bool use_introns = false;
     bool use_exons = false;
 
@@ -267,7 +486,7 @@ int isolator_analyze(int argc, char* argv[])
                 return 0;
 
             case 'o':
-                output_fn = optarg;
+                output_filename = optarg;
                 break;
 
             case 'v':
@@ -330,7 +549,7 @@ int isolator_analyze(int argc, char* argv[])
     const char* annotation_filename = argv[optind++];
     TranscriptSet ts;
 
-    // TODO: parse a bed file if the right option is set
+    // TODO: parse a; bed file if the right option is set
     if (use_introns && use_exons) {
         Logger::abort("'--introns' and '--exons' arguments are mutually exclusize.");
     }
@@ -343,6 +562,14 @@ int isolator_analyze(int argc, char* argv[])
     else {
         ts.read_gtf(annotation_filename, tss_cluster_dist);
     }
+
+    hid_t output_file_id = H5Fcreate(output_filename, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    if (output_file_id < 0) {
+        Logger::abort("Unable to open %s for writing.", output_filename);
+    }
+
+    // write metadata
+    write_cassette_exon_data(output_file_id, ts);
 
     // initialize
     Analyze analyze(burnin, num_samples, ts, fa_fn, run_gc_correction);
@@ -360,7 +587,7 @@ int isolator_analyze(int argc, char* argv[])
         ++condition_num;
     }
 
-    analyze.run(output_fn);
+    analyze.run(output_file_id);
 
     Logger::info("Finished. Have a nice day!");
     Logger::end();

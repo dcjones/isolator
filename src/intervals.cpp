@@ -59,3 +59,30 @@ bool Interval::operator == (const Interval& other) const
            start   == other.start &&
            end     == other.end;
 }
+
+
+IntervalPair::IntervalPair()
+{
+}
+
+
+IntervalPair::IntervalPair(const Interval& first, const Interval& second)
+    : first(first)
+    , second(second)
+{
+}
+
+
+bool IntervalPair::operator < (const IntervalPair& other) const
+{
+    return this->first == other.first ?
+        this->second < other.second : this->first < other.first;
+}
+
+
+bool IntervalPair::operator == (const IntervalPair& other) const
+{
+    return this->first == other.first && this->second == other.second;
+}
+
+

@@ -849,6 +849,76 @@ void TranscriptSet::get_distinct_5p_3p_exons(const std::vector<Interval>& consen
 }
 
 
+void TranscriptSet::get_cassette_exons(std::vector<Interval>& cassette_exons,
+                                       std::vector<std::vector<unsigned int> >& including_tids,
+                                       std::vector<std::vector<unsigned int> >& excluding_tids)
+{
+    std::map<Interval, std::vector<unsigned int> > introns;
+    std::map<IntervalPair, std::vector<unsigned int> > flanking_introns;;
+
+    // index introns
+    for (iterator t = begin(); t != end(); ++t) {
+        if (t->size() <= 1) continue;
+
+        Transcript::iterator e1 = t->begin();
+        Transcript::iterator e2 = t->begin(); ++e2;
+
+        while (e2 != t->end()) {
+            Interval intron(t->seqname, e1->end + 1, e2->start - 1, t->strand);
+            introns[intron].push_back(t->id);
+
+            ++e1;
+            ++e2;
+        }
+    }
+
+    // index flanking introns
+    for (iterator t = begin(); t != end(); ++t) {
+        if (t->size() <= 2) continue;
+
+        Transcript::iterator e1 = t->begin();
+        Transcript::iterator e2 = t->begin(); ++e2;
+        Transcript::iterator e3 = t->begin(); ++e3; ++e3;
+
+        while (e3 != t->end()) {
+            Interval first(t->seqname, e1->end + 1, e2->start - 1, t->strand);
+            Interval second(t->seqname, e2->end+ 1, e3->start - 1, t->strand);
+            IntervalPair flanks(first, second);
+            flanking_introns[flanks].push_back(t->id);
+
+            ++e1;
+            ++e2;
+            ++e3;
+        }
+    }
+
+    typedef std::pair<IntervalPair, std::vector<unsigned int> > flank_keyval_t;
+    BOOST_FOREACH (const flank_keyval_t& keyval, flanking_introns) {
+        const IntervalPair& flanks = keyval.first;
+        const std::vector<unsigned int>& tids = keyval.second;
+
+        Interval excluded_intron(flanks.first.seqname,
+                                 flanks.first.start,
+                                 flanks.second.end,
+                                 flanks.first.strand);
+
+        std::map<Interval, std::vector<unsigned int> >::iterator intron =
+            introns.find(excluded_intron);
+        if (intron == introns.end()) continue;
+
+        Interval exon(flanks.first.seqname,
+                      flanks.first.end + 1,
+                      flanks.second.start - 1,
+                      flanks.first.strand);
+
+        cassette_exons.push_back(exon);
+
+        including_tids.push_back(tids);
+        excluding_tids.push_back(intron->second);
+    }
+}
+
+
 TranscriptSet::iterator TranscriptSet::begin()
 {
     return transcripts.begin();
