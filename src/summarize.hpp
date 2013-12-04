@@ -5,6 +5,7 @@
 // Read and produce plain-text tables from the HDF5 output generated
 // by "analyze".
 
+#include <boost/multi_array.hpp>
 #include <boost/numeric/ublas/matrix.hpp>
 #include <cstdio>
 #include <map>
@@ -34,10 +35,13 @@ class Summarize
 
         void condition_splicing(FILE* output);
         void expression_samples(FILE* output);
+        void condition_pairwise_splicing(FILE* output);
 
     private:
         void median_transcript_expression(
                 boost::numeric::ublas::matrix<float>& Q);
+
+        void condition_splicing(std::vector<boost::multi_array<float, 3> >& output);
 
         hid_t h5_file;
 

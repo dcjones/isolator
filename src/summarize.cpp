@@ -1,7 +1,6 @@
 
 #include <algorithm>
 #include <boost/foreach.hpp>
-#include <boost/multi_array.hpp>
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/numeric/ublas/matrix_proxy.hpp>
 #include <set>
@@ -549,12 +548,8 @@ void Summarize::tgroup_fold_change(FILE* output,
 }
 
 
-void Summarize::condition_splicing(FILE* output)
+void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& splicing)
 {
-    // TODO: pass thete in
-    double upper_quantile = 0.95;
-    double lower_quantile = 0.05;
-
     hid_t dataset = H5Dopen2(h5_file, "/condition/splice_mu", H5P_DEFAULT);
     if (dataset < 0) {
         Logger::abort("Failed to open the /condition/splice_mu dataset");
@@ -580,11 +575,6 @@ void Summarize::condition_splicing(FILE* output)
     hsize_t dataspace_count[3] = {1, 1, dims[2]};
     herr_t status;
 
-    // indexed by sample_num, condition, and within-tgroup transcript
-    typedef boost::multi_array<float, 3> marray_t;
-
-    // indexed by spliced tgroup
-    std::vector<marray_t> splicing(dims[2]);
     for (size_t i = 0; i < dims[2]; ++i) {
         size_t tgroup = spliced_tgroup_indexes[i];
         splicing[i].resize(boost::extents[dims[0]][dims[1]][tgroup_tids[tgroup].size()]);
@@ -627,6 +617,34 @@ void Summarize::condition_splicing(FILE* output)
         }
     }
 
+    H5Dvlen_reclaim(memtype, mem_dataspace, H5P_DEFAULT, buffer);
+    delete [] buffer;
+    H5Sclose(mem_dataspace);
+    H5Tclose(memtype);
+    H5Dclose(dataset);
+}
+
+
+void Summarize::condition_splicing(FILE* output)
+{
+    // TODO: pass these in
+    double upper_quantile = 0.95;
+    double lower_quantile = 0.05;
+
+    // indexed by sample_num, condition, and within-tgroup transcript
+    typedef boost::multi_array<float, 3> marray_t;
+
+    // indexed by spliced tgroup
+    std::vector<marray_t> splicing(spliced_tgroup_indexes.size());
+
+    condition_splicing(splicing);
+    size_t num_samples = 0;
+    size_t C = 0;
+    if (splicing.size() > 0) {
+        C = splicing[0].shape()[1];
+        num_samples = splicing[0].shape()[0];
+    }
+
     // summarization
     fprintf(output, "transcript_id\ttss_transcript_ids");
     for (size_t i = 0; i < C; ++i) {
@@ -648,7 +666,7 @@ void Summarize::condition_splicing(FILE* output)
             }
 
             for (size_t k = 0; k < C; ++k) {
-                for (size_t l = 0; l < dims[0]; ++l) {
+                for (size_t l = 0; l < num_samples; ++l) {
                     work[l] = splicing[i][l][k][j];
                 }
 
@@ -661,12 +679,57 @@ void Summarize::condition_splicing(FILE* output)
             fputc('\n', output);
         }
     }
+}
 
-    H5Dvlen_reclaim(memtype, mem_dataspace, H5P_DEFAULT, buffer);
-    delete [] buffer;
-    H5Sclose(mem_dataspace);
-    H5Tclose(memtype);
-    H5Dclose(dataset);
+
+void Summarize::condition_pairwise_splicing(FILE* output)
+{
+    // TODO: pass these in
+    double upper_quantile = 0.95;
+    double lower_quantile = 0.05;
+
+    // indexed by sample_num, condition, and within-tgroup transcript
+    typedef boost::multi_array<float, 3> marray_t;
+
+    // indexed by spliced tgroup
+    std::vector<marray_t> splicing(spliced_tgroup_indexes.size());
+
+    condition_splicing(splicing);
+    size_t num_samples = 0;
+    size_t C = 0;
+    if (splicing.size() > 0) {
+        C = splicing[0].shape()[1];
+        num_samples = splicing[0].shape()[0];
+    }
+
+    fprintf(output, "transcript_id\tgene_id\tcondition_a\tcondition_b\t"
+                    "log2fc_lower\tlog2fc_median\tlog2fc_upper\n");
+
+    std::vector<float> work(num_samples);
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        size_t tgroup = spliced_tgroup_indexes[i];
+        for (size_t j = 0; j < tgroup_tids[tgroup].size(); ++j) {
+            unsigned long tid = tgroup_tids[tgroup][j];
+            for (size_t cond_a = 0; cond_a < C; ++cond_a) {
+                for (size_t cond_b = 0; cond_b < C; ++cond_b) {
+                    if (cond_a == cond_b) continue;
+
+                    for (size_t l = 0; l < num_samples; ++l) {
+                        work[l] = log2(splicing[i][l][cond_a][j]) -
+                                  log2(splicing[i][l][cond_b][j]);
+                    }
+
+                    std::sort(work.begin(), work.end());
+                    fprintf(output, "%s\t%s\t%lu\t%lu\t%f\t%f\t%f\n",
+                            transcript_ids[tid].c_str(), gene_ids[tid].c_str(),
+                            cond_a + 1, cond_b + 1,
+                            work[(int)(lower_quantile * num_samples)],
+                            work[num_samples/2],
+                            work[(int)(upper_quantile * num_samples)]);
+                }
+            }
+        }
+    }
 }
 
 
