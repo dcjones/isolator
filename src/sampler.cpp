@@ -1733,6 +1733,7 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
     if (S.component_tgroups[c].size() > 1) {
         // TODO: constant
         for (unsigned int i = 0; i < std::min<size_t>(5, S.component_tgroups[c].size() - 1); ++i) {
+#if 0
             double r = random_uniform_01(rng);
             unsigned int u = 0;
             BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
@@ -1741,6 +1742,10 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
                 ++u;
             }
             if (u == S.component_tgroups[c].size()) --u;
+#endif
+            random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
+                        0, S.component_tgroups[c].size() - 1));
+            unsigned int u = random_uniform_int(rng);
 
             random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
                         0, S.component_tgroups[c].size() - 2));
@@ -1817,6 +1822,7 @@ void AbundanceSamplerThread::sample_intra_tgroup(unsigned int tgroup)
     if (S.tgroup_tids[tgroup].size() > 1) {
         // TODO: constant
         for (unsigned int i = 0; i < std::min<size_t>(5, S.tgroup_tids[tgroup].size() - 1); ++i) {
+#if 0
             double r = random_uniform_01(rng);
             unsigned int u = 0.0;
             while (u < S.tgroup_tids[tgroup].size() - 1 &&
@@ -1824,6 +1830,10 @@ void AbundanceSamplerThread::sample_intra_tgroup(unsigned int tgroup)
                 r -= S.tgroup_tmix[S.tgroup_tids[tgroup][u]];
                 ++u;
             }
+#endif
+            random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
+                        0, S.tgroup_tids[tgroup].size() - 1));
+            unsigned int u = random_uniform_int(rng);
 
             random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
                         0, S.tgroup_tids[tgroup].size() - 2));

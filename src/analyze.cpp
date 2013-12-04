@@ -79,60 +79,6 @@ class BetaDistributionSampler : public Shredder
 };
 
 
-class SplicePrecisionSampler : public Shredder
-{
-    public:
-        SplicePrecisionSampler()
-            : Shredder(1.0, 1000.0)
-        {}
-
-        // mean and dat are both matrices indexed by sample then transcript
-        double sample(double prec, const matrix<double>* mean,
-                      double prior_alpha, double prior_beta,
-                      const matrix<double>* data,
-                      size_t n, size_t m)
-        {
-            this->prior_alpha = prior_alpha;
-            this->prior_beta = prior_beta;
-            this->mean = mean;
-            this->data = data;
-            this->n = n;
-            this->m = m;
-
-            double prec1 = Shredder::sample(prec);
-            return prec1;
-
-            //return Shredder::sample(prec);
-        }
-
-    private:
-        double prior_alpha, prior_beta;
-        const matrix<double>* mean;
-        const matrix<double>* data;
-        size_t n, m;
-
-        GammaLogPdf prior_logpdf;
-        DirichletLogPdf likelihood_logpdf;
-
-    protected:
-        double f(double prec, double &d)
-        {
-            double fx = 0.0;
-            d = 0.0;
-
-            // XXX: Is the prior the problem?
-            fx += prior_logpdf.f(prior_alpha, prior_beta, &prec, 1);
-            d += prior_logpdf.df_dx(prior_alpha, prior_beta, &prec, 1);
-
-            fx += likelihood_logpdf.f(m * prec, mean, data, n, m);
-            d += likelihood_logpdf.df_dalpha(m * prec, mean, data, n, m);
-
-            return fx;
-        }
-};
-
-
-
 class NormalMuSampler
 {
     public:

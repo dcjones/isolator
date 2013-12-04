@@ -555,9 +555,9 @@ void Summarize::condition_splicing(FILE* output)
     double upper_quantile = 0.95;
     double lower_quantile = 0.05;
 
-    hid_t dataset = H5Dopen2(h5_file, "/condition/splicing", H5P_DEFAULT);
+    hid_t dataset = H5Dopen2(h5_file, "/condition/splice_mu", H5P_DEFAULT);
     if (dataset < 0) {
-        Logger::abort("Failed to open the /condition/splicing dataset");
+        Logger::abort("Failed to open the /condition/splice_mu dataset");
     }
 
     hid_t dataspace = H5Dget_space(dataset);
@@ -567,7 +567,7 @@ void Summarize::condition_splicing(FILE* output)
     size_t C = dims[1];
 
     if (dims[2] != spliced_tgroup_indexes.size()) {
-        Logger::abort("The /condition/splicing dataset is of incorrect size.");
+        Logger::abort("The /condition/splice_mu dataset is of incorrect size.");
     }
 
     hsize_t mem_dataspace_dims[1] = {dims[2]};
@@ -616,7 +616,7 @@ void Summarize::condition_splicing(FILE* output)
                 float sum = 0.0;
                 for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
                     splicing[k][i][j][l] =
-                        reinterpret_cast<float*>(buffer[k].p)[l];
+                        exp(reinterpret_cast<float*>(buffer[k].p)[l]);
                     sum += splicing[k][i][j][l];
                 }
 
