@@ -36,12 +36,20 @@ class Summarize
         void condition_splicing(FILE* output);
         void expression_samples(FILE* output);
         void condition_pairwise_splicing(FILE* output);
+        void cassette_exon_pairwise_splicing(FILE* output);
 
     private:
         void median_transcript_expression(
                 boost::numeric::ublas::matrix<float>& Q);
 
         void condition_splicing(std::vector<boost::multi_array<float, 3> >& output);
+
+        void read_cassette_exons(
+                std::vector<Interval>& cassette_exons,
+                std::vector<std::vector<unsigned int> >& including_tids,
+                std::vector<std::vector<unsigned int> >& excluding_tids);
+
+        void read_tgroup_mean(boost::multi_array<float, 3>& output);
 
         hid_t h5_file;
 

@@ -3,6 +3,7 @@
 #include <boost/foreach.hpp>
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/numeric/ublas/matrix_proxy.hpp>
+#include <intervals.hpp>
 #include <set>
 
 #include "summarize.hpp"
@@ -10,6 +11,20 @@
 
 
 using namespace boost::numeric::ublas;
+
+
+// Compute log(exp(x) + exp(y)), avoiding overflow/underflow.
+static double logaddexp(double x, double y)
+{
+    double u = x - y;
+    if (u > 0.0) {
+        return x + log1p(exp(-u));
+    }else if (u <= 0.0) {
+        return y + log1p(exp(u));
+    }else  {
+        return x + y;
+    }
+}
 
 
 Summarize::Summarize(const char* filename)
@@ -779,6 +794,305 @@ void Summarize::expression_samples(FILE* output)
 
     H5Sclose(dataspace);
     H5Dclose(dataset);
+}
+
+
+void Summarize::read_cassette_exons(std::vector<Interval>& cassette_exons,
+                                    std::vector<std::vector<unsigned int> >& including_tids,
+                                    std::vector<std::vector<unsigned int> >& excluding_tids)
+{
+    hid_t dataset = H5Dopen2(h5_file, "/cassette_exons/seqname", H5P_DEFAULT);
+    if (dataset < 0) {
+        Logger::abort("Failed to open the /cassette_exons/seqname dataset");
+    }
+
+    hid_t dataspace = H5Dget_space(dataset);
+    hsize_t dims[1];
+    H5Sget_simple_extent_dims(dataspace, dims, NULL);
+    size_t n = dims[0];
+
+    // read sequence names
+    hid_t varstring_type = H5Tcopy(H5T_C_S1);
+    H5Tset_size(varstring_type, H5T_VARIABLE);
+    const char** seqnames = new const char* [n];
+    herr_t status = H5Dread(dataset, varstring_type, H5S_ALL, H5S_ALL,
+                            H5P_DEFAULT, seqnames);
+    if (status < 0) {
+        Logger::abort("Failed to read the /cassette_exons/seqname dataset.");
+    }
+
+    H5Dclose(dataset);
+
+    // read starts
+    dataset = H5Dopen2(h5_file, "/cassette_exons/start", H5P_DEFAULT);
+    if (dataset < 0) {
+        Logger::abort("Failed to open the /cassette_exons/start dataset");
+    }
+
+    std::vector<long> starts(n);
+    status = H5Dread(dataset, H5T_NATIVE_LONG, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                     &starts.at(0));
+    if (status < 0) {
+        Logger::abort("Failed to read the /cassette_exons/starts dataset.");
+    }
+
+    H5Dclose(dataset);
+
+    // read ends
+    dataset = H5Dopen2(h5_file, "/cassette_exons/end", H5P_DEFAULT);
+    if (dataset < 0) {
+        Logger::abort("Failed to open the /cassette_exons/end dataset");
+    }
+
+    std::vector<long> ends(n);
+    status = H5Dread(dataset, H5T_NATIVE_LONG, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                     &ends.at(0));
+    if (status < 0) {
+        Logger::abort("Failed to read the /cassette_exons/ends dataset.");
+    }
+
+    H5Dclose(dataset);
+
+    // read strands
+    dataset = H5Dopen2(h5_file, "/cassette_exons/strand", H5P_DEFAULT);
+    if (dataset < 0) {
+        Logger::abort("Failed to open the /cassette_exons/strand dataset");
+    }
+
+    std::vector<char> strands(n);
+    status = H5Dread(dataset, H5T_NATIVE_CHAR, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                     &strands.at(0));
+    if (status < 0) {
+        Logger::abort("Failed to read the /cassette_exons/strand dataset.");
+    }
+
+    H5Dclose(dataset);
+
+    // read including_tids
+    dataset = H5Dopen2(h5_file, "/cassette_exons/including_tids", H5P_DEFAULT);
+    if (dataset < 0) {
+        Logger::abort("Failed to open the /cassette_exons/including_tids dataset");
+    }
+
+    hid_t tids_type = H5Tvlen_create(H5T_NATIVE_UINT);
+    std::vector<hvl_t> including_tids_data(n);
+    status = H5Dread(dataset, tids_type, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                     &including_tids_data.at(0));
+    if (status) {
+        Logger::abort("Failed to read the /cassette_exons/including_tids");
+    }
+
+    H5Dclose(dataset);
+
+    // read excluding_tids
+    dataset = H5Dopen2(h5_file, "/cassette_exons/excluding_tids", H5P_DEFAULT);
+    if (dataset < 0) {
+        Logger::abort("Failed to open the /cassette_exons/excluding_tids dataset");
+    }
+
+    std::vector<hvl_t> excluding_tids_data(n);
+    status = H5Dread(dataset, tids_type, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                     &excluding_tids_data.at(0));
+    if (status) {
+        Logger::abort("Failed to read the /cassette_exons/excluding_tids");
+    }
+
+    H5Dclose(dataset);
+
+    // construct the data
+    cassette_exons.resize(n);
+    including_tids.resize(n);
+    excluding_tids.resize(n);
+
+    for (size_t i = 0; i < n; ++i) {
+        cassette_exons[i].seqname = std::string(seqnames[i]);
+        cassette_exons[i].start = starts[i];
+        cassette_exons[i].end = ends[i];
+        if (strands[i] == '+') {
+            cassette_exons[i].strand = strand_pos;
+        }
+        else if (strands[i] == '-') {
+            cassette_exons[i].strand = strand_neg;
+        }
+        else {
+            cassette_exons[i].strand = strand_na;
+        }
+
+        including_tids[i].resize(including_tids_data[i].len);
+        for (size_t j = 0; j < including_tids_data[i].len; ++j) {
+            including_tids[i][j] =
+                reinterpret_cast<unsigned int*>(including_tids_data[i].p)[j];
+        }
+
+        excluding_tids[i].resize(excluding_tids_data[i].len);
+        for (size_t j = 0; j < excluding_tids_data[i].len; ++j) {
+            excluding_tids[i][j] =
+                reinterpret_cast<unsigned int*>(excluding_tids_data[i].p)[j];
+        }
+    }
+
+    delete [] seqnames;
+
+    H5Dvlen_reclaim(varstring_type, dataspace, H5P_DEFAULT, seqnames);
+    H5Tclose(varstring_type);
+
+    H5Dvlen_reclaim(tids_type, dataspace, H5P_DEFAULT, &including_tids_data.at(0));
+    H5Dvlen_reclaim(tids_type, dataspace, H5P_DEFAULT, &excluding_tids_data.at(0));
+    H5Tclose(tids_type);
+}
+
+
+void Summarize::read_tgroup_mean(boost::multi_array<float, 3>& output)
+{
+    hid_t dataset = H5Dopen2(h5_file, "/condition/tgroup_mean", H5P_DEFAULT);
+    if (dataset < 0) {
+        Logger::abort("Failed to open the /condition/tgroup_mean dataset");
+    }
+
+    hid_t dataspace = H5Dget_space(dataset);
+    hsize_t dims[3]; // dims are: num_samples, C, T
+    H5Sget_simple_extent_dims(dataspace, dims, NULL);
+    output.resize(boost::extents[dims[0]][dims[1]][dims[2]]);
+
+    herr_t status = H5Dread(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL,
+                            H5P_DEFAULT, output.data());
+    if (status < 0) {
+        Logger::abort("HDF5 read failed.");
+    }
+
+    H5Dclose(dataset);
+}
+
+
+void Summarize::cassette_exon_pairwise_splicing(FILE* output)
+{
+    // TODO: pass these in
+    double upper_quantile = 0.95;
+    double lower_quantile = 0.05;
+
+    // indexed by sample_num, condition, and within-tgroup transcript
+    typedef boost::multi_array<float, 3> marray_t;
+
+    // indexed by spliced tgroup
+    std::vector<marray_t> splicing(spliced_tgroup_indexes.size());
+
+    condition_splicing(splicing);
+    size_t num_samples = 0;
+    size_t C = 0;
+    if (splicing.size() > 0) {
+        C = splicing[0].shape()[1];
+        num_samples = splicing[0].shape()[0];
+    }
+
+    boost::multi_array<float, 3> tgroup_means;
+    read_tgroup_mean(tgroup_means);
+
+    std::vector<Interval> cassette_exons;
+    std::vector<std::vector<unsigned int> > including_tids;
+    std::vector<std::vector<unsigned int> > excluding_tids;
+
+    read_cassette_exons(cassette_exons, including_tids, excluding_tids);
+
+
+    // construct an index mapping tids to their index within their tgroup
+    std::vector<unsigned int> tid_tgroup_index(N);
+    BOOST_FOREACH (const std::vector<unsigned int>& tids, tgroup_tids) {
+        for (size_t i = 0; i < tids.size(); ++i) {
+            tid_tgroup_index[tids[i]] = i;
+        }
+    }
+
+    fprintf(output,
+            "seqname\tstart\tend\tstrand\tspliced_in_transcript_ids\t"
+            "spliced_out_transcript_ids\t"
+            "condition_a\tcondition_b\tlog2fc_lower\t"
+            "log2fc_median\tlog2fc_upper\n");
+
+    boost::multi_array<float, 2> condition_spliced_in_proportion(
+            boost::extents[C][num_samples]);
+    std::vector<float> work(num_samples);
+
+    for (size_t i = 0; i < cassette_exons.size(); ++i) {
+        for (size_t j = 0; j < C; ++j) {
+            for (size_t k = 0; k < num_samples; ++k) {
+                float spliced_in = 0.0;
+                BOOST_FOREACH (unsigned int tid, including_tids[i]) {
+                    unsigned int tg = tgroup[tid];
+                    spliced_in +=
+                        log(splicing[tg][k][j][tid_tgroup_index[tid]]) +
+                        tgroup_means[k][j][tg];
+                }
+
+                float spliced_out = 0.0;
+                BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
+                    unsigned int tg = tgroup[tid];
+                    spliced_out +=
+                        log(splicing[tg][k][j][tid_tgroup_index[tid]]) +
+                        tgroup_means[k][j][tg];
+                }
+
+                // compute the proportion spliced in
+                condition_spliced_in_proportion[j][k] =
+                    (spliced_in - logaddexp(spliced_in, spliced_out)) / M_LN2;
+            }
+        }
+
+        for (size_t cond_a = 0; cond_a < C; ++cond_a) {
+            for (size_t cond_b = 0; cond_b < C; ++cond_b) {
+                if (cond_a == cond_b) continue;
+
+                for (size_t k = 0; k < num_samples; ++k) {
+                    work[k] = condition_spliced_in_proportion[cond_a][k] -
+                              condition_spliced_in_proportion[cond_b][k];
+                }
+
+                std::sort(work.begin(), work.end());
+
+                fprintf(output, "%s\t%ld\t%ld\t",
+                        cassette_exons[i].seqname.get().c_str(),
+                        cassette_exons[i].start,
+                        cassette_exons[i].end);
+
+                switch (cassette_exons[i].strand) {
+                    case strand_pos:
+                        fputc('+', output);
+                        break;
+                    case strand_neg:
+                        fputc('-', output);
+                        break;
+                    default:
+                        fputc('.', output);
+                }
+                fputc('\t', output);
+
+
+                bool first = true;
+                BOOST_FOREACH (unsigned int tid, including_tids[i]) {
+                    if (!first) {
+                        fputc(',', output);
+                    }
+                    else first = false;
+                    fputs(transcript_ids[tid].c_str(), output);
+                }
+
+                first = true;
+                BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
+                    if (!first) {
+                        fputc(',', output);
+                    }
+                    else first = false;
+                    fputs(transcript_ids[tid].c_str(), output);
+                }
+                fputc('\t', output);
+
+                fprintf(output, "%lu\t%lu\t%f\t%f\t%f\n",
+                        cond_a + 1, cond_b + 1,
+                        work[(int)(lower_quantile * num_samples)],
+                        work[num_samples/2],
+                        work[(int)(upper_quantile * num_samples)]);
+            }
+        }
+    }
 }
 
 
