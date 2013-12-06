@@ -117,7 +117,8 @@ int isolator_summarize(int argc, char* argv[])
                        "  condition_tgroup_mean\n"
                        "  experiment_tgroup_sd\n"
                        "  tgroup_fold_change\n"
-                       "  expression_samples\n");
+                       "  expression_samples\n"
+                       "  cassette_exons\n");
                 return 0;
 
             case 's':
@@ -189,6 +190,9 @@ int isolator_summarize(int argc, char* argv[])
     }
     else if (strcmp(strategy, "expression_samples") == 0) {
         summarize.expression_samples(out_f);
+    }
+    else if (strcmp(strategy, "cassette_exons") == 0) {
+        summarize.cassette_exon_pairwise_splicing(out_f);
     }
     else {
         Logger::abort("No such summarization strategy: %s", strategy);
@@ -263,7 +267,7 @@ static void write_cassette_exon_data(hid_t file_id, TranscriptSet& ts)
         Logger::abort("HDF5 type creation failed.");
     }
 
-    hid_t tids_type = H5Tvlen_create(H5T_NATIVE_LONG);
+    hid_t tids_type = H5Tvlen_create(H5T_NATIVE_UINT);
     if (tids_type < 0) {
         Logger::abort("HDF5 type creation failed.");
     }

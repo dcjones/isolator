@@ -814,9 +814,9 @@ void Summarize::read_cassette_exons(std::vector<Interval>& cassette_exons,
     // read sequence names
     hid_t varstring_type = H5Tcopy(H5T_C_S1);
     H5Tset_size(varstring_type, H5T_VARIABLE);
-    const char** seqnames = new const char* [n];
+    std::vector<char*> seqnames(n);
     herr_t status = H5Dread(dataset, varstring_type, H5S_ALL, H5S_ALL,
-                            H5P_DEFAULT, seqnames);
+                            H5P_DEFAULT, &seqnames.at(0));
     if (status < 0) {
         Logger::abort("Failed to read the /cassette_exons/seqname dataset.");
     }
@@ -931,9 +931,7 @@ void Summarize::read_cassette_exons(std::vector<Interval>& cassette_exons,
         }
     }
 
-    delete [] seqnames;
-
-    H5Dvlen_reclaim(varstring_type, dataspace, H5P_DEFAULT, seqnames);
+    H5Dvlen_reclaim(varstring_type, dataspace, H5P_DEFAULT, &seqnames.at(0));
     H5Tclose(varstring_type);
 
     H5Dvlen_reclaim(tids_type, dataspace, H5P_DEFAULT, &including_tids_data.at(0));
@@ -1002,6 +1000,13 @@ void Summarize::cassette_exon_pairwise_splicing(FILE* output)
         }
     }
 
+    // construct an index mapping tgroup to a spliced tgroup index
+    std::vector<unsigned int> tgroup_spliced_tgroup(T);
+    std::fill(tgroup_spliced_tgroup.begin(), tgroup_spliced_tgroup.end(), (unsigned int) -1);
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        tgroup_spliced_tgroup[spliced_tgroup_indexes[i]] = i;
+    }
+
     fprintf(output,
             "seqname\tstart\tend\tstrand\tspliced_in_transcript_ids\t"
             "spliced_out_transcript_ids\t"
@@ -1018,17 +1023,23 @@ void Summarize::cassette_exon_pairwise_splicing(FILE* output)
                 float spliced_in = 0.0;
                 BOOST_FOREACH (unsigned int tid, including_tids[i]) {
                     unsigned int tg = tgroup[tid];
-                    spliced_in +=
-                        log(splicing[tg][k][j][tid_tgroup_index[tid]]) +
-                        tgroup_means[k][j][tg];
+                    float tmix = 0.0;
+                    if (tgroup_spliced_tgroup[tg] < (unsigned int) -1) {
+                        tmix = log(splicing[tgroup_spliced_tgroup[tg]][k][j][tid_tgroup_index[tid]]);
+                    }
+
+                    spliced_in += tmix + tgroup_means[k][j][tg];
                 }
 
                 float spliced_out = 0.0;
                 BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
                     unsigned int tg = tgroup[tid];
-                    spliced_out +=
-                        log(splicing[tg][k][j][tid_tgroup_index[tid]]) +
-                        tgroup_means[k][j][tg];
+                    float tmix = 0.0;
+                    if (tgroup_spliced_tgroup[tg] < (unsigned int) -1) {
+                        tmix = log(splicing[tgroup_spliced_tgroup[tg]][k][j][tid_tgroup_index[tid]]);
+                    }
+
+                    spliced_out += tmix + tgroup_means[k][j][tg];
                 }
 
                 // compute the proportion spliced in
@@ -1074,6 +1085,7 @@ void Summarize::cassette_exon_pairwise_splicing(FILE* output)
                     else first = false;
                     fputs(transcript_ids[tid].c_str(), output);
                 }
+                fputc('\t', output);
 
                 first = true;
                 BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
