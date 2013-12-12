@@ -1243,6 +1243,7 @@ void Analyze::compute_ts()
 
         for (size_t tgroup = 0; tgroup < T; ++tgroup) {
             row(tgroup) = log(row(tgroup));
+            assert_finite(row(tgroup));
         }
     }
 }
@@ -1468,6 +1469,7 @@ void Analyze::warmup()
         }
     }
 
+    // XXX
     BOOST_FOREACH (Sampler* sampler, qsamplers) {
         sampler->engage_priors();
     }

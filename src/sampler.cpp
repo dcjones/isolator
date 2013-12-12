@@ -24,6 +24,12 @@ KHASH_MAP_INIT_STR(s, int)
 }
 
 
+static double sq(double x)
+{
+    return x * x;
+}
+
+
 static double gamma_lnpdf(double alpha, double beta, double x)
 {
     return alpha * log(beta) -
@@ -1367,16 +1373,18 @@ class InterTgroupSampler : public Shredder
             double prior_lp_delta = 0.0;
             if (S.use_priors) {
                 prior_lp_delta -= prior_lp0;
-                double xu = log(S.cmix[c] * tgroupmix_u);
-                prior_lp_delta += tgroup_prior.f(S.hp.tgroup_mu[u] + fastlog2(S.tgroup_scaling[u]),
-                                                 S.hp.tgroup_sigma[u], &xu, 1);
-                double xv = log(S.cmix[c] * tgroupmix_v);
-                prior_lp_delta += tgroup_prior.f(S.hp.tgroup_mu[v] + fastlog2(S.tgroup_scaling[v]),
-                                                 S.hp.tgroup_sigma[v], &xv, 1);
+                double xu = S.cmix[c] * tgroupmix_u;
+                double logxu = log(xu);
+                double mu_u = S.hp.tgroup_mu[u] + log(S.tgroup_scaling[u]);
+                prior_lp_delta += tgroup_prior.f(mu_u, S.hp.tgroup_sigma[u], &logxu, 1);
 
-                // prior gradient
-                d += (xu - S.hp.tgroup_mu[u]) / (S.hp.tgroup_sigma[u] * S.hp.tgroup_sigma[u]);
-                d += (xv - S.hp.tgroup_mu[v]) / (S.hp.tgroup_sigma[v] * S.hp.tgroup_sigma[v]);
+                double xv = S.cmix[c] * tgroupmix_v;
+                double logxv = log(xv);
+                double mu_v = S.hp.tgroup_mu[v] + log(S.tgroup_scaling[v]);
+                prior_lp_delta += tgroup_prior.f(mu_v, S.hp.tgroup_sigma[v], &logxv, 1);
+
+                d += (mu_u - logxu) / (sq(S.hp.tgroup_sigma[u]) * x);
+                d += (mu_v - logxv) / (sq(S.hp.tgroup_sigma[v]) * (x - 1));
             }
 
             return lp0 - lpf01 + dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0) +
@@ -1810,6 +1818,11 @@ void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u,
 
     size_t component_size = S.component_frag[c+1] - S.component_frag[c];
     for (size_t i = 0; i < component_size; ++i) {
+        if (S.frag_probs[c][i] < 0.0) S.frag_probs[c][i] = 0.0;
+        //if (-1e-12 <= S.frag_probs[c][i] && S.frag_probs[c][i] <= 0) {
+            //S.frag_probs[c][i] = 1e-12;
+        //}
+
         if (S.frag_probs[c][i] <= 0 || !boost::math::isfinite(S.frag_probs[c][i])) {
             Logger::abort("Non-positive fragment probability while doing inter tgroup sampling.");
         }
@@ -1897,6 +1910,13 @@ void AbundanceSamplerThread::sample_inter_transcript(unsigned int u, unsigned in
 }
 
 
+/* I should write a little abount what I'm doing with cmix. Cmix lies on a high
+ * dimensional simplex, but I'm sort of punting a bit and treating each cmix as
+ * independent. To do so, I keep track of the factor by which it was scaled
+ * *last* round to put it on a simplex and scale it by that. Super-weird I know,
+ * but the simplex is thousands of dimensions so as an approximation it isn't so
+ * bad.
+ */
 void AbundanceSamplerThread::sample_component(unsigned int c)
 {
     BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {

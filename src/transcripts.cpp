@@ -520,8 +520,7 @@ bed_parse_failure:
     }
 
     // Arrange flanking introns into pseudo-transcripts
-    std::vector<Transcript> transcripts;
-    unsigned int next_tgroup = 0;
+    std::set<Transcript> transcripts;
     BOOST_FOREACH (const IntronIdx::value_type& keyval, introns) {
         const std::string& exonname = keyval.first;
         const std::vector<Interval>& intronflanks = keyval.second;
@@ -551,42 +550,48 @@ bed_parse_failure:
         // inclusion form
         Transcript included_transcript;
         included_transcript.seqname = flankA.seqname;
-        included_transcript.gene_id = name;
-        included_transcript.transcript_id = name + "-included";
+        included_transcript.gene_id = exonname;
+        included_transcript.transcript_id = exonname + "-included";
         included_transcript.strand = flankA.strand;
         included_transcript.source = "AlternativeExon";
-        included_transcript.tgroup = next_tgroup;
+        included_transcript.tgroup = 0;
 
         included_transcript.add(std::max<pos_t>(0, flankA.start - constants::alt_exon_flank_length),
                                 std::max<pos_t>(0, flankA.start - 1));
         included_transcript.add(flankA.end + 1, flankB.start - 1);
         included_transcript.add(flankB.end + 1, flankB.end + constants::alt_exon_flank_length);
-        transcripts.push_back(included_transcript);
+        transcripts.insert(included_transcript);
 
         // exclusion form
         Transcript excluded_transcript;
         excluded_transcript.seqname = flankA.seqname;
-        excluded_transcript.gene_id = name;
-        excluded_transcript.transcript_id = name + "-excluded";
+        excluded_transcript.gene_id = exonname;
+        excluded_transcript.transcript_id = exonname + "-excluded";
         excluded_transcript.strand = flankA.strand;
         excluded_transcript.source = "AlternativeExon";
-        excluded_transcript.tgroup = next_tgroup;
+        excluded_transcript.tgroup = 0;
 
         excluded_transcript.add(std::max<pos_t>(0, flankA.start - constants::alt_exon_flank_length),
                                 std::max<pos_t>(0, flankA.start - 1));
         excluded_transcript.add(flankB.end + 1, flankB.end + constants::alt_exon_flank_length);
-        transcripts.push_back(excluded_transcript);
-
-        ++next_tgroup;
+        transcripts.insert(excluded_transcript);
     }
 
     // assign tids
     unsigned int next_tid = 0;
-    std::sort(transcripts.begin(), transcripts.end());
-    BOOST_FOREACH (Transcript& t, transcripts) {
+    unsigned int next_tgroup = -1;
+    GeneID last_gene_id = GeneID(std::string());
+    BOOST_FOREACH (Transcript t, transcripts) {
+        if (last_gene_id.get() != t.gene_id.get()) {
+            ++next_tgroup;
+        }
         t.id = next_tid++;
+        t.tgroup = next_tgroup;
         this->transcripts.insert(t);
+        last_gene_id = t.gene_id;
     }
+
+    _num_tgroups = next_tgroup + 1;
 
     Logger::pop_task(task_name);
 }

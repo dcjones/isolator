@@ -525,7 +525,6 @@ int isolator_analyze(int argc, char* argv[])
                 }
                 else if (strcmp(long_options[optidx].name, "exons") == 0) {
                     use_exons = true;
-                    return 1;
                 }
                 break;
 
