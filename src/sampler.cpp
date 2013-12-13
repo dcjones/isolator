@@ -1853,6 +1853,8 @@ void AbundanceSamplerThread::sample_intra_tgroup(unsigned int tgroup)
             unsigned int v = random_uniform_int(rng);
             if (v >= u) ++ v;
 
+            if (u > v) std::swap(u, v);
+
             sample_inter_transcript(S.tgroup_tids[tgroup][u],
                                     S.tgroup_tids[tgroup][v]);
         }

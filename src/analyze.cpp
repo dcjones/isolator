@@ -1469,7 +1469,6 @@ void Analyze::warmup()
         }
     }
 
-    // XXX
     BOOST_FOREACH (Sampler* sampler, qsamplers) {
         sampler->engage_priors();
     }
