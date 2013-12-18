@@ -28,6 +28,7 @@ static void assert_finite(double x)
 }
 
 
+
 class BetaDistributionSampler : public Shredder
 {
     public:
@@ -289,6 +290,7 @@ class SpliceMuSigmaSamplerThread
                 max_size2 = std::max<size_t>(tids.size(), max_size2);
             }
             matrix<double> dataj(K, max_size2);
+            matrix<double> _data_raw(K, max_size2);
 
             int j;
             while (true) {
@@ -303,6 +305,7 @@ class SpliceMuSigmaSamplerThread
                     for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                         unsigned int tid = tgroup_tids[tgroup][k];
                         dataj(i, k) = Q(i, tid);
+                        _data_raw(i, k) = dataj(i, k);
                         datasum += dataj(i, k);
                     }
 
@@ -312,7 +315,10 @@ class SpliceMuSigmaSamplerThread
 
                     size_t klast = tgroup_tids[tgroup].size() - 1;
                     for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
+                        double _dataj_i_klast = dataj(i, klast);
+                        double _dataj_i_k = dataj(i, k);
                         dataj(i, k) = log(dataj(i, k) / dataj(i, klast));
+                        double _dataj_i_k_log = dataj(i, k);
                     }
                 }
 
@@ -721,16 +727,17 @@ Analyze::Analyze(size_t burnin,
     tgroup_alpha_beta  = 1.0;
     tgroup_beta_beta   = 5.0;
 
-    splice_alpha_alpha = 1.0;
-    splice_beta_alpha  = 5.0;
-    splice_alpha_beta  = 1.0;
-    splice_beta_beta   = 5.0;
+    splice_alpha_alpha = 50.0;
+    splice_beta_alpha  = 15.0;
+
+    splice_alpha_beta  = 50.0;
+    splice_beta_beta   = 15.0;
 
     experiment_tgroup_mu0 = -10;
     experiment_tgroup_sigma0 = 5.0;
 
     experiment_splice_mu0 = 0;
-    experiment_splice_sigma0 = 10.0;
+    experiment_splice_sigma0 = 0.1;
 
     tgroup_expr.resize(T);
     tgroup_row_data.resize(T);
@@ -1310,7 +1317,7 @@ void Analyze::run(hid_t output_file_id)
         experiment_splice_sigma[i].resize(
                 tgroup_tids[spliced_tgroup_indexes[i]].size());
         std::fill(experiment_splice_sigma[i].begin(),
-                  experiment_splice_sigma[i].end(), 1.0);
+                  experiment_splice_sigma[i].end(), 0.1);
     }
 
     choose_initial_values();
@@ -1507,7 +1514,7 @@ void Analyze::warmup()
                   experiment_splice_mu[i].end(), 0.0);
 
         std::fill(experiment_splice_sigma[i].begin(),
-                  experiment_splice_sigma[i].end(), 1.0);
+                  experiment_splice_sigma[i].end(), 0.1);
     }
 
     // ml estimates for experiment_tgroup_mu
@@ -1613,13 +1620,18 @@ void Analyze::sample()
 
     assert_finite(splice_alpha);
 
+#if 0
     splice_beta =
         beta_sampler->sample(splice_beta, splice_alpha,
                              splice_alpha_beta, splice_beta_beta,
                              &condition_splice_sigma_work.at(0),
                              condition_splice_sigma_work.size());
+#endif
+    splice_beta = 0.1;
 
     assert_finite(splice_beta);
+
+    Logger::info("splice_alpha = %f, splice_beta = %f", splice_alpha, splice_beta);
 }
 
 
@@ -1845,7 +1857,7 @@ void Analyze::choose_initial_values()
     splice_alpha = 2.0;
     splice_beta = 2.0;
 
-    experiment_splice_alpha = 0.1;
-    experiment_splice_beta = 1.0;
+    experiment_splice_alpha = 50;
+    experiment_splice_beta = 15;
 }
 

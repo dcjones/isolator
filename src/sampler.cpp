@@ -1286,14 +1286,14 @@ class InterTgroupSampler : public Shredder
             f0 &= 0xfffffff8;
 
             this->x0 = x0;
-            this->lpf01 = dotlog(S.frag_counts[c] + f0, S.frag_probs[c] + f0, f1 - f0);
+            this->lpf01 = dotlog(S.frag_counts[c] + f0, S.frag_probs[c] + f0, f1 - f0) / M_LOG2E;
             this->c = c;
             this->u = u;
             this->v = v;
             this->f0 = f0;
             this->f1 = f1;
             this->tgroupmix_uv = S.tgroupmix[u] + S.tgroupmix[v];
-            this->lp0 = dotlog(S.frag_counts[c], S.frag_probs[c], component_size);
+            this->lp0 = dotlog(S.frag_counts[c], S.frag_probs[c], component_size) / M_LOG2E;
 
             prior_lp0 = 0.0;
             if (S.use_priors) {
@@ -1387,7 +1387,8 @@ class InterTgroupSampler : public Shredder
                 d += (mu_v - logxv) / (sq(S.hp.tgroup_sigma[v]) * (x - 1));
             }
 
-            return lp0 - lpf01 + dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0) +
+            return lp0 - lpf01 +
+                   dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0) / M_LOG2E +
                    prior_lp_delta;
         }
 
@@ -1412,12 +1413,13 @@ class InterTgroupSampler : public Shredder
 };
 
 
-class InterTranscriptSampler : public Shredder
+class InterTranscriptSampler
 {
     public:
         InterTranscriptSampler(Sampler& S)
-            : Shredder(constants::zero_eps, 1.0 - constants::zero_eps)
-            , S(S)
+            : S(S)
+            , lower_limit(constants::zero_eps)
+            , upper_limit(1.0 - constants::zero_eps)
         {
         }
 
@@ -1430,21 +1432,33 @@ class InterTranscriptSampler : public Shredder
             assert(tgroup == S.transcript_tgroup[v]);
 
             component_size = S.component_frag[c + 1] - S.component_frag[c];
-            lp0 = dotlog(S.frag_counts[c], S.frag_probs[c], component_size);
+            lp0 = dotlog(S.frag_counts[c], S.frag_probs[c], component_size) / M_LOG2E;
 
-            wtgroupmix = 0.0;
+            wtgroupmix0 = 0.0;
             prior_lp0 = 0.0;
             if (S.use_priors) {
                 BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
-                    wtgroupmix += S.tgroup_tmix[tid] / S.transcript_weights[tid];
+                    wtgroupmix0 += S.tmix[tid] / S.transcript_weights[tid];
                 }
 
-                double wtmixu = (S.tmix[u] / S.transcript_weights[u]) / wtgroupmix;
-                double wtmixv = (S.tmix[v] / S.transcript_weights[v]) / wtgroupmix;
+                /* XXX: Note to morning self:
+                 *
+                 * I made changes to sample from tmixu / (tmixu + tmixv). I
+                 * think that's actually wrong, but might not show up as wrong
+                 * here since most tgroups have only two transcripts.
+                 *
+                 * What's more likely the issue is using tgroup_tmix to compute
+                 * wtgroupmix above while using tmix everywhere else.
+                 *
+                 */
+
                 unsigned int last_tid = S.tgroup_tids[tgroup].back();
-                double wtmixlast = (S.tmix[last_tid] / S.transcript_weights[last_tid]) / wtgroupmix;
+                double wtmixlast = (S.tmix[last_tid] / S.transcript_weights[last_tid]) / wtgroupmix0;
+                double wtmixu = (S.tmix[u] / S.transcript_weights[u]) / wtgroupmix0;
+                double wtmixv = (S.tmix[v] / S.transcript_weights[v]) / wtgroupmix0;
                 marginal_splice_mu = S.hp.splice_mu[u] - log(wtmixv/wtmixlast);
                 prior_lp0 += splice_prior.f(marginal_splice_mu, S.hp.splice_sigma[u], wtmixu);
+
                 lp0 += prior_lp0;
                 assert_finite(prior_lp0);
             }
@@ -1468,16 +1482,135 @@ class InterTranscriptSampler : public Shredder
             // Round f0 down to the nearst 32-byte boundry so we can use avx/sse.
             f0 &= 0xfffffff8;
 
-            lpf01 = dotlog(S.frag_counts[c] + f0, S.frag_probs[c] + f0, f1 - f0);
+            lpf01 = dotlog(S.frag_counts[c] + f0, S.frag_probs[c] + f0, f1 - f0) / M_LOG2E;
             assert_finite(lpf01);
 
             this->u = u;
             this->v = v;
 
             double x0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
-            return Shredder::sample(x0);
+
+            return sample(x0);
         }
 
+
+        double sample(double x0)
+        {
+            double d0;
+            double lp0 = f(x0, d0);
+            assert_finite(lp0);
+
+            double slice_height = log(random_uniform_01(rng)) + lp0;
+
+            double x_min_lp, x_max_lp;
+            double x_min = find_slice_edge(x0, slice_height, lp0, d0, -1, &x_min_lp);
+            double x_max = find_slice_edge(x0, slice_height, lp0, d0,  1, &x_max_lp);
+
+            double x;
+            while (true) {
+                x = x_min + (x_max - x_min) * random_uniform_01(rng);
+                double d;
+                double lp = f(x, d);
+
+                if (lp >= slice_height) break;
+                else if (x > x0) x_max = x0;
+                else             x_min = x0;
+            }
+
+            //std::string id_of_interest("CA-320159-3239-14793-14932-17325[INC][1/1][UPT]-included");
+            //if (S.use_priors && (S.transcript_ids[u] == id_of_interest ||
+                                 //S.transcript_ids[v] == id_of_interest)) {
+            //if (S.use_priors && component_size == 0) {
+                //fprintf(stderr, "here\n");
+            //}
+
+            return x;
+        }
+
+        double find_slice_edge(double x0, double slice_height,
+                               double lp0, double d0, int direction,
+                               double* last_lp)
+        {
+            const double lp_eps = 1e-2;
+            const double d_eps  = 1e-5;
+            const double x_eps  = 1e-3;
+
+            double lp = lp0 - slice_height;
+            double d = d0;
+            double x = x0;
+            double x_bound_lower, x_bound_upper;
+            if (direction < 0) {
+                x_bound_lower = lower_limit;
+                x_bound_upper = x0;
+            }
+            else {
+                x_bound_lower = x0;
+                x_bound_upper = upper_limit;
+            }
+
+            while (fabs(lp) > lp_eps && fabs(x_bound_upper - x_bound_lower) > x_eps) {
+                double x1;
+                if (fabs(d) < d_eps) {
+                    x1 = (x_bound_lower + x_bound_upper) / 2;
+                }
+                else {
+                    x1 = x - lp / d;
+                }
+
+                // if we are very close to the boundry, and this iteration moves us past
+                // the boundry, just give up.
+                //if (direction < 0 && fabs(x - lower_limit) <= x_eps && (x1 < x || lp > 0.0)) break;
+                //if (direction > 0 && fabs(x - upper_limit) <= x_eps && (x1 > x || lp > 0.0)) break;
+
+                // if we are moving in the wrong direction (i.e. toward the other root),
+                // use bisection to correct course.
+                if (direction < 0) {
+                    if (lp > 0) x_bound_upper = x;
+                    else        x_bound_lower = x;
+                }
+                else {
+                    if (lp > 0) x_bound_lower = x;
+                    else        x_bound_upper = x;
+                }
+
+                bool bisect = x1 < x_bound_lower + x_eps || x1 > x_bound_upper - x_eps;
+
+                // try using the gradient
+                if (!bisect) {
+                    x = x1;
+                    lp = f(x, d) - slice_height;
+                    bisect = !boost::math::isfinite(lp) || !boost::math::isfinite(d);
+                }
+
+                // resort to binary search if we seem not to be making progress
+                if (bisect) {
+                    size_t iteration_count = 0;
+                    while (true) {
+                        x = (x_bound_lower + x_bound_upper) / 2;
+                        lp = f(x, d) - slice_height;
+
+                        //if (boost::math::isinf(lp) || boost::math::isinf(d)) {
+                        if (!boost::math::isfinite(lp) || !boost::math::isfinite(d)) {
+                            if (direction < 0) x_bound_lower = x;
+                            else               x_bound_upper = x;
+                        }
+                        else break;
+
+                        if (++iteration_count > 50) {
+                            Logger::abort("Slice sampler edge finding is not making progress.");
+                        }
+                    }
+                }
+
+                assert_finite(lp);
+                assert_finite(d);
+            }
+
+            assert_finite(x);
+            *last_lp = lp;
+
+            return x;
+        }
 
     protected:
         double f(double x, double& d)
@@ -1517,6 +1650,10 @@ class InterTranscriptSampler : public Shredder
             if (S.use_priors) {
                 prior_lp_delta -= prior_lp0;
 
+                double wtgroupmix = wtgroupmix0 +
+                    (tmixu - S.tmix[u]) / S.transcript_weights[u] +
+                    (tmixv - S.tmix[v]) / S.transcript_weights[v];
+
                 double wtmixu = (tmixu / S.transcript_weights[u]) / wtgroupmix;
                 prior_lp_delta += splice_prior.f(marginal_splice_mu,
                                                  S.hp.splice_sigma[u], wtmixu);
@@ -1524,7 +1661,8 @@ class InterTranscriptSampler : public Shredder
                                         S.hp.splice_sigma[u], wtmixu);
             }
 
-            return lp0 - lpf01 + dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0) +
+            return lp0 - lpf01 +
+                   dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0) / M_LOG2E +
                    prior_lp_delta;
         }
 
@@ -1535,11 +1673,18 @@ class InterTranscriptSampler : public Shredder
         unsigned int u, v, c, tgroup;
         double lp0, lpf01, prior_lp0;
         unsigned int component_size;
-        double wtgroupmix;
+        double wtgroupmix0;
         double marginal_splice_mu;
         unsigned int f0, f1;
 
         Sampler& S;
+
+        ////
+        // Bounds on the parameter being sampled over
+        double lower_limit, upper_limit;
+
+        rng_t rng;
+        boost::random::uniform_01<double> random_uniform_01;
 
 };
 
@@ -2178,7 +2323,11 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
             0);
     transcript_component = new unsigned int [ts.size()];
     transcript_tgroup = new unsigned int [ts.size()];
+    transcript_ids.resize(ts.size());
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+        // XXX
+        transcript_ids[t->id] = t->transcript_id.get();
+
         unsigned int c = ds[weight_matrix->ncol + t->id];
         transcript_tgroup[t->id] = t->tgroup;
         transcript_component[t->id] = c;
