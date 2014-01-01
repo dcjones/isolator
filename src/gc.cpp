@@ -5,6 +5,9 @@
 #include "gc.hpp"
 
 
+boost::mutex GCCorrection::mut;
+
+
 GCCorrection::GCCorrection(TranscriptSet& ts, const double* transcript_gc)
     : ts(ts)
     , transcript_gc(transcript_gc)
@@ -35,6 +38,8 @@ GCCorrection::~GCCorrection()
 
 void GCCorrection::correct(double* expr)
 {
+    boost::lock_guard<boost::mutex> lock(mut);
+
     std::fill(gene_gc.begin(), gene_gc.end(), 0.0);
     std::fill(gene_expr.begin(), gene_expr.end(), 0.0);
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
@@ -96,6 +101,8 @@ void GCCorrection::correct(double* expr)
 
 void GCCorrection::adjustments(const double* expr, double* weights)
 {
+    boost::lock_guard<boost::mutex> lock(mut);
+
     std::fill(gene_gc.begin(), gene_gc.end(), 0.0);
     std::fill(gene_expr.begin(), gene_expr.end(), 0.0);
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {

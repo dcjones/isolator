@@ -469,8 +469,7 @@ int isolator_analyze(int argc, char* argv[])
     unsigned int burnin = 100;
     unsigned int num_samples = 250;
     pos_t tss_cluster_dist = 30;
-    // TODO: this should default to true when we fix gc correction
-    bool run_gc_correction = false;
+    bool run_gc_correction = true;
     constants::num_threads = boost::thread::hardware_concurrency();
     const char* fa_fn  = NULL;
     const char* output_filename = "isolator_output.h5";

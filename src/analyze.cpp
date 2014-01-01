@@ -315,10 +315,7 @@ class SpliceMuSigmaSamplerThread
 
                     size_t klast = tgroup_tids[tgroup].size() - 1;
                     for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
-                        double _dataj_i_klast = dataj(i, klast);
-                        double _dataj_i_k = dataj(i, k);
                         dataj(i, k) = log(dataj(i, k) / dataj(i, klast));
-                        double _dataj_i_k_log = dataj(i, k);
                     }
                 }
 

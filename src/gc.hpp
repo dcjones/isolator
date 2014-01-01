@@ -3,6 +3,7 @@
 #define ISOLATOR_GC_HPP
 
 #include <vector>
+#include <boost/thread.hpp>
 
 #include "transcripts.hpp"
 #include "loess/loess.h"
@@ -42,6 +43,10 @@ class GCCorrection
 
         loess_struct lo;
         pred_struct pre;
+
+        // the netlib loess code is not thread safe so we need to
+        // use a global lock.
+        static boost::mutex mut;
 };
 
 

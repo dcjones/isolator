@@ -528,7 +528,6 @@ class FragmentModelThread
         }
 
         Queue<FragmentModelInterval*>& q;
-        sequencing_bias** sb;
         boost::thread* t;
 };
 
