@@ -1620,6 +1620,8 @@ void Analyze::sample()
 
     assert_finite(splice_alpha);
 
+    /* I seem to get better results by fixing splice_beta and only sampling
+     * splice_alpha. It's maybe a bit over-parameterized otherwise. */
 #if 0
     splice_beta =
         beta_sampler->sample(splice_beta, splice_alpha,
@@ -1630,8 +1632,6 @@ void Analyze::sample()
     splice_beta = 0.1;
 
     assert_finite(splice_beta);
-
-    Logger::info("splice_alpha = %f, splice_beta = %f", splice_alpha, splice_beta);
 }
 
 

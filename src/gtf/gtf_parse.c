@@ -229,7 +229,6 @@ bool gtf_next(gtf_file_t* f, gtf_row_t* r)
     str_t* attr;
 
     while (true) {
-
         /* figure out what string we are reading into */
         if (f->k != last_k) {
             last_k = f->k;
@@ -273,7 +272,8 @@ bool gtf_next(gtf_file_t* f, gtf_row_t* r)
                 f->col = 1;
                 f->line++;
             }
-            else if (f->state != STATE_KEY_SEEK && f->state != STATE_VALUE_END) {
+            else if (f->state != STATE_KEY_SEEK && f->state != STATE_VALUE_END &&
+                     f->state != STATE_VALUE) {
                 fail("Premature end of line.", f->line, f->col);
             }
         }
@@ -441,7 +441,7 @@ bool gtf_next(gtf_file_t* f, gtf_row_t* r)
 
 
             case STATE_VALUE_END:
-                if (isspace(*f->c)) break;
+                if (*f->c != '\n' && isspace(*f->c)) break;
                 else if (*f->c == ';') {
                     f->state = STATE_KEY_SEEK;
                     break;

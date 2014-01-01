@@ -1963,7 +1963,7 @@ void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u,
 
     size_t component_size = S.component_frag[c+1] - S.component_frag[c];
     for (size_t i = 0; i < component_size; ++i) {
-        if (S.frag_probs[c][i] < 0.0) S.frag_probs[c][i] = 0.0;
+        if (S.frag_probs[c][i] < 0.0) S.frag_probs[c][i] = 1e-12;
         //if (-1e-12 <= S.frag_probs[c][i] && S.frag_probs[c][i] <= 0) {
             //S.frag_probs[c][i] = 1e-12;
         //}
@@ -2563,15 +2563,19 @@ void Sampler::start()
             }
         }
 
+#if 0
         double eps = 1e-2;
-
         tmix[component_transcripts[i][j_max]] =
             1.0 - component_num_transcripts[i] * eps;
+#endif
 
         for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
+            tmix[component_transcripts[i][j]] = 1.0 / component_num_transcripts[i];
+#if 0
             if (j != j_max) {
                 tmix[component_transcripts[i][j]] = eps;
             }
+#endif
         }
     }
 
