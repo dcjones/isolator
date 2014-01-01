@@ -29,7 +29,6 @@ add_executable(isolator
                sampler.cpp
                shredder.cpp
                summarize.cpp
-               sparse_mat.cpp
                transcripts.cpp)
 
 target_link_libraries(isolator

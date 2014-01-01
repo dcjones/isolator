@@ -417,10 +417,8 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
 class FragmentModelThread
 {
     public:
-        FragmentModelThread(Queue<FragmentModelInterval*>& q,
-                            sequencing_bias** sb)
+        FragmentModelThread(Queue<FragmentModelInterval*>& q)
             : q(q)
-            , sb(sb)
             , t(NULL)
         {
             strand_bias[0] = strand_bias[1] = 0;
@@ -579,7 +577,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
     std::vector<FragmentModelThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
-        threads.push_back(new FragmentModelThread(q, sb));
+        threads.push_back(new FragmentModelThread(q));
         threads.back()->start();
     }
 

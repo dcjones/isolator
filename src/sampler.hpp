@@ -7,7 +7,6 @@
 #include "fragment_model.hpp"
 #include "gc.hpp"
 #include "queue.hpp"
-#include "sparse_mat.hpp"
 #include "transcripts.hpp"
 
 class WeightMatrix;
