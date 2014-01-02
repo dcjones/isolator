@@ -7,6 +7,7 @@
 #include <boost/accumulators/statistics/stats.hpp>
 #include <boost/accumulators/statistics/variance.hpp>
 #include <boost/foreach.hpp>
+#include <boost/thread.hpp>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -235,7 +236,7 @@ struct IsolatorMetadata
     std::string command_line;
     std::string version;
     std::string date;
-    std::string runtime;
+    std::string elapsed_seconds;
 };
 
 
@@ -257,21 +258,26 @@ static void write_metadata(hid_t file_id, const IsolatorMetadata& metadata)
     }
 
     hid_t attr;
+    const char* attr_value;
 
     attr = H5Acreate1(group, "command_line", varstring_type, dataspace, H5P_DEFAULT);
-    H5Awrite(attr, varstring_type, metadata.command_line.c_str());
+    attr_value = metadata.command_line.c_str();
+    H5Awrite(attr, varstring_type, &attr_value);
     H5Aclose(attr);
 
     attr = H5Acreate1(group, "version", varstring_type, dataspace, H5P_DEFAULT);
-    H5Awrite(attr, varstring_type, metadata.version.c_str());
+    attr_value = metadata.version.c_str();
+    H5Awrite(attr, varstring_type, &attr_value);
     H5Aclose(attr);
 
     attr = H5Acreate1(group, "date", varstring_type, dataspace, H5P_DEFAULT);
-    H5Awrite(attr, varstring_type, metadata.date.c_str());
+    attr_value = metadata.date.c_str();
+    H5Awrite(attr, varstring_type, &attr_value);
     H5Aclose(attr);
 
-    attr = H5Acreate1(group, "runtime", varstring_type, dataspace, H5P_DEFAULT);
-    H5Awrite(attr, varstring_type, metadata.runtime.c_str());
+    attr = H5Acreate1(group, "elapsed_seconds", varstring_type, dataspace, H5P_DEFAULT);
+    attr_value = metadata.elapsed_seconds.c_str();
+    H5Awrite(attr, varstring_type, &attr_value);
     H5Aclose(attr);
 
     H5Gclose(group);
@@ -622,9 +628,18 @@ int isolator_analyze(int argc, char* argv[])
         ++condition_num;
     }
 
+    boost::timer::cpu_timer timer;
+    timer.start();
+
     analyze.run(output_file_id);
 
+    boost::timer::cpu_times elapsed_time = timer.elapsed();
+
     IsolatorMetadata metadata;
+    char elapsed_seconds_string[100];
+    snprintf(elapsed_seconds_string, 100, "%0.1f", (double) elapsed_time.wall / 1e9);
+    metadata.elapsed_seconds = elapsed_seconds_string;
+
     metadata.command_line = "isolator";
     for (int i = 0; i < argc; ++i) {
         metadata.command_line += " ";
