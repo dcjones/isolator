@@ -11,9 +11,22 @@
 #include <map>
 #include <string>
 #include <vector>
-
 #include <hdf5.h>
 #include <hdf5_hl.h>
+
+#include "intervals.hpp"
+
+
+// Data that 'isolator analyze' writes as an attribute to the hdf5 file.
+struct IsolatorMetadata
+{
+    std::string command_line;
+    std::string version;
+    std::string date;
+    std::string elapsed_seconds;
+    std::vector<std::string> sample_filenames;
+    std::vector<std::string> sample_conditions;
+};
 
 
 class Summarize
@@ -37,6 +50,8 @@ class Summarize
         void expression_samples(FILE* output);
         void condition_pairwise_splicing(FILE* output);
         void cassette_exon_pairwise_splicing(FILE* output);
+
+        void read_metadata(IsolatorMetadata& metadata);
 
     private:
         void median_transcript_expression(

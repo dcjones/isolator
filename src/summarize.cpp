@@ -27,6 +27,29 @@ static double logaddexp(double x, double y)
 }
 
 
+// Safely open a hdf5 attribute
+static hid_t H5Aopen_checked(hid_t obj_id, const char* attr_name, hid_t aapl_id)
+{
+    hid_t attr = H5Aopen(obj_id, attr_name, aapl_id);
+    if (attr < 0) {
+        Logger::abort("Failed to open HDF5 attribute \"%s\".", attr_name);
+    }
+
+    return attr;
+}
+
+
+static hid_t H5Dopen2_checked(hid_t loc_id, const char* name, hid_t dapl_id)
+{
+    hid_t dataset = H5Dopen2(loc_id, name, dapl_id);
+    if (dataset < 0) {
+        Logger::abort("Failed to open the HDF5 dataset \"%s\".", name);
+    }
+
+    return dataset;
+}
+
+
 Summarize::Summarize(const char* filename)
 {
     h5_file = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -1112,4 +1135,67 @@ Summarize::~Summarize()
 {
     H5Fclose(h5_file);
 }
+
+
+void Summarize::read_metadata(IsolatorMetadata& metadata)
+{
+    hid_t group = H5Gopen2(h5_file, "/metadata", H5P_DEFAULT);
+    if (group < 0) {
+        Logger::abort("Failed to open the '/metadata' group.");
+    }
+
+    hid_t varstring_type = H5Tcopy(H5T_C_S1);
+    if (varstring_type < 0 || H5Tset_size(varstring_type, H5T_VARIABLE) < 0) {
+        Logger::abort("HDF5 type creation failed.");
+    }
+
+    hid_t attr;
+    std::vector<char*> data(1);
+
+    attr = H5Aopen_checked(group, "command_line", H5P_DEFAULT);
+    H5Aread(attr, varstring_type, &data.at(0));
+    metadata.command_line = data[0];
+    H5Aclose(attr);
+
+    attr = H5Aopen_checked(group, "version", H5P_DEFAULT);
+    H5Aread(attr, varstring_type, &data.at(0));
+    metadata.version = data[0];
+    H5Aclose(attr);
+
+    attr = H5Aopen_checked(group, "date", H5P_DEFAULT);
+    H5Aread(attr, varstring_type, &data.at(0));
+    metadata.date = data[0];
+    H5Aclose(attr);
+
+    attr = H5Aopen_checked(group, "elapsed_seconds", H5P_DEFAULT);
+    H5Aread(attr, varstring_type, &data.at(0));
+    metadata.elapsed_seconds = data[0];
+    H5Aclose(attr);
+
+    attr = H5Aopen_checked(group, "sample_filenames", H5P_DEFAULT);
+    hid_t samples_dataspace = H5Aget_space(attr);
+    hsize_t num_samples = 0;
+    H5Sget_simple_extent_dims(samples_dataspace, &num_samples, NULL);
+    H5Sclose(samples_dataspace);
+    data.resize(num_samples);
+    H5Aread(attr, varstring_type, &data.at(0));
+    metadata.sample_filenames.resize(num_samples);
+    for (size_t i = 0; i < num_samples; ++i) {
+        metadata.sample_filenames[i] = data[i];
+    }
+    H5Aclose(attr);
+
+    attr = H5Aopen_checked(group, "sample_conditions", H5P_DEFAULT);
+    H5Aread(attr, varstring_type, &data.at(0));
+    metadata.sample_conditions.resize(num_samples);
+    for (size_t i = 0; i < num_samples; ++i) {
+        metadata.sample_conditions[i] = data[i];
+    }
+    H5Aclose(attr);
+
+    H5Tclose(varstring_type);
+    H5Gclose(group);
+}
+
+
 

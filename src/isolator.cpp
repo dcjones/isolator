@@ -23,6 +23,7 @@
 #include "fragment_model.hpp"
 #include "linalg.hpp"
 #include "logger.hpp"
+#include "report.hpp"
 #include "sampler.hpp"
 #include "summarize.hpp"
 #include "transcripts.hpp"
@@ -44,9 +45,89 @@ static void print_logo()
 }
 
 
+void print_report_usage(FILE* fout)
+{
+    fprintf(fout, "Usage: isolator report [options] analyse_output.h5\n");
+}
+
+
+void print_report_help(FILE* fout)
+{
+    print_report_usage(fout);
+    fprintf(fout,
+            "\nOptions:\n"
+            "-h, --help                Print this help message\n"
+            "-o, --out=FILE            Output report the given file.\n"
+            "                           (default: isolator-report.html).\n"
+            "-v, --verbose             Print information useful for debugging\n"
+        );
+}
+
+
+int isolator_report(int argc, char* argv[])
+{
+    Logger::start();
+
+    static struct option long_options[] =
+    {
+        // TODO: HERE HERE HERE HERE
+        {"help",    no_argument,       NULL, 'h'},
+        {"verbose", no_argument,       NULL, 'v'},
+        {"out",     required_argument, NULL, 'o'},
+        {0, 0, 0, 0}
+    };
+
+    const char* output_filename = "isolator-report.html";
+    Logger::level logger_level = Logger::INFO;
+
+    int opt, opt_idx;
+
+    while (true) {
+        opt = getopt_long(argc, argv, "hvo:", long_options, &opt_idx);
+
+        if (opt == -1) break;
+
+        switch (opt) {
+            case 'h':
+                print_report_help(stdout);
+                return 0;
+
+            case 'v':
+                logger_level = Logger::DEBUG;
+                break;
+
+            case 'o':
+                output_filename = optarg;
+                break;
+
+            case '?':
+                fprintf(stderr, "\n");
+                print_report_help(stderr);
+                return 1;
+
+            default:
+                abort();
+        }
+    }
+
+    FILE* output_file = stdout;
+    if (output_filename) {
+        output_file = fopen(output_filename, "w");
+        if (!output_file) {
+            fprintf(stderr, "Can't open file %s for writing.\n", output_filename);
+        }
+    }
+
+    fclose(output_file);
+
+    Logger::end();
+    return EXIT_SUCCESS;
+}
+
+
 void print_summarize_usage(FILE* fout)
 {
-    fprintf(fout, "Usage: isolator summarize [options] analyze_output.hdf5\n");
+    fprintf(fout, "Usage: isolator summarize [options] analyze_output.h5\n");
 }
 
 
@@ -231,15 +312,6 @@ void print_analyze_help(FILE* fout)
 }
 
 
-struct IsolatorMetadata
-{
-    std::string command_line;
-    std::string version;
-    std::string date;
-    std::string elapsed_seconds;
-};
-
-
 static void write_metadata(hid_t file_id, const IsolatorMetadata& metadata)
 {
     hid_t dataspace = H5Screate(H5S_SCALAR);
@@ -280,6 +352,31 @@ static void write_metadata(hid_t file_id, const IsolatorMetadata& metadata)
     H5Awrite(attr, varstring_type, &attr_value);
     H5Aclose(attr);
 
+    hsize_t sample_dataspace_dims[1] = {metadata.sample_filenames.size()};
+    hid_t sample_dataspace = H5Screate_simple(1, sample_dataspace_dims, NULL);
+    if (sample_dataspace < 0) {
+        Logger::abort("HDF5 dataspace creation failed.");
+    }
+
+    attr = H5Acreate1(group, "sample_filenames", varstring_type,
+                      sample_dataspace, H5P_DEFAULT);
+    const char** sample_attr_value = new const char*[metadata.sample_filenames.size()];
+    for (size_t i = 0; i < metadata.sample_filenames.size(); ++i) {
+        sample_attr_value[i] = metadata.sample_filenames[i].c_str();
+    }
+    H5Awrite(attr, varstring_type, sample_attr_value);
+    H5Aclose(attr);
+
+    attr = H5Acreate1(group, "sample_conditions", varstring_type,
+                      sample_dataspace, H5P_DEFAULT);
+    for (size_t i = 0; i < metadata.sample_conditions.size(); ++i) {
+        sample_attr_value[i] = metadata.sample_conditions[i].c_str();
+    }
+    H5Awrite(attr, varstring_type, sample_attr_value);
+    H5Aclose(attr);
+
+    delete [] sample_attr_value;
+    H5Sclose(sample_dataspace);
     H5Gclose(group);
     H5Tclose(varstring_type);
     H5Sclose(dataspace);
@@ -613,6 +710,7 @@ int isolator_analyze(int argc, char* argv[])
     write_cassette_exon_data(output_file_id, ts);
 
     // initialize
+    IsolatorMetadata metadata;
     Analyze analyze(burnin, num_samples, ts, fa_fn, run_gc_correction);
     int condition_num = 1;
     for (; optind < argc; ++optind) {
@@ -622,6 +720,8 @@ int isolator_analyze(int argc, char* argv[])
         const char* fn;
         for (fn = strtok(argv[optind], ","); fn; fn = strtok(NULL, ",")) {
             analyze.add_sample(condition_name, fn);
+            metadata.sample_filenames.push_back(fn);
+            metadata.sample_conditions.push_back(condition_name);
             Logger::info("Adding '%s' to condition '%s'", fn, condition_name);
         }
 
@@ -635,7 +735,6 @@ int isolator_analyze(int argc, char* argv[])
 
     boost::timer::cpu_times elapsed_time = timer.elapsed();
 
-    IsolatorMetadata metadata;
     char elapsed_seconds_string[100];
     snprintf(elapsed_seconds_string, 100, "%0.1f", (double) elapsed_time.wall / 1e9);
     metadata.elapsed_seconds = elapsed_seconds_string;
@@ -672,6 +771,8 @@ void print_usage(FILE* fout)
             "Where <command> is one of:\n"
             "    analyze           Quantify and test for differential expression\n"
             "                      and splicing, among other things.\n"
+            "    report            Generate a simple document summarizing the\n"
+            "                      results of the analysis.\n"
             "    summarize         Summarize a sampler run.\n"
             "    help              Become enlightened.\n",
             VERSION, LINALG_INSTR_SET);
@@ -715,6 +816,9 @@ int main(int argc, char* argv[])
 
     if (strcmp(argv[0], "summarize") == 0) {
         return isolator_summarize(argc, argv);
+    }
+    else if (strcmp(argv[0], "report") == 0) {
+        return isolator_report(argc, argv);
     }
     else if (strcmp(argv[0], "analyze") == 0) {
         return isolator_analyze(argc, argv);
