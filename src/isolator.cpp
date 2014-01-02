@@ -230,20 +230,53 @@ void print_analyze_help(FILE* fout)
 }
 
 
-static void write_metadata(hid_t file_id)
+struct IsolatorMetadata
 {
-    /* TODO: Here's what we'd like to output.
-     *
-     * 1. Command line
-     * 2. Program version
-     * 3. Cassette exons
-     * 4. ???
-     *
-     */
+    std::string command_line;
+    std::string version;
+    std::string date;
+    std::string runtime;
+};
 
 
+static void write_metadata(hid_t file_id, const IsolatorMetadata& metadata)
+{
+    hid_t dataspace = H5Screate(H5S_SCALAR);
+    if (dataspace < 0) {
+        Logger::abort("HDF5 dataspace creation failed.");
+    }
 
+    hid_t varstring_type = H5Tcopy(H5T_C_S1);
+    if (varstring_type < 0 || H5Tset_size(varstring_type, H5T_VARIABLE) < 0) {
+        Logger::abort("HDF5 type creation failed.");
+    }
 
+    hid_t group = H5Gcreate1(file_id, "/metadata", 0);
+    if (group < 0) {
+        Logger::abort("HDF5 group creation failed.");
+    }
+
+    hid_t attr;
+
+    attr = H5Acreate1(group, "command_line", varstring_type, dataspace, H5P_DEFAULT);
+    H5Awrite(attr, varstring_type, metadata.command_line.c_str());
+    H5Aclose(attr);
+
+    attr = H5Acreate1(group, "version", varstring_type, dataspace, H5P_DEFAULT);
+    H5Awrite(attr, varstring_type, metadata.version.c_str());
+    H5Aclose(attr);
+
+    attr = H5Acreate1(group, "date", varstring_type, dataspace, H5P_DEFAULT);
+    H5Awrite(attr, varstring_type, metadata.date.c_str());
+    H5Aclose(attr);
+
+    attr = H5Acreate1(group, "runtime", varstring_type, dataspace, H5P_DEFAULT);
+    H5Awrite(attr, varstring_type, metadata.runtime.c_str());
+    H5Aclose(attr);
+
+    H5Gclose(group);
+    H5Tclose(varstring_type);
+    H5Sclose(dataspace);
 }
 
 
@@ -591,6 +624,23 @@ int isolator_analyze(int argc, char* argv[])
 
     analyze.run(output_file_id);
 
+    IsolatorMetadata metadata;
+    metadata.command_line = "isolator";
+    for (int i = 0; i < argc; ++i) {
+        metadata.command_line += " ";
+        metadata.command_line += argv[i];
+    }
+
+    metadata.version = VERSION;
+
+    time_t t = time(NULL);
+    struct tm timestruct;
+    localtime_r(&t, &timestruct);
+    char time_string[200];
+    strftime(time_string, 200, "%a, %d %b %Y %T %z", &timestruct);
+    metadata.date = time_string;
+
+    write_metadata(output_file_id, metadata);
     Logger::info("Finished. Have a nice day!");
     Logger::end();
 
