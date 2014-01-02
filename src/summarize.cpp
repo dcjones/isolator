@@ -50,6 +50,18 @@ static hid_t H5Dopen2_checked(hid_t loc_id, const char* name, hid_t dapl_id)
 }
 
 
+static void H5Dread_checked(hid_t dataset_id, hid_t mem_type_id,
+                            hid_t mem_space_id, hid_t file_space_id,
+                            hid_t xfer_plist_id, void* buf)
+{
+    hid_t err = H5Dread(dataset_id, mem_type_id, mem_space_id, file_space_id,
+                        xfer_plist_id, buf);
+    if (err < 0) {
+        Logger::abort("HDF5 read failed.");
+    }
+}
+
+
 Summarize::Summarize(const char* filename)
 {
     h5_file = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -60,11 +72,7 @@ Summarize::Summarize(const char* filename)
     // read transcript information
     hid_t dataset;
 
-    dataset = H5Dopen2(h5_file, "/transcript_id", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Could not oepen the transcript_id dataset.");
-    }
-
+    dataset = H5Dopen2_checked(h5_file, "/transcript_id", H5P_DEFAULT);
     hid_t dataspace = H5Dget_space(dataset);
 
     hsize_t dims[1];
@@ -78,11 +86,8 @@ Summarize::Summarize(const char* filename)
     const char** string_data = new const char* [N];
 
     // read transcript_id dataset
-    herr_t status = H5Dread(dataset, datatype, H5S_ALL, H5S_ALL,
-                            H5P_DEFAULT, string_data);
-    if (status < 0) {
-        Logger::abort("Failed to read the transcript_id dataset.");
-    }
+    H5Dread_checked(dataset, datatype, H5S_ALL, H5S_ALL,
+                    H5P_DEFAULT, string_data);
 
     transcript_ids.reserve(N);
     for (size_t i = 0; i < N; ++i) {
@@ -93,16 +98,9 @@ Summarize::Summarize(const char* filename)
     H5Dclose(dataset);
 
     // read gene_id dataset
-    dataset = H5Dopen2(h5_file, "/gene_id", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Could not open the gene_id dataset.");
-    }
-
-    status = H5Dread(dataset, datatype, H5S_ALL, H5S_ALL,
-                     H5P_DEFAULT, string_data);
-    if (status < 0) {
-        Logger::abort("Failed to read the gene_id dataset.");
-    }
+    dataset = H5Dopen2_checked(h5_file, "/gene_id", H5P_DEFAULT);
+    H5Dread_checked(dataset, datatype, H5S_ALL, H5S_ALL,
+                    H5P_DEFAULT, string_data);
 
     gene_ids.reserve(N);
     for (size_t i = 0; i < N; ++i) {
@@ -116,17 +114,11 @@ Summarize::Summarize(const char* filename)
     H5Tclose(datatype);
 
     // read tgroups
-    dataset = H5Dopen2(h5_file, "/tgroup", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Could not open the tgroup dataset.");
-    }
+    dataset = H5Dopen2_checked(h5_file, "/tgroup", H5P_DEFAULT);
 
     tgroup.resize(N);
-    status = H5Dread(dataset, H5T_NATIVE_UINT, H5S_ALL, H5S_ALL,
-                     H5P_DEFAULT, &tgroup.at(0));
-    if (status < 0) {
-        Logger::abort("Failed to read the tgroup dataset");
-    }
+    H5Dread_checked(dataset, H5T_NATIVE_UINT, H5S_ALL, H5S_ALL,
+                    H5P_DEFAULT, &tgroup.at(0));
 
     T = *std::max_element(tgroup.begin(), tgroup.end()) + 1;
     Logger::info("%lu tgroups", (unsigned long) T);
@@ -148,10 +140,7 @@ Summarize::Summarize(const char* filename)
     }
 
     // figure out K (number of samples)
-    dataset = H5Dopen2(h5_file, "/transcript_quantification", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /transcript_quant dataset");
-    }
+    dataset = H5Dopen2_checked(h5_file, "/transcript_quantification", H5P_DEFAULT);
 
     dataspace = H5Dget_space(dataset);
     hsize_t dims3[3]; // dims are num_samples, K, N
@@ -176,10 +165,7 @@ void Summarize::median_condition_tgroup_expression(FILE* output)
         tgroup_transcript_ids[tgroup[i]].insert(transcript_ids[i]);
     }
 
-    hid_t dataset = H5Dopen2(h5_file, "/condition/tgroup_mean", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /condition/tgroup_mean dataset");
-    }
+    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/tgroup_mean", H5P_DEFAULT);
 
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[3]; // dims are: num_samples, C, T
@@ -216,13 +202,9 @@ void Summarize::median_condition_tgroup_expression(FILE* output)
                                 file_dataspace_start, NULL,
                                 file_dataspace_dims, NULL);
 
-            herr_t status = H5Dread(dataset, H5T_NATIVE_FLOAT,
-                                    mem_dataspace, dataspace, H5P_DEFAULT,
-                                    &condition_data[j].at(0));
-
-            if (status < 0) {
-                Logger::abort("Reading /condition/tgroup_mean dataset failed.");
-            }
+            H5Dread_checked(dataset, H5T_NATIVE_FLOAT,
+                            mem_dataspace, dataspace, H5P_DEFAULT,
+                            &condition_data[j].at(0));
         }
 
         for (size_t j = 0; j < T; ++j) {
@@ -278,10 +260,7 @@ void Summarize::median_experiment_tgroup_sd(FILE* output)
         tgroup_transcript_ids[tgroup[i]].insert(transcript_ids[i]);
     }
 
-    hid_t dataset = H5Dopen2(h5_file, "/experiment/tgroup_sd", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /experiment/tgroup_sd dataset");
-    }
+    hid_t dataset = H5Dopen2_checked(h5_file, "/experiment/tgroup_sd", H5P_DEFAULT);
 
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[2]; // dims are: num_samples, T
@@ -309,12 +288,8 @@ void Summarize::median_experiment_tgroup_sd(FILE* output)
                             file_dataspace_start, NULL,
                             file_dataspace_dims, NULL);
 
-        herr_t status = H5Dread(dataset, H5T_NATIVE_FLOAT, mem_dataspace,
-                                dataspace, H5P_DEFAULT, &data[i].at(0));
-
-        if (status < 0) {
-            Logger::abort("Reading the /experiment/tgroup_sd dataset failed.");
-        }
+        H5Dread_checked(dataset, H5T_NATIVE_FLOAT, mem_dataspace,
+                        dataspace, H5P_DEFAULT, &data[i].at(0));
     }
 
     H5Sclose(mem_dataspace);
@@ -350,10 +325,7 @@ void Summarize::median_experiment_tgroup_sd(FILE* output)
 
 void Summarize::median_transcript_expression(matrix<float>& Q)
 {
-    hid_t dataset = H5Dopen2(h5_file, "/transcript_quantification", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /transcript_quant dataset");
-    }
+    hid_t dataset = H5Dopen2_checked(h5_file, "/transcript_quantification", H5P_DEFAULT);
 
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[3]; // dims are num_samples, K, N
@@ -373,19 +345,14 @@ void Summarize::median_transcript_expression(matrix<float>& Q)
     matrix<float> Qi(num_samples, N);
 
     for (size_t i = 0; i < K; ++i) {
-        herr_t status;
         file_dataspace_start[1] = i;
 
         H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
                             file_dataspace_start, NULL,
                             file_dataspace_dims, NULL);
 
-        status = H5Dread(dataset, H5T_NATIVE_FLOAT, mem_dataspace,
-                         dataspace, H5P_DEFAULT, &Qi.data()[0]);
-
-        if (status < 0) {
-            Logger::abort("Reading the /transcript_quantification dataset failed.");
-        }
+        H5Dread_checked(dataset, H5T_NATIVE_FLOAT, mem_dataspace,
+                        dataspace, H5P_DEFAULT, &Qi.data()[0]);
 
         for (size_t j = 0; j < N; ++j) {
             matrix_column<matrix<float> > col(Qi, j);
@@ -475,10 +442,7 @@ void Summarize::tgroup_fold_change(FILE* output,
         tgroup_transcript_ids[tgroup[i]].insert(transcript_ids[i]);
     }
 
-    hid_t dataset = H5Dopen2(h5_file, "/condition/tgroup_mean", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /condition/tgroup_mean dataset");
-    }
+    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/tgroup_mean", H5P_DEFAULT);
 
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[3]; // dims are: num_samples, C, T
@@ -524,13 +488,9 @@ void Summarize::tgroup_fold_change(FILE* output,
                             file_dataspace_start, NULL,
                             file_dataspace_dims, NULL);
 
-        herr_t status = H5Dread(dataset, H5T_NATIVE_FLOAT,
-                                mem_dataspace, dataspace, H5P_DEFAULT,
-                                &condition_data_a[j].at(0));
-
-        if (status < 0) {
-            Logger::abort("Reading /condition/tgroup_mean dataset failed.");
-        }
+        H5Dread_checked(dataset, H5T_NATIVE_FLOAT,
+                        mem_dataspace, dataspace, H5P_DEFAULT,
+                        &condition_data_a[j].at(0));
     }
 
     // read ccondition_b data
@@ -542,13 +502,9 @@ void Summarize::tgroup_fold_change(FILE* output,
                             file_dataspace_start, NULL,
                             file_dataspace_dims, NULL);
 
-        herr_t status = H5Dread(dataset, H5T_NATIVE_FLOAT,
-                                mem_dataspace, dataspace, H5P_DEFAULT,
-                                &condition_data_b[j].at(0));
-
-        if (status < 0) {
-            Logger::abort("Reading /condition/tgroup_mean dataset failed.");
-        }
+        H5Dread_checked(dataset, H5T_NATIVE_FLOAT,
+                        mem_dataspace, dataspace, H5P_DEFAULT,
+                        &condition_data_b[j].at(0));
     }
 
     for (size_t j = 0; j < T; ++j) {
@@ -588,10 +544,7 @@ void Summarize::tgroup_fold_change(FILE* output,
 
 void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& splicing)
 {
-    hid_t dataset = H5Dopen2(h5_file, "/condition/splice_mu", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /condition/splice_mu dataset");
-    }
+    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/splice_mu", H5P_DEFAULT);
 
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[3]; // dims are: num_samples, C, spliced_tgroups
@@ -629,11 +582,8 @@ void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& s
                 Logger::abort("HDF5 hyperslab selection failed.");
             }
 
-            status = H5Dread(dataset, memtype, mem_dataspace, dataspace,
-                             H5P_DEFAULT, buffer);
-            if (status < 0) {
-                Logger::abort("HDF5 read failed.");
-            }
+            H5Dread_checked(dataset, memtype, mem_dataspace, dataspace,
+                            H5P_DEFAULT, buffer);
 
             for (size_t k = 0; k < dims[2]; ++k) {
                 size_t tgroup = spliced_tgroup_indexes[k];
@@ -773,10 +723,7 @@ void Summarize::condition_pairwise_splicing(FILE* output)
 
 void Summarize::expression_samples(FILE* output)
 {
-    hid_t dataset = H5Dopen2(h5_file, "/transcript_quantification", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /transcript_quant dataset");
-    }
+    hid_t dataset = H5Dopen2_checked(h5_file, "/transcript_quantification", H5P_DEFAULT);
 
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[3]; // dims are num_samples, K, N
@@ -790,12 +737,8 @@ void Summarize::expression_samples(FILE* output)
     H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
                         file_dataspace_start, NULL,
                         dims, NULL);
-    herr_t status = H5Dread(dataset, H5T_NATIVE_FLOAT, dataspace, dataspace,
-                            H5P_DEFAULT, &Q.data()[0]);
-
-    if (status < 0) {
-        Logger::abort("Reading the /transcript_quantification dataset failed.");
-    }
+    H5Dread_checked(dataset, H5T_NATIVE_FLOAT, dataspace, dataspace,
+                    H5P_DEFAULT, &Q.data()[0]);
 
     fprintf(output, "transcript_id");
     for (size_t i = 0; i < K; ++i) {
@@ -824,11 +767,7 @@ void Summarize::read_cassette_exons(std::vector<Interval>& cassette_exons,
                                     std::vector<std::vector<unsigned int> >& including_tids,
                                     std::vector<std::vector<unsigned int> >& excluding_tids)
 {
-    hid_t dataset = H5Dopen2(h5_file, "/cassette_exons/seqname", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /cassette_exons/seqname dataset");
-    }
-
+    hid_t dataset = H5Dopen2_checked(h5_file, "/cassette_exons/seqname", H5P_DEFAULT);
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[1];
     H5Sget_simple_extent_dims(dataspace, dims, NULL);
@@ -838,88 +777,44 @@ void Summarize::read_cassette_exons(std::vector<Interval>& cassette_exons,
     hid_t varstring_type = H5Tcopy(H5T_C_S1);
     H5Tset_size(varstring_type, H5T_VARIABLE);
     std::vector<char*> seqnames(n);
-    herr_t status = H5Dread(dataset, varstring_type, H5S_ALL, H5S_ALL,
-                            H5P_DEFAULT, &seqnames.at(0));
-    if (status < 0) {
-        Logger::abort("Failed to read the /cassette_exons/seqname dataset.");
-    }
-
+    H5Dread_checked(dataset, varstring_type, H5S_ALL, H5S_ALL,
+                    H5P_DEFAULT, &seqnames.at(0));
     H5Dclose(dataset);
 
     // read starts
-    dataset = H5Dopen2(h5_file, "/cassette_exons/start", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /cassette_exons/start dataset");
-    }
-
+    dataset = H5Dopen2_checked(h5_file, "/cassette_exons/start", H5P_DEFAULT);
     std::vector<long> starts(n);
-    status = H5Dread(dataset, H5T_NATIVE_LONG, H5S_ALL, H5S_ALL, H5P_DEFAULT,
-                     &starts.at(0));
-    if (status < 0) {
-        Logger::abort("Failed to read the /cassette_exons/starts dataset.");
-    }
-
+    H5Dread_checked(dataset, H5T_NATIVE_LONG, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                    &starts.at(0));
     H5Dclose(dataset);
 
     // read ends
-    dataset = H5Dopen2(h5_file, "/cassette_exons/end", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /cassette_exons/end dataset");
-    }
-
+    dataset = H5Dopen2_checked(h5_file, "/cassette_exons/end", H5P_DEFAULT);
     std::vector<long> ends(n);
-    status = H5Dread(dataset, H5T_NATIVE_LONG, H5S_ALL, H5S_ALL, H5P_DEFAULT,
-                     &ends.at(0));
-    if (status < 0) {
-        Logger::abort("Failed to read the /cassette_exons/ends dataset.");
-    }
-
+    H5Dread_checked(dataset, H5T_NATIVE_LONG, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                    &ends.at(0));
     H5Dclose(dataset);
 
     // read strands
-    dataset = H5Dopen2(h5_file, "/cassette_exons/strand", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /cassette_exons/strand dataset");
-    }
-
+    dataset = H5Dopen2_checked(h5_file, "/cassette_exons/strand", H5P_DEFAULT);
     std::vector<char> strands(n);
-    status = H5Dread(dataset, H5T_NATIVE_CHAR, H5S_ALL, H5S_ALL, H5P_DEFAULT,
-                     &strands.at(0));
-    if (status < 0) {
-        Logger::abort("Failed to read the /cassette_exons/strand dataset.");
-    }
-
+    H5Dread_checked(dataset, H5T_NATIVE_CHAR, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                    &strands.at(0));
     H5Dclose(dataset);
 
     // read including_tids
-    dataset = H5Dopen2(h5_file, "/cassette_exons/including_tids", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /cassette_exons/including_tids dataset");
-    }
-
+    dataset = H5Dopen2_checked(h5_file, "/cassette_exons/including_tids", H5P_DEFAULT);
     hid_t tids_type = H5Tvlen_create(H5T_NATIVE_UINT);
     std::vector<hvl_t> including_tids_data(n);
-    status = H5Dread(dataset, tids_type, H5S_ALL, H5S_ALL, H5P_DEFAULT,
-                     &including_tids_data.at(0));
-    if (status) {
-        Logger::abort("Failed to read the /cassette_exons/including_tids");
-    }
-
+    H5Dread_checked(dataset, tids_type, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                    &including_tids_data.at(0));
     H5Dclose(dataset);
 
     // read excluding_tids
-    dataset = H5Dopen2(h5_file, "/cassette_exons/excluding_tids", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /cassette_exons/excluding_tids dataset");
-    }
-
+    dataset = H5Dopen2_checked(h5_file, "/cassette_exons/excluding_tids", H5P_DEFAULT);
     std::vector<hvl_t> excluding_tids_data(n);
-    status = H5Dread(dataset, tids_type, H5S_ALL, H5S_ALL, H5P_DEFAULT,
-                     &excluding_tids_data.at(0));
-    if (status) {
-        Logger::abort("Failed to read the /cassette_exons/excluding_tids");
-    }
-
+    H5Dread_checked(dataset, tids_type, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                    &excluding_tids_data.at(0));
     H5Dclose(dataset);
 
     // construct the data
@@ -965,22 +860,14 @@ void Summarize::read_cassette_exons(std::vector<Interval>& cassette_exons,
 
 void Summarize::read_tgroup_mean(boost::multi_array<float, 3>& output)
 {
-    hid_t dataset = H5Dopen2(h5_file, "/condition/tgroup_mean", H5P_DEFAULT);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the /condition/tgroup_mean dataset");
-    }
-
+    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/tgroup_mean", H5P_DEFAULT);
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[3]; // dims are: num_samples, C, T
     H5Sget_simple_extent_dims(dataspace, dims, NULL);
     output.resize(boost::extents[dims[0]][dims[1]][dims[2]]);
 
-    herr_t status = H5Dread(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL,
-                            H5P_DEFAULT, output.data());
-    if (status < 0) {
-        Logger::abort("HDF5 read failed.");
-    }
-
+    H5Dread_checked(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL,
+                    H5P_DEFAULT, output.data());
     H5Dclose(dataset);
 }
 
@@ -1196,6 +1083,4 @@ void Summarize::read_metadata(IsolatorMetadata& metadata)
     H5Tclose(varstring_type);
     H5Gclose(group);
 }
-
-
 
