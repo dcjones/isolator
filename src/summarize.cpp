@@ -27,41 +27,6 @@ static double logaddexp(double x, double y)
 }
 
 
-// Safely open a hdf5 attribute
-static hid_t H5Aopen_checked(hid_t obj_id, const char* attr_name, hid_t aapl_id)
-{
-    hid_t attr = H5Aopen(obj_id, attr_name, aapl_id);
-    if (attr < 0) {
-        Logger::abort("Failed to open HDF5 attribute \"%s\".", attr_name);
-    }
-
-    return attr;
-}
-
-
-static hid_t H5Dopen2_checked(hid_t loc_id, const char* name, hid_t dapl_id)
-{
-    hid_t dataset = H5Dopen2(loc_id, name, dapl_id);
-    if (dataset < 0) {
-        Logger::abort("Failed to open the HDF5 dataset \"%s\".", name);
-    }
-
-    return dataset;
-}
-
-
-static void H5Dread_checked(hid_t dataset_id, hid_t mem_type_id,
-                            hid_t mem_space_id, hid_t file_space_id,
-                            hid_t xfer_plist_id, void* buf)
-{
-    hid_t err = H5Dread(dataset_id, mem_type_id, mem_space_id, file_space_id,
-                        xfer_plist_id, buf);
-    if (err < 0) {
-        Logger::abort("HDF5 read failed.");
-    }
-}
-
-
 Summarize::Summarize(const char* filename)
 {
     h5_file = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);

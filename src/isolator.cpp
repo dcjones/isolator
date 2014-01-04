@@ -110,6 +110,21 @@ int isolator_report(int argc, char* argv[])
         }
     }
 
+    /* no positional argumens */
+    if (optind == argc) {
+        print_report_usage(stdout);
+        return 0;
+    }
+
+    /* too many */
+    else if (optind + 1 > argc) {
+        fprintf(stderr, "Too many arguments.\n\n");
+        print_report_usage(stderr);
+        return 1;
+    }
+
+    const char* input_filename = argv[optind];
+
     FILE* output_file = stdout;
     if (output_filename) {
         output_file = fopen(output_filename, "w");
@@ -117,6 +132,8 @@ int isolator_report(int argc, char* argv[])
             fprintf(stderr, "Can't open file %s for writing.\n", output_filename);
         }
     }
+
+    generate_report(input_filename, output_file);
 
     fclose(output_file);
 

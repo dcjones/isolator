@@ -930,13 +930,8 @@ void Analyze::setup_output(hid_t file_id)
     // transcript information
     // ----------------------
     {
-        herr_t status;
-
         hsize_t dims[1] = { N };
-        hid_t dataspace;
-        if ((dataspace = H5Screate_simple(1, dims, NULL)) < 0) {
-            Logger::abort("HDF5 dataspace creation failed.");
-        }
+        hid_t dataspace = H5Screate_simple_checked(1, dims, NULL);
 
         hid_t varstring_type = H5Tcopy(H5T_C_S1);
         if (varstring_type < 0 || H5Tset_size(varstring_type, H5T_VARIABLE) < 0) {
@@ -947,53 +942,54 @@ void Analyze::setup_output(hid_t file_id)
 
         // transcript_id table
         hid_t transcript_id_dataset =
-            H5Dcreate2(file_id, "/transcript_id", varstring_type,
-                       dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        if (transcript_id_dataset < 0) {
-            Logger::abort("HDF5 dataset creation failed.");
-        }
+            H5Dcreate2_checked(file_id, "/transcript_id", varstring_type,
+                               dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
         for (TranscriptSet::iterator t = transcripts.begin();
                 t != transcripts.end(); ++t) {
             string_data[t->id] = t->transcript_id.get().c_str();
         }
 
-        status = H5Dwrite(transcript_id_dataset, varstring_type,
-                          H5S_ALL, H5S_ALL, H5P_DEFAULT, string_data);
-        if (status < 0) Logger::abort("HDF5 write failed.");
-
+        H5Dwrite_checked(transcript_id_dataset, varstring_type,
+                         H5S_ALL, H5S_ALL, H5P_DEFAULT, string_data);
         H5Dclose(transcript_id_dataset);
 
         // gene_id table
         hid_t gene_id_dataset =
-            H5Dcreate2(file_id, "/gene_id", varstring_type,
-                       dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        if (gene_id_dataset < 0) {
-            Logger::abort("HDF5 dataset creation failed.");
-        }
+            H5Dcreate2_checked(file_id, "/gene_id", varstring_type,
+                               dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
         for (TranscriptSet::iterator t = transcripts.begin();
                 t != transcripts.end(); ++t) {
             string_data[t->id] = t->gene_id.get().c_str();
         }
 
-        status = H5Dwrite(gene_id_dataset, varstring_type,
-                          H5S_ALL, H5S_ALL, H5P_DEFAULT, string_data);
-        if (status < 0) Logger::abort("HDF5 write failed.");
-
+        H5Dwrite_checked(gene_id_dataset, varstring_type,
+                         H5S_ALL, H5S_ALL, H5P_DEFAULT, string_data);
         H5Dclose(gene_id_dataset);
+
+
+        // gene_name table
+        hid_t gene_name_dataset =
+            H5Dcreate2_checked(file_id, "/gene_name", varstring_type,
+                               dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        for (TranscriptSet::iterator t = transcripts.begin();
+                t != transcripts.end(); ++t) {
+            string_data[t->id] = t->gene_name.get().c_str();
+        }
+        H5Dwrite_checked(gene_name_dataset, varstring_type,
+                         H5S_ALL, H5S_ALL, H5P_DEFAULT, string_data);
+        H5Dclose(gene_name_dataset);
+
         H5Tclose(varstring_type);
 
         delete [] string_data;
 
         // tgroup table
         hid_t tgroup_dataset =
-            H5Dcreate2(file_id, "/tgroup", H5T_NATIVE_UINT,
-                       dataspace, H5P_DEFAULT,
-                       H5P_DEFAULT, H5P_DEFAULT);
-        if (tgroup_dataset < 0) {
-            Logger::abort("HDF5 dataset creation failed.");
-        }
+            H5Dcreate2_checked(file_id, "/tgroup", H5T_NATIVE_UINT,
+                               dataspace, H5P_DEFAULT,
+                               H5P_DEFAULT, H5P_DEFAULT);
 
         unsigned int* tgroup_data = new unsigned int[N];
 
@@ -1002,11 +998,8 @@ void Analyze::setup_output(hid_t file_id)
             tgroup_data[t->id] = t->tgroup;
         }
 
-        status = H5Dwrite(tgroup_dataset, H5T_NATIVE_UINT, H5S_ALL, H5S_ALL,
+        H5Dwrite_checked(tgroup_dataset, H5T_NATIVE_UINT, H5S_ALL, H5S_ALL,
                           H5S_ALL, tgroup_data);
-        if (status < 0) {
-            Logger::abort("HDF5 write failed.");
-        }
 
         H5Dclose(tgroup_dataset);
 
@@ -1029,13 +1022,9 @@ void Analyze::setup_output(hid_t file_id)
         h5_sample_quant_dataspace = H5Screate_simple(3, dims, NULL);
 
         h5_sample_quant_dataset =
-            H5Dcreate2(file_id, "/transcript_quantification", H5T_NATIVE_FLOAT,
-                       h5_sample_quant_dataspace, H5P_DEFAULT,
-                       dataset_create_property, H5P_DEFAULT);
-
-        if (h5_sample_quant_dataset < 0) {
-            Logger::abort("HDF5 dataset creation failed.");
-        }
+            H5Dcreate2_checked(file_id, "/transcript_quantification", H5T_NATIVE_FLOAT,
+                               h5_sample_quant_dataspace, H5P_DEFAULT,
+                               dataset_create_property, H5P_DEFAULT);
 
         H5Pclose(dataset_create_property);
 
@@ -1044,9 +1033,9 @@ void Analyze::setup_output(hid_t file_id)
             H5Screate_simple(2, sample_quant_mem_dims, NULL);
 
         hsize_t sample_quant_start[2] = {0, 0};
-        status = H5Sselect_hyperslab(h5_sample_quant_dataspace, H5S_SELECT_SET,
-                                     sample_quant_start, NULL,
-                                     sample_quant_mem_dims, NULL);
+        H5Sselect_hyperslab_checked(h5_sample_quant_dataspace, H5S_SELECT_SET,
+                                    sample_quant_start, NULL,
+                                    sample_quant_mem_dims, NULL);
 
         if (status < 0) {
             Logger::abort("HDF5 hyperslab creation failed.");
@@ -1073,25 +1062,21 @@ void Analyze::setup_output(hid_t file_id)
         h5_experiment_tgroup_dataspace = H5Screate_simple(2, dims, NULL);
 
         h5_experiment_mean_dataset =
-            H5Dcreate2(file_id, "/experiment/tgroup_mean", H5T_NATIVE_DOUBLE,
-                       h5_experiment_tgroup_dataspace, H5P_DEFAULT,
-                       dataset_create_property, H5P_DEFAULT);
+            H5Dcreate2_checked(file_id, "/experiment/tgroup_mean", H5T_NATIVE_DOUBLE,
+                               h5_experiment_tgroup_dataspace, H5P_DEFAULT,
+                               dataset_create_property, H5P_DEFAULT);
 
         h5_experiment_sd_dataset =
-            H5Dcreate2(file_id, "/experiment/tgroup_sd", H5T_NATIVE_DOUBLE,
-                       h5_experiment_tgroup_dataspace, H5P_DEFAULT,
-                       dataset_create_property, H5P_DEFAULT);
-
-        if (h5_experiment_mean_dataset < 0 || h5_experiment_sd_dataset < 0) {
-            Logger::abort("HDF5 dataset creation failed.");
-        }
+            H5Dcreate2_checked(file_id, "/experiment/tgroup_sd", H5T_NATIVE_DOUBLE,
+                               h5_experiment_tgroup_dataspace, H5P_DEFAULT,
+                               dataset_create_property, H5P_DEFAULT);
 
         hsize_t tgroup_row_dims = T;
         h5_tgroup_row_mem_dataspace = H5Screate_simple(1, &tgroup_row_dims, NULL);
 
         hsize_t tgroup_row_start = 0;
-        status = H5Sselect_hyperslab(h5_tgroup_row_mem_dataspace, H5S_SELECT_SET,
-                                     &tgroup_row_start, NULL, &tgroup_row_dims, NULL);
+        H5Sselect_hyperslab_checked(h5_tgroup_row_mem_dataspace, H5S_SELECT_SET,
+                                    &tgroup_row_start, NULL, &tgroup_row_dims, NULL);
 
         // splicing parameters
         chunk_dims[1] = spliced_tgroup_indexes.size();
@@ -1107,20 +1092,14 @@ void Analyze::setup_output(hid_t file_id)
         h5_splicing_mem_dataspace = H5Screate_simple(1, &dims[1], NULL);
 
         h5_experiment_splice_mu_dataset =
-            H5Dcreate2(file_id, "/experiment/splice_mu", h5_splice_param_type,
-                       h5_experiment_splice_dataspace, H5P_DEFAULT,
-                       dataset_create_property, H5P_DEFAULT);
-        if (h5_experiment_splice_mu_dataset < 0) {
-            Logger::abort("HDF5 dataset creation failed.");
-        }
+            H5Dcreate2_checked(file_id, "/experiment/splice_mu", h5_splice_param_type,
+                               h5_experiment_splice_dataspace, H5P_DEFAULT,
+                               dataset_create_property, H5P_DEFAULT);
 
         h5_experiment_splice_sigma_dataset =
-            H5Dcreate2(file_id, "/experiment/splice_sigma", h5_splice_param_type,
-                       h5_experiment_splice_dataspace, H5P_DEFAULT,
-                       dataset_create_property, H5P_DEFAULT);
-        if (h5_experiment_splice_sigma_dataset < 0) {
-            Logger::abort("HDF5 dataset creation failed.");
-        }
+            H5Dcreate2_checked(file_id, "/experiment/splice_sigma", h5_splice_param_type,
+                               h5_experiment_splice_dataspace, H5P_DEFAULT,
+                               dataset_create_property, H5P_DEFAULT);
 
         H5Pclose(dataset_create_property);
     }
@@ -1143,13 +1122,9 @@ void Analyze::setup_output(hid_t file_id)
         h5_condition_tgroup_dataspace = H5Screate_simple(3, dims, NULL);
 
         h5_condition_mean_dataset =
-            H5Dcreate2(file_id, "/condition/tgroup_mean", H5T_NATIVE_FLOAT,
-                       h5_condition_tgroup_dataspace, H5P_DEFAULT,
-                       dataset_create_property, H5P_DEFAULT);
-
-        if (h5_condition_mean_dataset < 0) {
-            Logger::abort("HDF5 dataset creation failed.");
-        }
+            H5Dcreate2_checked(file_id, "/condition/tgroup_mean", H5T_NATIVE_FLOAT,
+                               h5_condition_tgroup_dataspace, H5P_DEFAULT,
+                               dataset_create_property, H5P_DEFAULT);
 
         // splicing
         chunk_dims[2] = spliced_tgroup_indexes.size();
@@ -1159,12 +1134,9 @@ void Analyze::setup_output(hid_t file_id)
         h5_condition_splice_mu_dataspace = H5Screate_simple(3, dims, NULL);
 
         h5_condition_splice_mu_dataset =
-            H5Dcreate2(file_id, "/condition/splice_mu", h5_splice_param_type,
-                       h5_condition_splice_mu_dataspace, H5P_DEFAULT,
-                       dataset_create_property, H5P_DEFAULT);
-        if (h5_condition_splice_mu_dataset < 0) {
-            Logger::abort("HDF5 dataset creation failed.");
-        }
+            H5Dcreate2_checked(file_id, "/condition/splice_mu", h5_splice_param_type,
+                               h5_condition_splice_mu_dataspace, H5P_DEFAULT,
+                               dataset_create_property, H5P_DEFAULT);
 
         chunk_dims[1] = spliced_tgroup_indexes.size();
         H5Pset_chunk(dataset_create_property, 2, chunk_dims);
@@ -1173,12 +1145,9 @@ void Analyze::setup_output(hid_t file_id)
         h5_condition_splice_sigma_dataspace = H5Screate_simple(2, dims, NULL);
 
         h5_condition_splice_sigma_dataset =
-            H5Dcreate2(file_id, "/condition/splice_sigma", h5_splice_param_type,
-                       h5_condition_splice_sigma_dataspace, H5P_DEFAULT,
-                       dataset_create_property, H5P_DEFAULT);
-        if (h5_condition_splice_sigma_dataset < 0) {
-            Logger::abort("HDF5 dataset creation failed.");
-        }
+            H5Dcreate2_checked(file_id, "/condition/splice_sigma", h5_splice_param_type,
+                               h5_condition_splice_sigma_dataspace, H5P_DEFAULT,
+                               dataset_create_property, H5P_DEFAULT);
 
         H5Pclose(dataset_create_property);
     }

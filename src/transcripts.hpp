@@ -76,6 +76,7 @@ class Transcript : public std::set<Exon>
         pos_t get_offset(pos_t) const;
 
         GeneID gene_id;
+        GeneName gene_name;
         TranscriptID transcript_id;
         SeqName seqname;
 

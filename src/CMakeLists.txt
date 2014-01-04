@@ -20,6 +20,7 @@ add_executable(isolator
                emp_dist.cpp
                fragment_model.cpp
                gc.cpp
+               hdf5.cpp
                intervals.cpp
                isolator.cpp
                linalg.cpp

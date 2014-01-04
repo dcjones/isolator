@@ -8,9 +8,8 @@
 #include <string>
 #include <vector>
 #include <cstdio>
-#include <hdf5.h>
-#include <hdf5_hl.h>
 
+#include "hdf5.hpp"
 #include "fragment_model.hpp"
 #include "queue.hpp"
 #include "sampler.hpp"

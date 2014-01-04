@@ -4,6 +4,6 @@
 
 #include <cstdio>
 
-void isolator_report(const char* input_filename, FILE* output_file);
+void generate_report(const char* input_filename, FILE* output_file);
 
 #endif

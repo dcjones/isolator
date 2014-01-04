@@ -46,6 +46,7 @@ Transcript::Transcript()
 Transcript::Transcript(const Transcript& other)
     : std::set<Exon>(other)
     , gene_id(other.gene_id)
+    , gene_name(other.gene_name)
     , transcript_id(other.transcript_id)
     , seqname(other.seqname)
     , strand(other.strand)
@@ -138,7 +139,7 @@ pos_t Transcript::get_offset(pos_t pos) const
     return -1;
 }
 
-
+// 
 bool Transcript::operator < (const Transcript& other) const
 {
     int c;
@@ -149,6 +150,7 @@ bool Transcript::operator < (const Transcript& other) const
     else if (max_end   != other.max_end)   return max_end       < other.max_end;
     else if (strand    != other.strand)    return strand        < other.strand;
     else if (gene_id   != other.gene_id)   return gene_id       < other.gene_id;
+    else if (gene_name != other.gene_name) return gene_name     < other.gene_name;
     else                                   return transcript_id < other.transcript_id;
 }
 
@@ -175,6 +177,7 @@ bool TranscriptCmpTSS::operator()(const Transcript& a, const Transcript& b) cons
     else if (a.min_start != b.min_start) return a.min_start     < b.min_start;
     else if (a.max_end   != b.max_end)   return a.max_end       < b.max_end;
     else if (a.gene_id   != b.gene_id)   return a.gene_id       < b.gene_id;
+    else if (a.gene_name != b.gene_name) return a.gene_name     < b.gene_name;
     else                                 return a.transcript_id < b.transcript_id;
 }
 
@@ -318,6 +321,9 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance)
             continue;
         }
 
+        str_t* t_gene_name = reinterpret_cast<str_t*>(
+                str_map_get(row->attributes, "gene_name", 9));
+
         str_t* t_biotype = reinterpret_cast<str_t*>(
                 str_map_get(row->attributes, "gene_biotype", 12));
 
@@ -329,7 +335,8 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance)
             t.transcript_id = t_id->s;
             t.strand = (strand_t) row->strand;
             t.source = row->source->s;
-            if (t_biotype) t.biotype = t_biotype->s;
+            if (t_gene_name) t.gene_name = t_gene_name->s;
+            if (t_biotype)   t.biotype = t_biotype->s;
         }
 
         pos_t pos = (t.strand == strand_pos ? row->start : row->end) - 1;

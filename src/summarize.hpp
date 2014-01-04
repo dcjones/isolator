@@ -11,9 +11,8 @@
 #include <map>
 #include <string>
 #include <vector>
-#include <hdf5.h>
-#include <hdf5_hl.h>
 
+#include "hdf5.hpp"
 #include "intervals.hpp"
 
 
@@ -52,6 +51,10 @@ class Summarize
         void cassette_exon_pairwise_splicing(FILE* output);
 
         void read_metadata(IsolatorMetadata& metadata);
+        void read_transcript_ids(std::vector<std::string>& transcirpt_ids);
+        void read_gene_ids(std::vector<std::string>& gene_ids);
+        // TODo
+        // void read_gene_names(std::vector<std::string>& gene_names);
 
     private:
         void median_transcript_expression(
