@@ -43,7 +43,6 @@ Summarize::Summarize(const char* filename)
     hsize_t dims[1];
     H5Sget_simple_extent_dims(dataspace, dims, NULL);
     N = dims[0];
-    Logger::info("%lu transcripts", (unsigned long) N);
 
     hid_t datatype = H5Tcopy(H5T_C_S1);
     H5Tset_size(datatype, H5T_VARIABLE);
@@ -86,7 +85,6 @@ Summarize::Summarize(const char* filename)
                     H5P_DEFAULT, &tgroup.at(0));
 
     T = *std::max_element(tgroup.begin(), tgroup.end()) + 1;
-    Logger::info("%lu tgroups", (unsigned long) T);
 
     H5Dclose(dataset);
     H5Sclose(dataspace);
@@ -1048,4 +1046,24 @@ void Summarize::read_metadata(IsolatorMetadata& metadata)
     H5Tclose(varstring_type);
     H5Gclose(group);
 }
+
+
+const std::vector<std::string>& Summarize::get_transcript_ids()
+{
+    return transcript_ids;
+}
+
+
+const std::vector<std::string>& Summarize::get_gene_ids()
+{
+    return gene_ids;
+}
+
+
+const std::vector<unsigned int>& Summarize::get_tgroups()
+{
+    return tgroup;
+}
+
+
 

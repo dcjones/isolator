@@ -51,10 +51,10 @@ class Summarize
         void cassette_exon_pairwise_splicing(FILE* output);
 
         void read_metadata(IsolatorMetadata& metadata);
-        void read_transcript_ids(std::vector<std::string>& transcirpt_ids);
-        void read_gene_ids(std::vector<std::string>& gene_ids);
-        // TODo
-        // void read_gene_names(std::vector<std::string>& gene_names);
+
+        const std::vector<std::string>& get_transcript_ids();
+        const std::vector<std::string>& get_gene_ids();
+        const std::vector<unsigned int>& get_tgroups();
 
     private:
         void median_transcript_expression(

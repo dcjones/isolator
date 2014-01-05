@@ -27,7 +27,6 @@ add_executable(isolator
                logger.cpp
                pos_table.cpp
                read_set.cpp
-               report.cpp
                sampler.cpp
                shredder.cpp
                summarize.cpp

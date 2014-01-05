@@ -14,6 +14,7 @@
 #include <getopt.h>
 #include <hdf5.h>
 #include <hdf5_hl.h>
+#include <map>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -23,7 +24,6 @@
 #include "fragment_model.hpp"
 #include "linalg.hpp"
 #include "logger.hpp"
-#include "report.hpp"
 #include "sampler.hpp"
 #include "summarize.hpp"
 #include "transcripts.hpp"
@@ -45,56 +45,48 @@ static void print_logo()
 }
 
 
-void print_report_usage(FILE* fout)
+void print_describe_usage(FILE* fout)
 {
-    fprintf(fout, "Usage: isolator report [options] analyse_output.h5\n");
+    fprintf(fout, "Usage: isolator describe isolator-output.h5\n");
 }
 
 
-void print_report_help(FILE* fout)
+void print_describe_help(FILE* fout)
 {
-    print_report_usage(fout);
+    print_describe_usage(fout);
     fprintf(fout,
             "\nOptions:\n"
             "-h, --help                Print this help message\n"
-            "-o, --out=FILE            Output report the given file.\n"
-            "                           (default: isolator-report.html).\n"
-            "-v, --verbose             Print information useful for debugging\n"
-        );
+            "-o, --output=FILE         Write output to the given file (default: standard out)\n"
+            "\n"
+            "See 'isolator help summarize' for more.\n");
 }
 
 
-int isolator_report(int argc, char* argv[])
+int isolator_describe(int argc, char* argv[])
 {
     Logger::start();
 
     static struct option long_options[] =
     {
-        // TODO: HERE HERE HERE HERE
-        {"help",    no_argument,       NULL, 'h'},
-        {"verbose", no_argument,       NULL, 'v'},
-        {"out",     required_argument, NULL, 'o'},
+        {"help",        no_argument,       NULL, 'h'},
+        {"output",      required_argument, NULL, 'o'},
         {0, 0, 0, 0}
     };
 
-    const char* output_filename = "isolator-report.html";
-    Logger::level logger_level = Logger::INFO;
-
-    int opt, opt_idx;
+    int opt;
+    int opt_idx;
+    const char* output_filename = NULL;
 
     while (true) {
-        opt = getopt_long(argc, argv, "hvo:", long_options, &opt_idx);
+        opt = getopt_long(argc, argv, "ho:", long_options, &opt_idx);
 
         if (opt == -1) break;
 
         switch (opt) {
             case 'h':
-                print_report_help(stdout);
+                print_describe_help(stdout);
                 return 0;
-
-            case 'v':
-                logger_level = Logger::DEBUG;
-                break;
 
             case 'o':
                 output_filename = optarg;
@@ -102,7 +94,7 @@ int isolator_report(int argc, char* argv[])
 
             case '?':
                 fprintf(stderr, "\n");
-                print_report_help(stderr);
+                print_describe_help(stderr);
                 return 1;
 
             default:
@@ -112,32 +104,82 @@ int isolator_report(int argc, char* argv[])
 
     /* no positional argumens */
     if (optind == argc) {
-        print_report_usage(stdout);
+        print_describe_usage(stdout);
         return 0;
     }
 
     /* too many */
     else if (optind + 1 > argc) {
         fprintf(stderr, "Too many arguments.\n\n");
-        print_report_usage(stderr);
+        print_describe_usage(stderr);
         return 1;
     }
 
     const char* input_filename = argv[optind];
+    Summarize summarize(input_filename);
 
     FILE* output_file = stdout;
     if (output_filename) {
         output_file = fopen(output_filename, "w");
         if (!output_file) {
-            fprintf(stderr, "Can't open file %s for writing.\n", output_filename);
+            Logger::abort("Can't open file %s for writing.\n", output_filename);
         }
     }
 
-    generate_report(input_filename, output_file);
+    IsolatorMetadata metadata;
+    summarize.read_metadata(metadata);
 
-    fclose(output_file);
+    const std::vector<std::string>& transcript_ids = summarize.get_transcript_ids();
+    const std::vector<std::string>& gene_ids = summarize.get_gene_ids();
+    const std::vector<unsigned int>& tgroups = summarize.get_tgroups();
 
-    Logger::end();
+    std::set<std::string> unique_gene_ids;
+    unique_gene_ids.insert(gene_ids.begin(), gene_ids.end());
+
+    std::set<unsigned int> unique_tgroups;
+    unique_tgroups.insert(tgroups.begin(), tgroups.end());
+
+    std::map<std::string, std::vector<std::string> > condition_samples;
+    for (size_t i = 0; i < metadata.sample_filenames.size(); ++i) {
+        condition_samples[metadata.sample_conditions[i]].push_back(
+                metadata.sample_filenames[i]);
+    }
+
+    fprintf(output_file,
+        "Experiment Design\n"
+        "-----------------\n"
+        "\n"
+        "%lu samples in %lu conditions.\n",
+        (unsigned long) metadata.sample_conditions.size(),
+        (unsigned long) condition_samples.size());
+
+    typedef std::map<std::string, std::vector<std::string> >::value_type
+        condition_samples_value_type;
+    BOOST_FOREACH (condition_samples_value_type& condition, condition_samples) {
+        fprintf(output_file, "\nCondition %s:\n", condition.first.c_str());
+        BOOST_FOREACH (std::string& filename, condition.second) {
+            fprintf(output_file, "  %s\n", filename.c_str());
+        }
+    }
+
+    fprintf(output_file,
+        "\n\nAnalysis\n"
+        "--------\n"
+        "\n"
+        "Gene annotations contained %lu transcripts in %lu genes and\n"
+        "%lu transcription groups.\n"
+        "\n"
+        "Isolator version %s was run on %s taking %s seconds.\n"
+        "\n"
+        "Command line:\n  %s\n\n",
+        (unsigned long) transcript_ids.size(),
+        (unsigned long) unique_gene_ids.size(),
+        (unsigned long) unique_tgroups.size(),
+        metadata.version.c_str(),
+        metadata.date.c_str(),
+        metadata.elapsed_seconds.c_str(),
+        metadata.command_line.c_str());
+
     return EXIT_SUCCESS;
 }
 
@@ -259,7 +301,7 @@ int isolator_summarize(int argc, char* argv[])
     if (out_fn) {
         out_f = fopen(out_fn, "w");
         if (out_f == NULL) {
-            fprintf(stderr, "Can't open file %s for writing.\n", out_fn);
+            Logger::abort("Can't open file %s for writing.\n", out_fn);
         }
     }
 
@@ -788,9 +830,8 @@ void print_usage(FILE* fout)
             "Where <command> is one of:\n"
             "    analyze           Quantify and test for differential expression\n"
             "                      and splicing, among other things.\n"
-            "    report            Generate a simple document summarizing the\n"
-            "                      results of the analysis.\n"
             "    summarize         Summarize a sampler run.\n"
+            "    describe          Briefly describe contents of an output file.\n"
             "    help              Become enlightened.\n",
             VERSION, LINALG_INSTR_SET);
 }
@@ -834,8 +875,8 @@ int main(int argc, char* argv[])
     if (strcmp(argv[0], "summarize") == 0) {
         return isolator_summarize(argc, argv);
     }
-    else if (strcmp(argv[0], "report") == 0) {
-        return isolator_report(argc, argv);
+    else if (strcmp(argv[0], "describe") == 0) {
+        return isolator_describe(argc, argv);
     }
     else if (strcmp(argv[0], "analyze") == 0) {
         return isolator_analyze(argc, argv);
