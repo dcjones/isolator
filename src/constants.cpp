@@ -39,4 +39,6 @@ unsigned int         constants::max_newton_iter              = 12;
 unsigned int         constants::sampler_burnin_samples       = 200;
 unsigned int         constants::sampler_hillclimb_samples    = 0;
 unsigned int         constants::min_tss_group_isoforms_conditioning = 50;
+double               constants::sample_scaling_quantile      = 0.9;
+size_t               constants::sample_scaling_truncation    = 100000;
 

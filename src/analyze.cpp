@@ -1009,8 +1009,6 @@ void Analyze::setup_output(hid_t file_id)
     // sample quantification
     // ---------------------
     {
-        herr_t status;
-
         hsize_t dims[3] = {num_samples, K, N};
         hsize_t chunk_dims[3] = {1, 1, N};
 
@@ -1036,17 +1034,40 @@ void Analyze::setup_output(hid_t file_id)
         H5Sselect_hyperslab_checked(h5_sample_quant_dataspace, H5S_SELECT_SET,
                                     sample_quant_start, NULL,
                                     sample_quant_mem_dims, NULL);
+    }
 
-        if (status < 0) {
-            Logger::abort("HDF5 hyperslab creation failed.");
-        }
+    // sample scaling factors
+    // ----------------------
+    {
+        hsize_t dims[2] = {num_samples, K};
+        hsize_t chunk_dims[2] = {1, K};
+
+        hid_t dataset_create_property = H5Pcreate(H5P_DATASET_CREATE);
+        H5Pset_layout(dataset_create_property, H5D_CHUNKED);
+        H5Pset_chunk(dataset_create_property, 2, chunk_dims);
+        H5Pset_deflate(dataset_create_property, 7);
+
+        h5_sample_scaling_dataspace = H5Screate_simple(2, dims, NULL);
+        h5_sample_scaling_dataset =
+            H5Dcreate2_checked(file_id, "/sample_scaling", H5T_NATIVE_DOUBLE,
+                               h5_sample_scaling_dataspace, H5P_DEFAULT,
+                               dataset_create_property, H5P_DEFAULT);
+
+        H5Pclose(dataset_create_property);
+
+        hsize_t sample_scaling_mem_dims[1] = {K};
+        h5_sample_scaling_mem_dataspace =
+            H5Screate_simple(2, sample_scaling_mem_dims, NULL);
+
+        hsize_t sample_scaling_mem_start[1] = {0};
+        H5Sselect_hyperslab_checked(h5_sample_scaling_dataspace, H5S_SELECT_SET,
+                                    sample_scaling_mem_start, NULL,
+                                    sample_scaling_mem_dims, NULL);
     }
 
     // experiment parameters
     // ---------------------
     {
-        herr_t status;
-
         if (H5Gcreate1(file_id, "/experiment", 0) < 0) {
             Logger::abort("HDF5 group creation failed.");
         }
@@ -1421,6 +1442,9 @@ void Analyze::run(hid_t output_file_id)
     H5Sclose(h5_condition_splice_sigma_dataspace);
     H5Sclose(h5_splicing_mem_dataspace);
     H5Tclose(h5_splice_param_type);
+    H5Dclose(h5_sample_scaling_dataset);
+    H5Sclose(h5_sample_scaling_dataspace);
+    H5Sclose(h5_sample_scaling_mem_dataspace);
 
     Logger::pop_task(task_name);
     cleanup();
@@ -1607,33 +1631,19 @@ void Analyze::write_output(size_t sample_num)
     hsize_t file_count2[2] = {1, T};
     herr_t status;
 
-    status = H5Sselect_hyperslab(h5_experiment_tgroup_dataspace, H5S_SELECT_SET,
-                                 file_start2, NULL, file_count2, NULL);
-
-    if (status < 0) {
-        Logger::abort("HD5 dataspace selection failed.");
-    }
-
+    H5Sselect_hyperslab_checked(h5_experiment_tgroup_dataspace, H5S_SELECT_SET,
+                                file_start2, NULL, file_count2, NULL);
     std::copy(experiment_tgroup_mu.begin(), experiment_tgroup_mu.end(),
               tgroup_row_data.begin());
-    status = H5Dwrite(h5_experiment_mean_dataset, H5T_NATIVE_FLOAT,
-                      h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
-                      H5P_DEFAULT, &tgroup_row_data.at(0));
-
-    if (status < 0) {
-        Logger::abort("HD5 write operation failed.");
-    }
+    H5Dwrite_checked(h5_experiment_mean_dataset, H5T_NATIVE_FLOAT,
+                              h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
+                              H5P_DEFAULT, &tgroup_row_data.at(0));
 
     std::copy(experiment_tgroup_sigma.begin(), experiment_tgroup_sigma.end(),
               tgroup_row_data.begin());
-    status = H5Dwrite(h5_experiment_sd_dataset, H5T_NATIVE_FLOAT,
-                      h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
-                      H5P_DEFAULT, &tgroup_row_data.at(0));
-
-    if (status < 0) {
-        Logger::abort("HD5 write operation failed.");
-    }
-
+    H5Dwrite_checked(h5_experiment_sd_dataset, H5T_NATIVE_FLOAT,
+                     h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
+                     H5P_DEFAULT, &tgroup_row_data.at(0));
 
     hsize_t file_start3[3] = {sample_num, 0, 0};
     hsize_t file_count3[3] = {1, 1, T};
@@ -1642,53 +1652,45 @@ void Analyze::write_output(size_t sample_num)
 
     for (size_t i = 0; i < C; ++i) {
         file_start3[1] = i;
-        status = H5Sselect_hyperslab(h5_condition_tgroup_dataspace, H5S_SELECT_SET,
-                                     file_start3, NULL, file_count3, NULL);
-        if (status < 0) {
-            Logger::abort("HDF5 hyperslab selection failed.");
-        }
+        H5Sselect_hyperslab_checked(h5_condition_tgroup_dataspace, H5S_SELECT_SET,
+                                    file_start3, NULL, file_count3, NULL);
 
         matrix_row<matrix<double > > mu_row(tgroup_mu, i);
         std::copy(mu_row.begin(), mu_row.end(), tgroup_row_data.begin());
-        status = H5Dwrite(h5_condition_mean_dataset, H5T_NATIVE_FLOAT,
-                          h5_tgroup_row_mem_dataspace, h5_condition_tgroup_dataspace,
-                          H5P_DEFAULT, &tgroup_row_data.at(0));
-        if (status < 0) {
-            Logger::abort("HDF5 write operation failed.");
-        }
+        H5Dwrite_checked(h5_condition_mean_dataset, H5T_NATIVE_FLOAT,
+                                  h5_tgroup_row_mem_dataspace, h5_condition_tgroup_dataspace,
+                                  H5P_DEFAULT, &tgroup_row_data.at(0));
     }
-
 
     hsize_t sample_quant_start[3] = {sample_num, 0, 0};
     hsize_t sample_quant_count[3] = {1, K, N};
 
-    status = H5Sselect_hyperslab(h5_sample_quant_dataspace, H5S_SELECT_SET,
-                                 sample_quant_start, NULL,
-                                 sample_quant_count, NULL);
+    H5Sselect_hyperslab_checked(h5_sample_quant_dataspace, H5S_SELECT_SET,
+                                sample_quant_start, NULL,
+                                sample_quant_count, NULL);
 
-    if (status < 0) {
-        Logger::abort("HDF5 dataspace selection failed.");
-    }
+    H5Dwrite_checked(h5_sample_quant_dataset, H5T_NATIVE_DOUBLE,
+                     h5_sample_quant_mem_dataspace, h5_sample_quant_dataspace,
+                     H5P_DEFAULT, &Q.data()[0]);
 
-    status = H5Dwrite(h5_sample_quant_dataset, H5T_NATIVE_DOUBLE,
-                      h5_sample_quant_mem_dataspace, h5_sample_quant_dataspace,
-                      H5P_DEFAULT, &Q.data()[0]);
-
-    if (status < 0) {
-        Logger::abort("HDF5 write operation failed.");
-    }
+    // write sample scaling factors
+    hsize_t sample_scaling_start[2] = {sample_num, 0};
+    hsize_t sample_scaling_count[2] = {1, K};
+    H5Sselect_hyperslab_checked(h5_sample_scaling_dataspace, H5S_SELECT_SET,
+                                sample_scaling_start, NULL,
+                                sample_scaling_count, NULL);
+    H5Dwrite_checked(h5_sample_scaling_dataset, H5T_NATIVE_DOUBLE,
+                     h5_sample_scaling_mem_dataspace, h5_sample_scaling_dataspace,
+                     H5P_DEFAULT, &scale.at(0));
 
     // write experiment and condition splicing parameters
     hsize_t experiment_splicing_start[2] = {sample_num, 0};
     hsize_t experiment_splicing_count[2] = {1, spliced_tgroup_indexes.size()};
 
-    status = H5Sselect_hyperslab(h5_experiment_splice_dataspace,
-                                 H5S_SELECT_SET,
-                                 experiment_splicing_start, NULL,
-                                 experiment_splicing_count, NULL);
-    if (status < 0) {
-        Logger::abort("HDF5 dataspace selection failed.");
-    }
+    H5Sselect_hyperslab_checked(h5_experiment_splice_dataspace,
+                                H5S_SELECT_SET,
+                                experiment_splicing_start, NULL,
+                                experiment_splicing_count, NULL);
 
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
         float* xs = reinterpret_cast<float*>(h5_splice_work[i].p);
@@ -1697,12 +1699,9 @@ void Analyze::write_output(size_t sample_num)
         }
     }
 
-    status = H5Dwrite(h5_experiment_splice_mu_dataset, h5_splice_param_type,
-                      h5_splicing_mem_dataspace, h5_experiment_splice_dataspace,
-                      H5P_DEFAULT, h5_splice_work);
-    if (status < 0) {
-        Logger::abort("HDF5 write operation failed.");
-    }
+    H5Dwrite_checked(h5_experiment_splice_mu_dataset, h5_splice_param_type,
+                     h5_splicing_mem_dataspace, h5_experiment_splice_dataspace,
+                     H5P_DEFAULT, h5_splice_work);
 
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
         float* xs = reinterpret_cast<float*>(h5_splice_work[i].p);
@@ -1711,12 +1710,9 @@ void Analyze::write_output(size_t sample_num)
         }
     }
 
-    status = H5Dwrite(h5_experiment_splice_sigma_dataset, h5_splice_param_type,
-                      h5_splicing_mem_dataspace, h5_experiment_splice_dataspace,
-                      H5P_DEFAULT, h5_splice_work);
-    if (status < 0) {
-        Logger::abort("HDF5 write operation failed.");
-    }
+    H5Dwrite_checked(h5_experiment_splice_sigma_dataset, h5_splice_param_type,
+                     h5_splicing_mem_dataspace, h5_experiment_splice_dataspace,
+                     H5P_DEFAULT, h5_splice_work);
 
     hsize_t condition_splice_mu_start[3] = {sample_num, 0, 0};
     hsize_t condition_splice_mu_count[3] = {1, 1, spliced_tgroup_indexes.size()};
@@ -1730,21 +1726,14 @@ void Analyze::write_output(size_t sample_num)
         }
 
         condition_splice_mu_start[1] = i;
-        status = H5Sselect_hyperslab(h5_condition_splice_mu_dataspace,
-                                     H5S_SELECT_SET,
-                                     condition_splice_mu_start, NULL,
-                                     condition_splice_mu_count, NULL);
-        if (status < 0) {
-            Logger::abort("HDF5 dataspace selection failed.");
-        }
+        H5Sselect_hyperslab_checked(h5_condition_splice_mu_dataspace,
+                                    H5S_SELECT_SET,
+                                    condition_splice_mu_start, NULL,
+                                    condition_splice_mu_count, NULL);
 
-        status = H5Dwrite(h5_condition_splice_mu_dataset, h5_splice_param_type,
-                          h5_splicing_mem_dataspace, h5_condition_splice_mu_dataspace,
-                          H5P_DEFAULT, h5_splice_work);
-
-        if (status < 0) {
-            Logger::abort("HDF5 write operation failed.");
-        }
+        H5Dwrite_checked(h5_condition_splice_mu_dataset, h5_splice_param_type,
+                         h5_splicing_mem_dataspace, h5_condition_splice_mu_dataspace,
+                         H5P_DEFAULT, h5_splice_work);
     }
 
     hsize_t condition_splice_sigma_start[2] = {sample_num, 0};
@@ -1757,25 +1746,25 @@ void Analyze::write_output(size_t sample_num)
         }
     }
 
-    status = H5Sselect_hyperslab(h5_condition_splice_sigma_dataspace,
-                                 H5S_SELECT_SET,
-                                 condition_splice_sigma_start, NULL,
-                                 condition_splice_sigma_count, NULL);
-    if (status < 0) {
-        Logger::abort("HDF5 dataspace selection failed.");
-    }
+    H5Sselect_hyperslab_checked(h5_condition_splice_sigma_dataspace,
+                                H5S_SELECT_SET,
+                                condition_splice_sigma_start, NULL,
+                                condition_splice_sigma_count, NULL);
 
-    status = H5Dwrite(h5_condition_splice_sigma_dataset, h5_splice_param_type,
-                      h5_splicing_mem_dataspace, h5_condition_splice_sigma_dataspace,
-                      H5P_DEFAULT, h5_splice_work);
-    if (status < 0) {
-        Logger::abort("HDF5 write operation failed.");
-    }
+    H5Dwrite_checked(h5_condition_splice_sigma_dataset, h5_splice_param_type,
+                     h5_splicing_mem_dataspace, h5_condition_splice_sigma_dataspace,
+                     H5P_DEFAULT, h5_splice_work);
 }
 
 
+/* TODO: We need to think carefully about */
 void Analyze::compute_ts_scaling()
 {
+    size_t effective_size =
+        std::min<size_t>(N, constants::sample_scaling_truncation);
+    size_t normalization_point_idx =
+        N - effective_size + constants::sample_scaling_quantile * effective_size;
+
     for (unsigned int i = 0; i < K; ++i) {
         matrix_row<matrix<double> > row(Q, i);
 
@@ -1786,7 +1775,7 @@ void Analyze::compute_ts_scaling()
         // normalize according to an upper quantile
         std::copy(row.begin(), row.end(), scale_work.begin());
         std::sort(scale_work.begin(), scale_work.end());
-        scale[i] = scale_work[scale_work.size() * 0.85];
+        scale[i] = scale_work[normalization_point_idx];
     }
 
     for (int i = (int) K - 1; i >= 0; --i) {

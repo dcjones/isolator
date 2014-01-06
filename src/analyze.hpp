@@ -218,6 +218,8 @@ class Analyze
         hid_t h5_condition_splice_mu_dataspace;
         hid_t h5_condition_splice_sigma_dataspace;
         hid_t h5_splicing_mem_dataspace;
+        hid_t h5_sample_scaling_dataspace;
+        hid_t h5_sample_scaling_mem_dataspace;
 
         // datasets
         hid_t h5_experiment_mean_dataset;
@@ -228,6 +230,7 @@ class Analyze
         hid_t h5_experiment_splice_sigma_dataset;
         hid_t h5_condition_splice_mu_dataset;
         hid_t h5_condition_splice_sigma_dataset;
+        hid_t h5_sample_scaling_dataset;
 
         // variable length array for splicing paramaters
         hid_t h5_splice_param_type;

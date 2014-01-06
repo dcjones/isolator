@@ -165,6 +165,15 @@ namespace constants
      * explain tersely....
      */
     extern unsigned int min_tss_group_isoforms_conditioning;
+
+    /* Normalize to this quantile to compare expression fold change. */
+    extern double sample_scaling_quantile;
+
+    /* Before choosing the normalization point, discard all but the n most
+     * abundant transcripts. This is to account for very large gene annotation
+     * sets containing many transcripts with very low expression, which could
+     * bias things. */
+    extern size_t sample_scaling_truncation;
 }
 
 #endif
