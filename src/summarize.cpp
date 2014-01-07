@@ -55,7 +55,19 @@ Summarize::Summarize(const char* filename)
 
     transcript_ids.reserve(N);
     for (size_t i = 0; i < N; ++i) {
-        transcript_ids.push_back(std::string(string_data[i]));
+        transcript_ids.push_back(TranscriptID(std::string(string_data[i])));
+    }
+
+    H5Dvlen_reclaim(datatype, dataspace, H5P_DEFAULT, string_data);
+    H5Dclose(dataset);
+
+    // read gene_name dataset
+    dataset = H5Dopen2_checked(h5_file, "/gene_name", H5P_DEFAULT);
+    H5Dread_checked(dataset, datatype, H5S_ALL, H5S_ALL,
+                    H5P_DEFAULT, string_data);
+
+    for (size_t i = 0; i < N; ++i) {
+        gene_names.push_back(GeneName(std::string(string_data[i])));
     }
 
     H5Dvlen_reclaim(datatype, dataspace, H5P_DEFAULT, string_data);
@@ -68,7 +80,7 @@ Summarize::Summarize(const char* filename)
 
     gene_ids.reserve(N);
     for (size_t i = 0; i < N; ++i) {
-        gene_ids.push_back(std::string(string_data[i]));
+        gene_ids.push_back(GeneID(std::string(string_data[i])));
     }
 
     H5Dvlen_reclaim(datatype, dataspace, H5P_DEFAULT, string_data);
@@ -113,6 +125,16 @@ Summarize::Summarize(const char* filename)
     H5Dclose(dataset);
     H5Sclose(dataspace);
 
+    num_samples = dims3[0];
+
+    // read scale
+    dataset = H5Dopen2_checked(h5_file, "/sample_scaling", H5P_DEFAULT);
+
+    scale.resize(num_samples, K);
+    H5Dread_checked(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
+                    H5P_DEFAULT, &scale.data()[0]);
+
+    H5Dclose(dataset);
 }
 
 
@@ -286,8 +308,13 @@ void Summarize::median_experiment_tgroup_sd(FILE* output)
 }
 
 
-void Summarize::median_transcript_expression(matrix<float>& Q)
+void Summarize::median_ci_transcript_expression(
+        matrix<float>* med, matrix<float>* lower, matrix<float>* upper,
+        double interval, bool unnormalized)
 {
+    double lower_quantile = 0.5 - interval/2;
+    double upper_quantile = 0.5 + interval/2;
+
     hid_t dataset = H5Dopen2_checked(h5_file, "/transcript_quantification", H5P_DEFAULT);
 
     hid_t dataspace = H5Dget_space(dataset);
@@ -317,11 +344,24 @@ void Summarize::median_transcript_expression(matrix<float>& Q)
         H5Dread_checked(dataset, H5T_NATIVE_FLOAT, mem_dataspace,
                         dataspace, H5P_DEFAULT, &Qi.data()[0]);
 
+        if (unnormalized) {
+            for (size_t j = 0; j < num_samples; ++j) {
+                for (size_t k = 0; k < N; ++k) {
+                    Qi(j, k) /= scale(j, i);
+                }
+            }
+        }
+
         for (size_t j = 0; j < N; ++j) {
             matrix_column<matrix<float> > col(Qi, j);
             std::sort(col.begin(), col.end());
-            float med = col[col.size() / 2];
-            Q(i, j) = med;
+            (*med)(i, j) = col[col.size() / 2];
+            if (lower) {
+                (*lower)(i, j) = col[lround((col.size() - 1) * lower_quantile)];
+            }
+            if (upper) {
+                (*upper)(i, j) = col[lround((col.size() - 1) * upper_quantile)];
+            }
         }
     }
 
@@ -331,61 +371,202 @@ void Summarize::median_transcript_expression(matrix<float>& Q)
 }
 
 
-void Summarize::median_transcript_expression(FILE* output)
+void Summarize::median_ci_gene_expression(
+        matrix<float>* med, matrix<float>* lower, matrix<float>* upper,
+        double interval, bool unnormalized)
 {
-    matrix<float> Q(K, N);
-    median_transcript_expression(Q);
+    double lower_quantile = 0.5 - interval/2;
+    double upper_quantile = 0.5 + interval/2;
 
-    fprintf(output, "transcript_id\tgene_id");
-    for (unsigned int i = 0; i < K; ++i) {
-        fprintf(output, "\tsample_%u", i);
-    }
-    fputc('\n', output);
+    hid_t dataset = H5Dopen2_checked(h5_file, "/transcript_quantification", H5P_DEFAULT);
 
-    for (size_t i = 0; i < N; ++i) {
-        fprintf(output, "%s\t%s",
-                transcript_ids[i].c_str(),
-                gene_ids[i].c_str());
-        for (size_t j = 0; j < K; ++j) {
-            fprintf(output, "\t%e", Q(j, i));
-        }
-        fputc('\n', output);
-    }
-}
+    hid_t dataspace = H5Dget_space(dataset);
+    hsize_t dims[3]; // dims are num_samples, K, N
+    H5Sget_simple_extent_dims(dataspace, dims, NULL);
+    size_t num_samples = dims[0];
+    size_t K = dims[1];
 
+    hsize_t file_dataspace_start[3] = {0, 0, 0};
+    hsize_t file_dataspace_dims[3] = {num_samples, 1, N};
 
-void Summarize::median_gene_expression(FILE* output)
-{
-    matrix<float> Q(K, N);
-    median_transcript_expression(Q);
+    hsize_t mem_dataspace_dims[2] = {num_samples, N};
+    hsize_t mem_dataspace_start[2] = {0, 0};
+    hid_t mem_dataspace = H5Screate_simple(2, mem_dataspace_dims, NULL);
+    H5Sselect_hyperslab(mem_dataspace, H5S_SELECT_SET, mem_dataspace_start,
+                        NULL, mem_dataspace_dims, NULL);
+
+    matrix<float> Qi(num_samples, N);
+    std::vector<float> work(num_samples);
 
     std::map<std::string, std::vector<size_t> > gid_to_tids;
+    typedef std::pair<std::string, std::vector<size_t> > item_t;
     for (size_t i = 0; i < N; ++i) {
         gid_to_tids[gene_ids[i]].push_back(i);
     }
 
-    fprintf(output, "gene_id");
+    for (size_t i = 0; i < K; ++i) {
+        file_dataspace_start[1] = i;
+
+        H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
+                            file_dataspace_start, NULL,
+                            file_dataspace_dims, NULL);
+
+        H5Dread_checked(dataset, H5T_NATIVE_FLOAT, mem_dataspace,
+                        dataspace, H5P_DEFAULT, &Qi.data()[0]);
+
+        if (unnormalized) {
+            for (size_t j = 0; j < num_samples; ++j) {
+                for (size_t k = 0; k < N; ++k) {
+                    Qi(j, k) /= scale(j, i);
+                }
+            }
+        }
+
+        size_t j = 0;
+        BOOST_FOREACH (const item_t& item, gid_to_tids) {
+            std::fill(work.begin(), work.end(), 0.0);
+            BOOST_FOREACH (size_t tid, item.second) {
+                for (size_t k = 0; k < num_samples; ++k) {
+                    work[k] += Qi(k, tid);
+                }
+            }
+
+            std::sort(work.begin(), work.end());
+            (*med)(i, j) = work[num_samples/2];
+            if (lower) {
+                (*lower)(i, j) = work[lround((num_samples - 1) * lower_quantile)];
+            }
+            if (upper) {
+                (*upper)(i, j) = work[lround((num_samples - 1) * upper_quantile)];
+            }
+            ++j;
+        }
+    }
+
+    H5Sclose(mem_dataspace);
+    H5Sclose(dataspace);
+    H5Dclose(dataset);
+}
+
+
+void Summarize::median_transcript_expression(FILE* output,
+                                             double credible_interval,
+                                             bool unnormalized)
+{
+    bool print_credible_interval = !isnan(credible_interval);
+
+    matrix<float> Q(K, N);
+    matrix<float> lower;
+    matrix<float> upper;
+
+    if (print_credible_interval) {
+        lower.resize(K, N);
+        upper.resize(K, N);
+        median_ci_transcript_expression(&Q, &lower, &upper,
+                                        credible_interval, unnormalized);
+    }
+    else {
+        median_ci_transcript_expression(&Q, NULL, NULL, credible_interval,
+                                        unnormalized);
+    }
+
+    fprintf(output, "gene_name\tgene_id\ttranscript_id\t");
     for (unsigned int i = 0; i < K; ++i) {
-        fprintf(output, "\tsample_%u", i);
+        fprintf(output,
+                unnormalized ? "\tsample%u_tpm" : "\tsample%u_adjusted_tpm",
+                i+1);
+        if (print_credible_interval) {
+            fprintf(output,
+                    unnormalized ?
+                        "\tsample%u_tpm_lower\tsample%u_tpm_upper" :
+                        "\tsample%u_adjusted_tpm_lower\tsample%u_adjusted_tpm_upper",
+                    i+1, i+1);
+        }
     }
     fputc('\n', output);
 
-    boost::numeric::ublas::vector<float> margin(K);
-
-    typedef std::pair<std::string, std::vector<size_t> > item_t;
-    BOOST_FOREACH (const item_t& item, gid_to_tids) {
-        fprintf(output, "%s", item.first.c_str());
-        std::fill(margin.begin(), margin.end(), 0.0);
-        BOOST_FOREACH (size_t tid, item.second) {
-            margin += matrix_column<matrix<float> >(Q, tid);
-        }
+    for (size_t i = 0; i < N; ++i) {
+        fprintf(output, "%s\t%s\t%s",
+                gene_names[i].get().c_str(),
+                gene_ids[i].get().c_str(),
+                transcript_ids[i].get().c_str());
 
         for (size_t j = 0; j < K; ++j) {
-            fprintf(output, "\t%e", margin[j]);
+            if (print_credible_interval) {
+                fprintf(output, "\t%e\t%e\t%e",
+                        1e6 * Q(j, i), 1e6 * lower(j, i), 1e6 * upper(j, i));
+            }
+            else {
+                fprintf(output, "\t%e", 1e6 * Q(j, i));
+            }
         }
         fputc('\n', output);
     }
 }
+
+
+void Summarize::median_gene_expression(FILE* output,
+                                       double credible_interval,
+                                       bool unnormalized)
+{
+    bool print_credible_interval = !isnan(credible_interval);
+
+    std::map<GeneID, std::vector<size_t> > gid_to_tids;
+    std::map<GeneID, GeneName> gid_to_gene_name;
+    typedef std::pair<GeneID, std::vector<size_t> > item_t;
+    for (size_t i = 0; i < N; ++i) {
+        gid_to_tids[gene_ids[i]].push_back(i);
+        gid_to_gene_name[gene_ids[i]] = gene_names[i];
+    }
+    size_t num_genes = gid_to_tids.size();
+
+    matrix<float> med(K, num_genes);
+    matrix<float> lower;
+    matrix<float> upper;
+
+    if (print_credible_interval) {
+        lower.resize(K, num_genes);
+        upper.resize(K, num_genes);
+        median_ci_gene_expression(&med, &lower, &upper,
+                                  credible_interval, unnormalized);
+    }
+    else {
+        median_ci_gene_expression(&med, NULL, NULL, credible_interval,
+                                  unnormalized);
+    }
+
+    fprintf(output, "gene_name\tgene_id\ttranscript_ids\t");
+
+
+    size_t i = 0;
+    BOOST_FOREACH (const item_t& gid_tids, gid_to_tids) {
+        const GeneID& gene_id = gid_tids.first;
+        const std::vector<size_t>& tids = gid_tids.second;
+        const GeneName& gene_name = gid_to_gene_name[gene_id];
+
+        fprintf(output, "%s\t%s\t%s",
+                gene_name.get().c_str(),
+                gene_id.get().c_str(),
+                transcript_ids[tids[0]].get().c_str());
+
+        for (size_t j = 1; j < tids.size(); ++j) {
+            fprintf(output, ",%s", transcript_ids[tids[j]].get().c_str());
+        }
+
+        for (size_t j = 0; j < K; ++j) {
+            if (print_credible_interval) {
+                fprintf(output, "\t%e\t%e\t%e",
+                        1e6 * med(j, i), 1e6 * lower(j, i), 1e6 * upper(j, i));
+            }
+            else {
+                fprintf(output, "\t%e", 1e6 * med(j, i));
+            }
+        }
+
+        ++i;
+    }
+}
+
 
 void Summarize::tgroup_fold_change(FILE* output,
                                    unsigned int condition_a,
@@ -610,10 +791,10 @@ void Summarize::condition_splicing(FILE* output)
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
         size_t tgroup = spliced_tgroup_indexes[i];
         for (size_t j = 0; j < tgroup_tids[tgroup].size(); ++j) {
-            fprintf(output, "%s\t", transcript_ids[tgroup_tids[tgroup][j]].c_str());
+            fprintf(output, "%s\t", transcript_ids[tgroup_tids[tgroup][j]].get().c_str());
             for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                 if (k != 0) fputc(',', output);
-                fprintf(output, "%s", transcript_ids[tgroup_tids[tgroup][k]].c_str());
+                fprintf(output, "%s", transcript_ids[tgroup_tids[tgroup][k]].get().c_str());
             }
 
             for (size_t k = 0; k < C; ++k) {
@@ -672,7 +853,7 @@ void Summarize::condition_pairwise_splicing(FILE* output)
 
                     std::sort(work.begin(), work.end());
                     fprintf(output, "%s\t%s\t%lu\t%lu\t%f\t%f\t%f\n",
-                            transcript_ids[tid].c_str(), gene_ids[tid].c_str(),
+                            transcript_ids[tid].get().c_str(), gene_ids[tid].get().c_str(),
                             cond_a + 1, cond_b + 1,
                             work[(int)(lower_quantile * num_samples)],
                             work[num_samples/2],
@@ -710,7 +891,7 @@ void Summarize::expression_samples(FILE* output)
     fputc('\n', output);
 
     for (size_t i = 0; i < N; ++i) {
-        fputs(transcript_ids[i].c_str(), output);
+        fputs(transcript_ids[i].get().c_str(), output);
         for (size_t j = 0; j < K; ++j) {
             fputc('\t', output);
             for (size_t k = 0; k < num_samples; ++k) {
@@ -956,7 +1137,7 @@ void Summarize::cassette_exon_pairwise_splicing(FILE* output)
                         fputc(',', output);
                     }
                     else first = false;
-                    fputs(transcript_ids[tid].c_str(), output);
+                    fputs(transcript_ids[tid].get().c_str(), output);
                 }
                 fputc('\t', output);
 
@@ -966,7 +1147,7 @@ void Summarize::cassette_exon_pairwise_splicing(FILE* output)
                         fputc(',', output);
                     }
                     else first = false;
-                    fputs(transcript_ids[tid].c_str(), output);
+                    fputs(transcript_ids[tid].get().c_str(), output);
                 }
                 fputc('\t', output);
 
@@ -1048,13 +1229,13 @@ void Summarize::read_metadata(IsolatorMetadata& metadata)
 }
 
 
-const std::vector<std::string>& Summarize::get_transcript_ids()
+const std::vector<TranscriptID>& Summarize::get_transcript_ids()
 {
     return transcript_ids;
 }
 
 
-const std::vector<std::string>& Summarize::get_gene_ids()
+const std::vector<GeneID>& Summarize::get_gene_ids()
 {
     return gene_ids;
 }

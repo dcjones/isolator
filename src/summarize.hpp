@@ -36,10 +36,16 @@ class Summarize
 
         // pre-baked summarizations
         void median_condition_tgroup_expression(FILE* output);
+
         void median_experiment_tgroup_sd(FILE* output);
 
-        void median_transcript_expression(FILE* output);
-        void median_gene_expression(FILE* output);
+        void median_transcript_expression(FILE* output,
+                                          double credible_interval,
+                                          bool unnormalized);
+
+        void median_gene_expression(FILE* output,
+                                    double credible_interval,
+                                    bool unnormalized);
 
         void tgroup_fold_change(FILE* output,
                                 unsigned int condition_a,
@@ -52,13 +58,22 @@ class Summarize
 
         void read_metadata(IsolatorMetadata& metadata);
 
-        const std::vector<std::string>& get_transcript_ids();
-        const std::vector<std::string>& get_gene_ids();
+        const std::vector<TranscriptID>& get_transcript_ids();
+        const std::vector<GeneID>& get_gene_ids();
         const std::vector<unsigned int>& get_tgroups();
 
     private:
-        void median_transcript_expression(
-                boost::numeric::ublas::matrix<float>& Q);
+        void median_ci_transcript_expression(
+                boost::numeric::ublas::matrix<float>* med,
+                boost::numeric::ublas::matrix<float>* lower,
+                boost::numeric::ublas::matrix<float>* upper,
+                double credible_interval, bool unnormalized);
+
+        void median_ci_gene_expression(
+                boost::numeric::ublas::matrix<float>* med,
+                boost::numeric::ublas::matrix<float>* lower,
+                boost::numeric::ublas::matrix<float>* upper,
+                double credible_interval, bool unnormalized);
 
         void condition_splicing(std::vector<boost::multi_array<float, 3> >& output);
 
@@ -71,6 +86,9 @@ class Summarize
 
         hid_t h5_file;
 
+        // number of sampler iterations
+        size_t num_samples;
+
         // number of samples
         size_t K;
 
@@ -81,10 +99,13 @@ class Summarize
         size_t T;
 
         // transcript_id indexed by tid
-        std::vector<std::string> transcript_ids;
+        std::vector<TranscriptID> transcript_ids;
+
+        // gene_name indexed by tid
+        std::vector<GeneName> gene_names;
 
         // gene_id indexed by tid
-        std::vector<std::string> gene_ids;
+        std::vector<GeneID> gene_ids;
 
         // tgroup indexed by tid
         std::vector<unsigned int> tgroup;
@@ -94,6 +115,9 @@ class Summarize
 
         // indexes of tgroups with multiple transcripts
         std::vector<unsigned int> spliced_tgroup_indexes;
+
+        // normalization factor indexed by sample_num, sample
+        boost::numeric::ublas::matrix<double> scale;
 };
 
 

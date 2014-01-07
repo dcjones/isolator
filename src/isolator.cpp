@@ -129,11 +129,11 @@ int isolator_describe(int argc, char* argv[])
     IsolatorMetadata metadata;
     summarize.read_metadata(metadata);
 
-    const std::vector<std::string>& transcript_ids = summarize.get_transcript_ids();
-    const std::vector<std::string>& gene_ids = summarize.get_gene_ids();
+    const std::vector<TranscriptID>& transcript_ids = summarize.get_transcript_ids();
+    const std::vector<GeneID>& gene_ids = summarize.get_gene_ids();
     const std::vector<unsigned int>& tgroups = summarize.get_tgroups();
 
-    std::set<std::string> unique_gene_ids;
+    std::set<GeneID> unique_gene_ids;
     unique_gene_ids.insert(gene_ids.begin(), gene_ids.end());
 
     std::set<unsigned int> unique_tgroups;
@@ -186,7 +186,7 @@ int isolator_describe(int argc, char* argv[])
 
 void print_summarize_usage(FILE* fout)
 {
-    fprintf(fout, "Usage: isolator summarize [options] analyze_output.h5\n");
+    fprintf(fout, "Usage: isolator summarize strategy [options] analyze_output.h5\n");
 }
 
 
@@ -199,11 +199,26 @@ void print_summarize_help(FILE* fout)
             "-v, --verbose             Print a bunch of information useful mainly for debugging.\n"
             "-o, --out=FILE            Output summary to the given file. (default: standard out).\n"
             "-l, --list                List summarization strategies.\n"
-            "-s, --strategy            Summarization strategy.\n"
             "-a, --condition_a         First condition for pairwise comparisons.\n"
             "-b, --condition_b         First condition for pairwise comparisons.\n"
             "\n"
             "See 'isolator help summarize' for more.\n");
+}
+
+
+void print_summarize_strategies(FILE* fout)
+{
+    fprintf(fout,
+           "Available strategies:\n"
+           "  median_transcript_expression\n"
+           "  median_gene_expression\n"
+           "  condition_splicing\n"
+           "  condition_pairwise_splicing\n"
+           "  condition_tgroup_mean\n"
+           "  experiment_tgroup_sd\n"
+           "  tgroup_fold_change\n"
+           "  expression_samples\n"
+           "  cassette_exons\n");
 }
 
 
@@ -213,13 +228,16 @@ int isolator_summarize(int argc, char* argv[])
 
     static struct option long_options[] =
     {
-        {"help",        no_argument,       NULL, 'h'},
-        {"verbose",     no_argument,       NULL, 'v'},
-        {"out",         required_argument, NULL, 'o'},
-        {"list",        no_argument,       NULL, 'l'},
-        {"strategy",    required_argument, NULL, 's'},
-        {"condition_a", required_argument, NULL, 'a'},
-        {"condition_b", required_argument, NULL, 'b'},
+        {"help",         no_argument,       NULL, 'h'},
+        {"verbose",      no_argument,       NULL, 'v'},
+        {"out",          required_argument, NULL, 'o'},
+        {"list",         no_argument,       NULL, 'l'},
+        {"strategy",     required_argument, NULL, 's'},
+        {"condition_a",  required_argument, NULL, 'a'},
+        {"condition_b",  required_argument, NULL, 'b'},
+        {"unnormalized", no_argument,       NULL, 'u'},
+        {"credible",     required_argument, NULL, 'c'},
+        {"effect-size",  required_argument, NULL, 'e'},
         {0, 0, 0, 0}
     };
 
@@ -229,7 +247,9 @@ int isolator_summarize(int argc, char* argv[])
 
     int opt;
     int opt_idx;
-    const char* strategy = "median_transcript_expression";
+    double credible_interval = NAN;
+    double minimum_effect_size = 0.0;
+    bool unnormalized = false;
 
     while (true) {
         opt = getopt_long(argc, argv, "hvo:s:l", long_options, &opt_idx);
@@ -250,21 +270,8 @@ int isolator_summarize(int argc, char* argv[])
                 break;
 
             case 'l':
-                printf("Available strategies:\n"
-                       "  median_transcript_expression\n"
-                       "  median_gene_expression\n"
-                       "  condition_splicing\n"
-                       "  condition_pairwise_splicing\n"
-                       "  condition_tgroup_mean\n"
-                       "  experiment_tgroup_sd\n"
-                       "  tgroup_fold_change\n"
-                       "  expression_samples\n"
-                       "  cassette_exons\n");
+                print_summarize_strategies(stdout);
                 return 0;
-
-            case 's':
-                strategy = optarg;
-                break;
 
             case 'a':
                 condition_a = strtoul(optarg, NULL, 10);
@@ -272,6 +279,18 @@ int isolator_summarize(int argc, char* argv[])
 
             case 'b':
                 condition_b = strtoul(optarg, NULL, 10);
+                break;
+
+            case 'u':
+                unnormalized = true;
+                break;
+
+            case 'c':
+                credible_interval = atof(optarg);
+                break;
+
+            case 'e':
+                minimum_effect_size = atof(optarg);
                 break;
 
             case '?':
@@ -284,30 +303,61 @@ int isolator_summarize(int argc, char* argv[])
         }
     }
 
-    /* no positional argumens */
-    if (optind == argc) {
+    /* too few positional argumens */
+    if (optind + 1 >= argc) {
+        fprintf(stderr, "Too few arguments.\n\n");
         print_summarize_usage(stdout);
         return 0;
     }
 
     /* too many */
-    else if (optind + 1 > argc) {
+    else if (optind + 2 < argc) {
         fprintf(stderr, "Too many arguments.\n\n");
         print_summarize_usage(stderr);
         return 1;
     }
 
-    FILE* out_f = stdout;
+    FILE* out_file = stdout;
     if (out_fn) {
-        out_f = fopen(out_fn, "w");
-        if (out_f == NULL) {
+        out_file = fopen(out_fn, "w");
+        if (out_file == NULL) {
             Logger::abort("Can't open file %s for writing.\n", out_fn);
         }
     }
 
-    const char* in_fn = argv[optind];
+    char* strategy = argv[optind];
+    const char* in_fn = argv[optind+1];
+
+    // strategies are not case sensitive
+    for (char* c = strategy; *c; ++c) {
+        *c = tolower(*c);
+    }
+
+    /* TODO: Plan for summarization strategies.
+     *
+     *     transcript_expression
+     *     gene_expression
+     *     tgroup_expression
+     *
+     *     differential_transcription
+     *     differential_splicing
+     */
+
 
     Summarize summarize(in_fn);
+
+
+    if (strcmp(strategy, "transcript_expression")) {
+        summarize.median_transcript_expression(out_file, credible_interval, 
+                                               unnormalized);
+    }
+    else if (strcmp(strategy, "gene_expression")) {
+        summarize.median_gene_expression(out_file, credible_interval,
+                                         unnormalized);
+    }
+
+
+#if 0
     if (strcmp(strategy, "median_transcript_expression") == 0) {
         summarize.median_transcript_expression(out_f);
     }
@@ -335,11 +385,15 @@ int isolator_summarize(int argc, char* argv[])
     else if (strcmp(strategy, "cassette_exons") == 0) {
         summarize.cassette_exon_pairwise_splicing(out_f);
     }
+#endif
+
     else {
-        Logger::abort("No such summarization strategy: %s", strategy);
+        fprintf(stderr, "No such summarization strategy: %s\n\n", strategy);
+        print_summarize_strategies(stderr);
+        return EXIT_FAILURE;
     }
 
-    fclose(out_f);
+    if (out_file != stdout) fclose(out_file);
 
     Logger::end();
     return EXIT_SUCCESS;
