@@ -108,6 +108,8 @@ class Sampler
             std::vector<double> splice_sigma;
         } hp;
 
+        unsigned long num_frags() const;
+
     private:
         // Run a single multiread sampler round.
         void sample_multireads();

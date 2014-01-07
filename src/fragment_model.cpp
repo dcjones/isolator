@@ -708,7 +708,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
         delete [] frag_len_vals;
         delete [] frag_len_lens;
 
-        Logger::info("Fragment length distribution estimated.");
         Logger::info("Median fragment-length: %d", (int) frag_len_dist->median());
     }
     else {

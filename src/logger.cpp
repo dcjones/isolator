@@ -207,8 +207,7 @@ void Logger::flush()
     if (!log_queue.empty()) {
         t = time(NULL);
         localtime_r(&t, &ts);
-        // RFC-2822 date
-        strftime(time_str, 200, "%a, %d %b %Y %T %z", &ts);
+        strftime(time_str, 200, "%T", &ts);
     }
 
     while (!log_queue.empty()) {

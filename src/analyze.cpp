@@ -751,11 +751,9 @@ Analyze::Analyze(size_t burnin,
         }
     }
 
-    Logger::info("Number of transcripts: %u", N);
-    Logger::info("Number of transcription groups: %u", T);
-    Logger::info("Number of tgroup with multiple isoforms: %u",
+    Logger::debug("Number of transcription groups: %u", T);
+    Logger::debug("Number of tgroups with multiple isoforms: %u",
                   spliced_tgroup_indexes.size());
-
 }
 
 
@@ -1057,7 +1055,7 @@ void Analyze::setup_output(hid_t file_id)
 
         hsize_t sample_scaling_mem_dims[1] = {K};
         h5_sample_scaling_mem_dataspace =
-            H5Screate_simple(2, sample_scaling_mem_dims, NULL);
+            H5Screate_simple(1, sample_scaling_mem_dims, NULL);
 
         hsize_t sample_scaling_mem_start[1] = {0};
         H5Sselect_hyperslab_checked(h5_sample_scaling_dataspace, H5S_SELECT_SET,
@@ -1290,7 +1288,6 @@ void Analyze::run(hid_t output_file_id)
                   condition_splice_sigma[j].end(), 1.0);
         flattened_sigma_size += condition_splice_sigma[j].size() - 1;
     }
-    Logger::info("flattened_sigma_size = %lu", (unsigned long) flattened_sigma_size);
 
     condition_splice_sigma_work.resize(flattened_sigma_size);
 
@@ -1315,6 +1312,13 @@ void Analyze::run(hid_t output_file_id)
     BOOST_FOREACH (Sampler* qsampler, qsamplers) {
         qsampler->start();
     }
+
+    unsigned long total_frag_count = 0;
+    BOOST_FOREACH (Sampler* qsampler, qsamplers) {
+        total_frag_count += qsampler->num_frags();
+    }
+    Logger::info("Estimating expression of %lu trancripts in %lu samples with %lu fragments.",
+                 N, K, total_frag_count);
 
     qsampler_threads.resize(constants::num_threads);
     BOOST_FOREACH (SamplerTickThread*& thread, qsampler_threads) {

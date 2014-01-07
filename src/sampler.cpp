@@ -2313,7 +2313,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
         num_components = component_label.size();
     }
 
-    Logger::info("Components: %lu", (unsigned long) num_components);
+    Logger::debug("Components: %lu", (unsigned long) num_components);
 
     /* Label transcript components */
     component_tgroups.resize(num_components);
@@ -2755,5 +2755,11 @@ void Sampler::init_frag_probs()
             }
         }
     }
+}
+
+
+unsigned long Sampler::num_frags() const
+{
+    return lround(total_frag_count);
 }
 

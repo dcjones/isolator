@@ -436,7 +436,6 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance)
     }
 
     Logger::pop_task(task_name);
-    Logger::info("Transcripts: %lu", (unsigned long) size());
 }
 
 

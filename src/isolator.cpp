@@ -506,7 +506,7 @@ static void write_cassette_exon_data(hid_t file_id, TranscriptSet& ts)
     std::vector<std::vector<unsigned int> > including_tids, excluding_tids;
     ts.get_cassette_exons(cassette_exons, including_tids, excluding_tids);
     size_t n = cassette_exons.size();
-    Logger::info("%lu cassette exons", (unsigned long) n);
+    Logger::debug("%lu cassette exons", (unsigned long) n);
 
     herr_t status;
 
@@ -835,7 +835,7 @@ int isolator_analyze(int argc, char* argv[])
             analyze.add_sample(condition_name, fn);
             metadata.sample_filenames.push_back(fn);
             metadata.sample_conditions.push_back(condition_name);
-            Logger::info("Adding '%s' to condition '%s'", fn, condition_name);
+            Logger::debug("Adding '%s' to condition '%s'", fn, condition_name);
         }
 
         ++condition_num;
