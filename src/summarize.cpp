@@ -619,7 +619,7 @@ void Summarize::differential_transcription(FILE* output, double credible_interva
             "gene_names\tgene_ids\ttranscript_ids\tcondition_a\tcondition_b\t"
             "down_pr\tup_pr\tmedian_log2_fold_change");
     if (print_credible_interval) {
-        fprintf(output, "\tlog2_fold_change_lower\tlog2_fold_change_upper");
+        fprintf(output, "\tlower_log2_fold_change\tupper_log2_fold_change");
     }
     fputc('\n', output);
 
@@ -637,10 +637,9 @@ void Summarize::differential_transcription(FILE* output, double credible_interva
 
     size_t C = dims[1];
     fprintf(stderr, "C = %u\n", (unsigned int) C);
-    unsigned int condition_a, condition_b;
-    for (condition_a = 0; condition_a < C - 1; ++condition_a) {
+    for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
         read_condition_tgroup_mean(condition_a, condition_a_data);
-        for (condition_b = condition_a + 1; condition_b < C; ++condition_b) {
+        for (unsigned int condition_b = condition_a + 1; condition_b < C; ++condition_b) {
             read_condition_tgroup_mean(condition_b, condition_b_data);
 
             for (size_t i = 0; i < T; ++i) {
@@ -714,7 +713,69 @@ void Summarize::differential_transcription(FILE* output, double credible_interva
 void Summarize::differential_splicing(FILE* output, double credible_interval,
                                       double effect_size)
 {
-    // TODO
+    bool print_credible_interval = !isnan(credible_interval);
+
+    double lower_quantile = 0.5 - credible_interval/2;
+    double upper_quantile = 0.5 + credible_interval/2;
+
+    typedef boost::multi_array<float, 3> marray_t;
+    // indexed by spliced tgroup
+    std::vector<marray_t> splicing(spliced_tgroup_indexes.size());
+
+    condition_splicing(splicing);
+    size_t num_samples = 0;
+    size_t C = 0;
+    if (splicing.size() > 0) {
+        C = splicing[0].shape()[1];
+        num_samples = splicing[0].shape()[0];
+    }
+
+    std::vector<float> work(num_samples);
+
+    fprintf(output,
+            "gene_name\tgene_id\ttranscript_id\tcondition_a\tcondition_b\t"
+            "down_pr\tup-pr\tmedian_log2_fold_change");
+    if (print_credible_interval) {
+        fprintf(output, "\tlower_log2_fold_change\tupper_log2_fold_change");
+    }
+    fputc('\n', output);
+
+    for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
+        for (unsigned int condition_b = condition_a + 1; condition_b < C; ++condition_b) {
+            for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+                size_t tgroup = spliced_tgroup_indexes[i];
+                for (size_t j = 0; j < tgroup_tids[tgroup].size(); ++j) {
+                    unsigned long tid = tgroup_tids[tgroup][j];
+                    double down_pr = 0, up_pr = 0;
+                    for (size_t l = 0; l < num_samples; ++l) {
+                        work[l] = log2(splicing[i][l][condition_a][j]) -
+                                  log2(splicing[i][l][condition_b][j]);
+                        if (fabs(work[l]) >= effect_size) {
+                            if (work[l] <= 0) down_pr += 1;
+                            else up_pr += 1;
+                        }
+                    }
+                    down_pr /= num_samples;
+                    up_pr /= num_samples;
+
+                    std::sort(work.begin(), work.end());
+                    fprintf(output, "%s\t%s\t%s\t%lu\t%lu\t%0.3f\t%0.3f\t%e",
+                            gene_names[tid].get().c_str(),
+                            gene_ids[tid].get().c_str(),
+                            transcript_ids[tid].get().c_str(),
+                            (unsigned long) condition_a + 1,
+                            (unsigned long) condition_b + 1,
+                            down_pr, up_pr, work[num_samples/2]);
+                    if (print_credible_interval) {
+                        fprintf(output, "\t%e\t%e",
+                                work[lround((num_samples - 1) * lower_quantile)],
+                                work[lround((num_samples - 1) * upper_quantile)]);
+                    }
+                    fputc('\t', output);
+                }
+            }
+        }
+    }
 }
 
 
