@@ -703,7 +703,7 @@ void Summarize::differential_transcription(FILE* output, double credible_interva
                             work[lround((num_samples - 1) * lower_quantile)],
                             work[lround((num_samples - 1) * upper_quantile)]);
                 }
-                fputc('\t', output);
+                fputc('\n', output);
             }
         }
     }
@@ -771,7 +771,7 @@ void Summarize::differential_splicing(FILE* output, double credible_interval,
                                 work[lround((num_samples - 1) * lower_quantile)],
                                 work[lround((num_samples - 1) * upper_quantile)]);
                     }
-                    fputc('\t', output);
+                    fputc('\n', output);
                 }
             }
         }
