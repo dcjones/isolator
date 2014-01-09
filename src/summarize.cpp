@@ -682,8 +682,8 @@ void Summarize::differential_transcription(FILE* output, double credible_interva
 
                 double down_pr = 0, up_pr = 0;
                 for (size_t j = 0; j < num_samples; ++j) {
-                    work[j] = log2(condition_a_data(j, i)) -
-                              log2(condition_b_data(j, i));
+                    work[j] = (condition_a_data(j, i) -
+                               condition_b_data(j, i)) / M_LN2;
                 }
                 std::sort(work.begin(), work.end());
 

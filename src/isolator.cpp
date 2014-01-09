@@ -248,7 +248,7 @@ int isolator_summarize(int argc, char* argv[])
     int opt;
     int opt_idx;
     double credible_interval = NAN;
-    double minimum_effect_size = 0.0;
+    double minimum_effect_size = 1.5;
     bool unnormalized = false;
 
     while (true) {
@@ -343,9 +343,9 @@ int isolator_summarize(int argc, char* argv[])
      *     differential_splicing
      */
 
+    minimum_effect_size = log2(minimum_effect_size);
 
     Summarize summarize(in_fn);
-
 
     if (strcmp(strategy, "transcript_expression") == 0) {
         summarize.median_transcript_expression(out_file, credible_interval,
