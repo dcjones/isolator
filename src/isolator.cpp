@@ -347,13 +347,21 @@ int isolator_summarize(int argc, char* argv[])
     Summarize summarize(in_fn);
 
 
-    if (strcmp(strategy, "transcript_expression")) {
-        summarize.median_transcript_expression(out_file, credible_interval, 
+    if (strcmp(strategy, "transcript_expression") == 0) {
+        summarize.median_transcript_expression(out_file, credible_interval,
                                                unnormalized);
     }
-    else if (strcmp(strategy, "gene_expression")) {
+    else if (strcmp(strategy, "gene_expression") == 0) {
         summarize.median_gene_expression(out_file, credible_interval,
                                          unnormalized);
+    }
+    else if (strcmp(strategy, "differential_transcription") == 0) {
+        summarize.differential_transcription(out_file, credible_interval,
+                                             minimum_effect_size);
+    }
+    else if (strcmp(strategy, "differential_splicing") == 0) {
+        summarize.differential_splicing(out_file, credible_interval,
+                                        minimum_effect_size);
     }
 
 

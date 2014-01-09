@@ -43,6 +43,11 @@ class Summarize
                                           double credible_interval,
                                           bool unnormalized);
 
+        void differential_transcription(FILE* output, double credible_interval,
+                                        double effect_size);
+        void differential_splicing(FILE* output, double credible_interval,
+                                   double effect_size);
+
         void median_gene_expression(FILE* output,
                                     double credible_interval,
                                     bool unnormalized);
@@ -74,6 +79,9 @@ class Summarize
                 boost::numeric::ublas::matrix<float>* lower,
                 boost::numeric::ublas::matrix<float>* upper,
                 double credible_interval, bool unnormalized);
+
+        void read_condition_tgroup_mean(unsigned int condition,
+                                        boost::numeric::ublas::matrix<float>& data);
 
         void condition_splicing(std::vector<boost::multi_array<float, 3> >& output);
 
