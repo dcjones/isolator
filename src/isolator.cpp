@@ -210,15 +210,10 @@ void print_summarize_strategies(FILE* fout)
 {
     fprintf(fout,
            "Available strategies:\n"
-           "  median_transcript_expression\n"
-           "  median_gene_expression\n"
-           "  condition_splicing\n"
-           "  condition_pairwise_splicing\n"
-           "  condition_tgroup_mean\n"
-           "  experiment_tgroup_sd\n"
-           "  tgroup_fold_change\n"
-           "  expression_samples\n"
-           "  cassette_exons\n");
+           "  transcript_expression\n"
+           "  gene_expression\n"
+           "  differential_transcription\n"
+           "  differential_splicing\n");
 }
 
 
@@ -333,16 +328,6 @@ int isolator_summarize(int argc, char* argv[])
         *c = tolower(*c);
     }
 
-    /* TODO: Plan for summarization strategies.
-     *
-     *     transcript_expression
-     *     gene_expression
-     *     tgroup_expression
-     *
-     *     differential_transcription
-     *     differential_splicing
-     */
-
     minimum_effect_size = log2(minimum_effect_size);
 
     Summarize summarize(in_fn);
@@ -363,38 +348,6 @@ int isolator_summarize(int argc, char* argv[])
         summarize.differential_splicing(out_file, credible_interval,
                                         minimum_effect_size);
     }
-
-
-#if 0
-    if (strcmp(strategy, "median_transcript_expression") == 0) {
-        summarize.median_transcript_expression(out_f);
-    }
-    else if (strcmp(strategy, "median_gene_expression") == 0) {
-        summarize.median_gene_expression(out_f);
-    }
-    else if (strcmp(strategy, "condition_splicing") == 0) {
-        summarize.condition_splicing(out_f);
-    }
-    else if (strcmp(strategy, "condition_pairwise_splicing") == 0) {
-        summarize.condition_pairwise_splicing(out_f);
-    }
-    else if (strcmp(strategy, "condition_tgroup_mean") == 0) {
-        summarize.median_condition_tgroup_expression(out_f);
-    }
-    else if (strcmp(strategy, "experiment_tgroup_sd") == 0) {
-        summarize.median_experiment_tgroup_sd(out_f);
-    }
-    else if (strcmp(strategy, "tgroup_fold_change") == 0) {
-        summarize.tgroup_fold_change(out_f, condition_a, condition_b);
-    }
-    else if (strcmp(strategy, "expression_samples") == 0) {
-        summarize.expression_samples(out_f);
-    }
-    else if (strcmp(strategy, "cassette_exons") == 0) {
-        summarize.cassette_exon_pairwise_splicing(out_f);
-    }
-#endif
-
     else {
         fprintf(stderr, "No such summarization strategy: %s\n\n", strategy);
         print_summarize_strategies(stderr);

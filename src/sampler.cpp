@@ -2092,8 +2092,8 @@ void AbundanceSamplerThread::sample_component(unsigned int c)
          float lp = compute_component_probability(c, x);
 
          if (lp >= slice_height) break;
-         else if (x > x0) x_max = x0;
-         else             x_min = x0;
+         else if (x > x0) x_max = x;
+         else             x_min = x;
     }
 
     S.cmix[c] = x;
