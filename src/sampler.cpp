@@ -2624,7 +2624,7 @@ void Sampler::sample()
         double unscaled_expr = 0.0;
         BOOST_FOREACH (unsigned int tid, tgroup_tids[tgroup]) {
             scaled_expr += expr[tid];
-            unscaled_expr = cmix[transcript_component[tid]] * tmix[tid];
+            unscaled_expr += cmix[transcript_component[tid]] * tmix[tid];
         }
         tgroup_scaling[tgroup] = unscaled_expr / scaled_expr;
     }

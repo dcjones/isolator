@@ -125,7 +125,6 @@ class NormalSigmaSampler
             double posterior_beta = prior_beta + part / 2.0;
 
             boost::random::gamma_distribution<double> dist(posterior_alpha, 1/posterior_beta);
-
             return sqrt(1 / dist(rng));
         }
 
