@@ -58,7 +58,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
 {
     const double lp_eps = 1e-2;
     const double d_eps  = 1e-5;
-    const double x_eps  = 1e-3;
+    const double x_eps  = 1e-8;
 
     double lp = lp0 - slice_height;
     double d = d0;

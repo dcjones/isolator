@@ -1795,8 +1795,8 @@ float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
                                                          float x0, float slice_height,
                                                          float step)
 {
-    const float zero_eps = 1e-12;
-    const float eps = 1e-2;
+    const float zero_eps = 1e-10;
+    const float eps = 1e-8;
     float x, y;
     do {
         x = std::max<float>(zero_eps, x0 + step);

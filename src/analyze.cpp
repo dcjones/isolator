@@ -653,7 +653,7 @@ class ExperimentTgroupMuSigmaSamplerThread
                 experiment_tgroup_mu[tgroup] = posterior_mu + random_normal(rng) * posterior_sigma;
 
                 // sample experiment_tgroup_sigma[tgroup]
-
+#if 0
                 double mu = experiment_tgroup_mu[tgroup];
                 double posterior_alpha = experiment_tgroup_alpha + C/2;
                 part = 0.0;
@@ -665,6 +665,7 @@ class ExperimentTgroupMuSigmaSamplerThread
                 boost::random::gamma_distribution<double> dist(posterior_alpha, 1/posterior_beta);
 
                 experiment_tgroup_sigma[tgroup] = sqrt(1 / dist(rng));
+#endif
 
                 notify_queue.push(1);
             }
@@ -1801,7 +1802,7 @@ void Analyze::choose_initial_values()
     std::fill(tgroup_mu.data().begin(), tgroup_mu.data().end(), tgroup_mu_0);
 
     // tgroup_sigma
-    const double tgroup_sigma_0 = 1.0;
+    const double tgroup_sigma_0 = 0.5;
     //const double tgroup_sigma_0 =
         //(tgroup_alpha_alpha / tgroup_beta_alpha) / (tgroup_alpha_beta / tgroup_beta_beta);
     std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);
