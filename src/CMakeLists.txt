@@ -47,3 +47,5 @@ target_link_libraries(isolator
                       ${ZLIB_LIBRARIES}
                       ${CMAKE_THREAD_LIBS_INIT})
 
+install(TARGETS isolator RUNTIME DESTINATION bin)
+

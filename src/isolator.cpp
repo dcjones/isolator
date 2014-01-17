@@ -186,7 +186,7 @@ int isolator_describe(int argc, char* argv[])
 
 void print_summarize_usage(FILE* fout)
 {
-    fprintf(fout, "Usage: isolator summarize strategy [options] analyze_output.h5\n");
+    fprintf(fout, "Usage: isolator summarize strategy [options] isolator-output.h5\n");
 }
 
 
@@ -311,6 +311,9 @@ int isolator_summarize(int argc, char* argv[])
         print_summarize_usage(stderr);
         return 1;
     }
+
+    // TODO: I'm thinking the default behavior here should be to use the
+    // strategy as the output file name (appending .tsv)
 
     FILE* out_file = stdout;
     if (out_fn) {
@@ -682,7 +685,7 @@ int isolator_analyze(int argc, char* argv[])
     bool run_gc_correction = true;
     constants::num_threads = boost::thread::hardware_concurrency();
     const char* fa_fn  = NULL;
-    const char* output_filename = "isolator_output.h5";
+    const char* output_filename = "isolator-output.h5";
     bool use_introns = false;
     bool use_exons = false;
 
