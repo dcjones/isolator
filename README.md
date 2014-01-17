@@ -1,5 +1,5 @@
 
-![Isolator](http://dcjones.github.com/isolator/logo.svg)
+![Isolator](http://homes.cs.washington.edu/~dcjones/isolator/logo.svg)
 
 Isolator analyzes RNA-Seq experiments.
 
