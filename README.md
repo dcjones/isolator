@@ -1,12 +1,5 @@
 
-
-```
-     ___           _       _
-    |_ _|___  ___ | | __ _| |_ ___  _ __
-     | |/ __|/ _ \| |/ _` | __/ _ \| '__|
-     | |\__ \ (_) | | (_| | || (_) | |
-    |___|___/\___/|_|\__,_|\__\___/|_|
-```
+![Isolator](http://dcjones.github.com/isolator/logo.svg)
 
 Isolator analyzes RNA-Seq experiments.
 
@@ -100,13 +93,13 @@ tables from the raw sampler output,
 
 ## What you'll need
 
-Input to isolator is a ![GTF](http://en.wikipedia.org/wiki/Gene_transfer_format)
+Input to isolator is a [GTF](http://en.wikipedia.org/wiki/Gene_transfer_format)
 giving transcript/gene annotations along with one or more
-![BAM/SAM](http://en.wikipedia.org/wiki/SAMtools) files giving the aligned reads
+[BAM/SAM](http://en.wikipedia.org/wiki/SAMtools) files giving the aligned reads
 for each sample or replicate in the experiment.
 
 Optionally, the genome sequence can also be provided in
-![FASTA](http://en.wikipedia.org/wiki/Fasta) format, allowing isolator to
+[FASTA](http://en.wikipedia.org/wiki/Fasta) format, allowing isolator to
 correct for various forms of sequence bias, typically resulting in more accurate
 quantification.
 
@@ -133,7 +126,7 @@ isolator analyze gene_annotations.gtf a.bam
 ```
 
 The analyze command run for a while and output a file named (by default)
-`isolator-output.h5`. It is an ![HDF5](http://www.hdfgroup.org/HDF5/), which is
+`isolator-output.h5`. It is an [HDF5](http://www.hdfgroup.org/HDF5/), which is
 a standardized data format than can be accessed using wide variety of tools.
 However, data stored in this file is a raw form, and typically far more
 information than is needed. To quickly generate to-the-point results, there is
