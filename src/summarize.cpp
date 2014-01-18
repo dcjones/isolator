@@ -535,7 +535,7 @@ void Summarize::median_gene_expression(FILE* output,
                                   unnormalized);
     }
 
-    fprintf(output, "gene_name\tgene_id\ttranscript_ids\t");
+    fprintf(output, "gene_name\tgene_id\ttranscript_ids");
     for (unsigned int i = 0; i < K; ++i) {
         fprintf(output,
                 unnormalized ? "\tsample%u_tpm" : "\tsample%u_adjusted_tpm",
