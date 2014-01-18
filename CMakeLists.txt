@@ -5,9 +5,9 @@ include(CheckIncludeFile)
 
 set(CMAKE_COLOR_MAKEFILE ON)
 
-execute_process(COMMAND sh ${CMAKE_SOURCE_DIR}/git-version-gen
-                OUTPUT_VARIABLE VERSION
-                OUTPUT_STRIP_TRAILING_WHITESPACE)
+#execute_process(COMMAND sh ${CMAKE_SOURCE_DIR}/git-version-gen
+                #OUTPUT_VARIABLE VERSION
+                #OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 

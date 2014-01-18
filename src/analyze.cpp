@@ -1802,7 +1802,7 @@ void Analyze::choose_initial_values()
     std::fill(tgroup_mu.data().begin(), tgroup_mu.data().end(), tgroup_mu_0);
 
     // tgroup_sigma
-    const double tgroup_sigma_0 = 0.5;
+    const double tgroup_sigma_0 = 1.0;
     //const double tgroup_sigma_0 =
         //(tgroup_alpha_alpha / tgroup_beta_alpha) / (tgroup_alpha_beta / tgroup_beta_beta);
     std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);

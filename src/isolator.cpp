@@ -27,6 +27,7 @@
 #include "sampler.hpp"
 #include "summarize.hpp"
 #include "transcripts.hpp"
+#include "gitversion.hpp"
 
 using namespace boost::accumulators;
 
@@ -41,7 +42,7 @@ const char* isolator_logo =
 static void print_logo()
 {
     printf("%s\n     Version: %s\n     Instruction set: %s\n\n",
-           isolator_logo, VERSION, LINALG_INSTR_SET);
+           isolator_logo, GITVERSION, LINALG_INSTR_SET);
 }
 
 
@@ -822,7 +823,7 @@ int isolator_analyze(int argc, char* argv[])
         metadata.command_line += argv[i];
     }
 
-    metadata.version = VERSION;
+    metadata.version = GITVERSION;
 
     time_t t = time(NULL);
     struct tm timestruct;
@@ -851,7 +852,7 @@ void print_usage(FILE* fout)
             "    summarize         Summarize a sampler run.\n"
             "    describe          Briefly describe contents of an output file.\n"
             "    help              Become enlightened.\n",
-            VERSION, LINALG_INSTR_SET);
+            GITVERSION, LINALG_INSTR_SET);
 }
 
 

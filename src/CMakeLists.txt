@@ -2,7 +2,8 @@
 include_directories(${isolator_SOURCE_DIR}/src
                     ${Boost_INCLUDE_DIRS}
                     ${HDF5_INCLUDE_DIRS}
-                    ${ZLIB_INCLUDE_DIRS})
+                    ${ZLIB_INCLUDE_DIRS}
+                    ${CMAKE_CURRENT_BINARY_DIR})
 
 add_subdirectory(cblas)
 add_subdirectory(f2c)
@@ -48,4 +49,21 @@ target_link_libraries(isolator
                       ${CMAKE_THREAD_LIBS_INIT})
 
 install(TARGETS isolator RUNTIME DESTINATION bin)
+
+# Fancy automatic git versions
+add_custom_target(gitversion_target
+                  ALL DEPENDS gitversion)
+
+add_custom_command(OUTPUT gitversion
+                   COMMAND ${CMAKE_COMMAND}
+                   -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+                   -DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}
+                   -P ${CMAKE_CURRENT_SOURCE_DIR}/gitversion.cmake)
+
+set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/gitversion.hpp
+                            PROPERTIES GENERATED TRUE
+                            HEADER_FILE_ONLY TRUE)
+
+add_dependencies(isolator gitversion_target)
+
 

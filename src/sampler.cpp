@@ -1795,25 +1795,24 @@ float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
                                                          float x0, float slice_height,
                                                          float step)
 {
-    const float zero_eps = 1e-10;
     const float eps = 1e-8;
     float x, y;
     do {
-        x = std::max<float>(zero_eps, x0 + step);
+        x = std::max<float>(constants::zero_eps, x0 + step);
         y = compute_component_probability(c, x);
         step *= 2;
-    } while (y > slice_height && x > zero_eps);
+    } while (y > slice_height && x > constants::zero_eps);
     step /= 2;
 
     // binary search to find the edge
     double a, b;
     if (step < 0.0) {
-        a = std::max<float>(zero_eps, x0 + step);
+        a = std::max<float>(constants::zero_eps, x0 + step);
         b = x0;
     }
     else {
         a = x0;
-        b = std::max<float>(zero_eps, x0 + step);
+        b = std::max<float>(constants::zero_eps, x0 + step);
     }
 
     while (fabs(b - a) > eps) {
