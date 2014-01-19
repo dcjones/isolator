@@ -47,5 +47,25 @@ target_link_libraries(isolator
                       ${ZLIB_LIBRARIES}
                       ${CMAKE_THREAD_LIBS_INIT})
 
+add_executable(samcnt
+               samcnt.cpp
+               common.cpp
+               constants.cpp
+               intervals.cpp
+               logger.cpp
+               transcripts.cpp
+               read_set.cpp)
+
+target_link_libraries(samcnt
+                      hat-trie
+                      samtools
+                      seqbias
+                      gtf
+                      ${Boost_SYSTEM_LIBRARY}
+                      ${Boost_THREAD_LIBRARY}
+                      ${Boost_TIMER_LIBRARY}
+                      ${ZLIB_LIBRARIES}
+                      ${CMAKE_THREAD_LIBS_INIT})
+
 install(TARGETS isolator RUNTIME DESTINATION bin)
 

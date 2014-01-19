@@ -139,7 +139,7 @@ pos_t Transcript::get_offset(pos_t pos) const
     return -1;
 }
 
-// 
+
 bool Transcript::operator < (const Transcript& other) const
 {
     int c;
@@ -269,7 +269,9 @@ std::vector<std::vector<unsigned int> > TranscriptSet::tgroup_tids() const
 }
 
 
-void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance)
+void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
+                             const char* feature, const char* tid_attr,
+                             const char* gid_attr)
 {
     FILE* f = fopen(filename, "r");
     if (!f) {
@@ -298,6 +300,9 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance)
 
     long fpos_mark = 1e6;
 
+    size_t tid_attr_strlen = strlen(tid_attr);
+    size_t gid_attr_strlen = strlen(gid_attr);
+
     while (gtf_next(gtf_file, row)) {
         if (fsize > 0 && ftell(f) > fpos_mark) {
             Logger::get_task(task_name).inc();
@@ -306,15 +311,15 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance)
 
         ++count;
 
-        if (strcmp("exon",        row->feature->s) != 0 &&
+        if (strcmp(feature,       row->feature->s) != 0 &&
             strcmp("start_codon", row->feature->s) != 0 &&
             strcmp("stop_codon",  row->feature->s) != 0) continue;
 
         str_t* t_id = reinterpret_cast<str_t*>(
-                str_map_get(row->attributes, "transcript_id", 13));
+                str_map_get(row->attributes, tid_attr, tid_attr_strlen));
 
         str_t* g_id = reinterpret_cast<str_t*>(
-                str_map_get(row->attributes, "gene_id", 7));
+                str_map_get(row->attributes, gid_attr, gid_attr_strlen));
 
         if (t_id == NULL || g_id == NULL) {
             ++skip_count;
@@ -341,7 +346,7 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance)
 
         pos_t pos = (t.strand == strand_pos ? row->start : row->end) - 1;
 
-        if (strcmp("exon", row->feature->s) == 0) {
+        if (strcmp(feature, row->feature->s) == 0) {
             /* '-1' to make 0-based, end-inclusive. */
             t.add(row->start - 1, row->end - 1);
         }
