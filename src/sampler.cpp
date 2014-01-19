@@ -1342,29 +1342,40 @@ class InterTgroupSampler : public Shredder
             }
 
             // gradient
-            // TODO: These gradients seem wrong. They don't depend on "x" at all.
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
-                for (unsigned int i = 0; i < S.weight_matrix->rowlens[tid]; ++i) {
-                    unsigned int idx = S.weight_matrix->idxs[tid][i];
+                const unsigned int rowlen = S.weight_matrix->rowlens[tid];
+                const double z =
+                    S.tgroup_tmix[tid] *
+                    tgroupmix_uv;
+                const unsigned int frag_offset = S.component_frag[c];
+                const unsigned int* idxs = S.weight_matrix->idxs[tid];
+
+                for (unsigned int i = 0; i < rowlen; ++i) {
+                    unsigned int idx = idxs[i] - frag_offset;
                     double d_i =
-                        S.frag_counts[c][idx - S.component_frag[c]] *
-                        S.tgroup_tmix[tid] *
-                        tgroupmix_uv *
+                        z *
+                        S.frag_counts[c][idx] *
                         S.weight_matrix->rows[tid][i];
-                    d_i /= S.frag_probs_prop[c][idx - S.component_frag[c]];
+                    d_i /= S.frag_probs_prop[c][idx];
                     d += d_i;
                 }
             }
 
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
-                for (unsigned int i = 0; i < S.weight_matrix->rowlens[tid]; ++i ) {
-                    unsigned int idx = S.weight_matrix->idxs[tid][i];
+                const unsigned int rowlen = S.weight_matrix->rowlens[tid];
+                const double z =
+                    S.tgroup_tmix[tid] *
+                    tgroupmix_uv;
+                const unsigned int frag_offset = S.component_frag[c];
+                const unsigned int* idxs = S.weight_matrix->idxs[tid];
+
+                for (unsigned int i = 0; i < rowlen; ++i ) {
+                    unsigned int idx = idxs[i] - frag_offset;
                     double d_i =
-                        S.frag_counts[c][idx - S.component_frag[c]] *
-                        S.tgroup_tmix[tid] *
-                        tgroupmix_uv *
+                        z *
+                        S.frag_counts[c][idx] *
                         S.weight_matrix->rows[tid][i];
-                    d_i /= S.frag_probs_prop[c][idx - S.component_frag[c]];
+                    d_i /= S.frag_probs_prop[c][idx];
                     d -= d_i;
                 }
             }
