@@ -1847,8 +1847,9 @@ float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 
 float AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
 {
-    float lp = gamma_lnpdf(S.frag_count_sums[c] + S.component_num_transcripts[c] * constants::tmix_prior_prec,
-                           1.0, cmixc);
+    float lp = gamma_lnpdf(S.frag_count_sums[c] +
+                           S.component_tgroups[c].size() *
+                           constants::tmix_prior_prec, 1.0, cmixc);
 
     if (S.use_priors) {
 
@@ -1877,6 +1878,7 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
     double component_tmix = 0.0;
     BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
         S.tgroupmix[tgroup] = 0.0;
+
         BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
             S.tgroupmix[tgroup] += S.tmix[tid];
         }
@@ -2597,7 +2599,7 @@ void Sampler::start()
     /* Initial cmix */
     for (unsigned int c = 0; c < num_components; ++c) {
         cmix[c] =
-            component_num_transcripts[c] * constants::tmix_prior_prec +
+            component_tgroups[c].size() * constants::tmix_prior_prec +
             frag_count_sums[c];
     }
 }
