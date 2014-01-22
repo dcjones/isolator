@@ -211,10 +211,10 @@ void print_summarize_strategies(FILE* fout)
 {
     fprintf(fout,
            "Available strategies:\n"
-           "  transcript_expression\n"
-           "  gene_expression\n"
-           "  differential_transcription\n"
-           "  differential_splicing\n");
+           "  transcript-expression\n"
+           "  gene-expression\n"
+           "  differential-transcription\n"
+           "  differential-splicing\n");
 }
 
 
@@ -330,25 +330,26 @@ int isolator_summarize(int argc, char* argv[])
     // strategies are not case sensitive
     for (char* c = strategy; *c; ++c) {
         *c = tolower(*c);
+        if (*c == '_') *c = '-';
     }
 
     minimum_effect_size = log2(minimum_effect_size);
 
     Summarize summarize(in_fn);
 
-    if (strcmp(strategy, "transcript_expression") == 0) {
+    if (strcmp(strategy, "transcript-expression") == 0) {
         summarize.median_transcript_expression(out_file, credible_interval,
                                                unnormalized);
     }
-    else if (strcmp(strategy, "gene_expression") == 0) {
+    else if (strcmp(strategy, "gene-expression") == 0) {
         summarize.median_gene_expression(out_file, credible_interval,
                                          unnormalized);
     }
-    else if (strcmp(strategy, "differential_transcription") == 0) {
+    else if (strcmp(strategy, "differential-transcription") == 0) {
         summarize.differential_transcription(out_file, credible_interval,
                                              minimum_effect_size);
     }
-    else if (strcmp(strategy, "differential_splicing") == 0) {
+    else if (strcmp(strategy, "differential-splicing") == 0) {
         summarize.differential_splicing(out_file, credible_interval,
                                         minimum_effect_size);
     }
