@@ -7,6 +7,7 @@
 #include <boost/accumulators/statistics/stats.hpp>
 #include <boost/accumulators/statistics/variance.hpp>
 #include <boost/foreach.hpp>
+#include <boost/lexical_cast.hpp>
 #include <boost/thread.hpp>
 #include <cstdlib>
 #include <cstring>
@@ -28,6 +29,7 @@
 #include "summarize.hpp"
 #include "transcripts.hpp"
 #include "gitversion.hpp"
+#include "yaml/yaml.h"
 
 using namespace boost::accumulators;
 
@@ -368,7 +370,10 @@ int isolator_summarize(int argc, char* argv[])
 
 void print_analyze_usage(FILE* fout)
 {
-    fprintf(fout, "Usage: isolator analyze [options] genes.gtf a1.bam[,a2.bam...] [b1.bam[,b2.bam...]]\n");
+    fprintf(fout,
+            "Usage: isolator analyze [options] genes.gtf a1.bam[,a2.bam...] [b1.bam[,b2.bam...]]\n\n"
+            "or\n\n"
+            "       isolator analyze [options] genes.gtf experiment-description.yml\n");
 }
 
 void print_analyze_help(FILE* fout)
@@ -442,6 +447,14 @@ static void write_metadata(hid_t file_id, const IsolatorMetadata& metadata)
     const char** sample_attr_value = new const char*[metadata.sample_filenames.size()];
     for (size_t i = 0; i < metadata.sample_filenames.size(); ++i) {
         sample_attr_value[i] = metadata.sample_filenames[i].c_str();
+    }
+    H5Awrite(attr, varstring_type, sample_attr_value);
+    H5Aclose(attr);
+
+    attr = H5Acreate1(group, "sample_names", varstring_type,
+                      sample_dataspace, H5P_DEFAULT);
+    for (size_t i = 0; i < metadata.sample_names.size(); ++i) {
+        sample_attr_value[i] = metadata.sample_names[i].c_str();
     }
     H5Awrite(attr, varstring_type, sample_attr_value);
     H5Aclose(attr);
@@ -662,6 +675,233 @@ static void write_cassette_exon_data(hid_t file_id, TranscriptSet& ts)
 }
 
 
+static std::string yaml_event_name(yaml_event_type_t type)
+{
+    switch (type) {
+        case YAML_STREAM_START_EVENT:
+            return "stream start";
+        case YAML_STREAM_END_EVENT:
+            return "stream end";
+        case YAML_DOCUMENT_START_EVENT:
+            return "document start";
+        case YAML_DOCUMENT_END_EVENT:
+            return "document end";
+        case YAML_ALIAS_EVENT:
+            return "alias";
+        case YAML_SCALAR_EVENT:
+            return "scalar";
+        case YAML_SEQUENCE_START_EVENT:
+            return "sequence start";
+        case YAML_SEQUENCE_END_EVENT:
+            return "sequence end";
+        case YAML_MAPPING_START_EVENT:
+            return "mapping start";
+        case YAML_MAPPING_END_EVENT:
+            return "mapping end";
+        default:
+            return "unknown event";
+    }
+}
+
+
+static void parse_experiment_description_error(
+        const char* filename, yaml_event_type_t expected, yaml_event_type_t observed)
+{
+    Logger::abort("Error parsing %s: expected %s while parsing %s.",
+                  filename,
+                  yaml_event_name(expected).c_str(),
+                  yaml_event_name(observed).c_str());
+}
+
+
+// Parse a YAML file describing the experiment
+static void parse_experiment_description(const char* filename,
+                                         std::vector<std::string>& condition_names,
+                                         std::vector<std::string>& sample_names,
+                                         std::vector<std::string>& sample_filenames)
+{
+    FILE* input = fopen(filename, "rb");
+    if (!input) {
+        Logger::abort("Unable to open experiment description file %s.",
+                      filename);
+    }
+
+    yaml_parser_t parser;
+    yaml_parser_initialize(&parser);
+    yaml_parser_set_input_file(&parser, input);
+
+    std::string current_condition_name;
+    int condition_sample_number = 0;
+
+    enum {
+        STATE_BEGIN,
+        STATE_END,
+        STATE_CONDITION_MAP,
+        STATE_SAMPLES,
+        STATE_SAMPLE_SEQUENCE,
+        STATE_SAMPLE_MAPPING,
+        STATE_SAMPLE_FILENAME
+    } state = STATE_BEGIN;
+
+    yaml_event_t event;
+    bool done = false;
+    while (!done) {
+        if (!yaml_parser_parse(&parser, &event)) {
+            Logger::abort("Error parsing YAML file %s", filename);
+        }
+
+        switch (state) {
+            case STATE_BEGIN:
+                if (event.type == YAML_MAPPING_START_EVENT) {
+                    state = STATE_CONDITION_MAP;
+                }
+                else if (event.type == YAML_STREAM_START_EVENT ||
+                         event.type == YAML_DOCUMENT_START_EVENT) {
+                }
+                else {
+                    parse_experiment_description_error(
+                        filename, YAML_MAPPING_START_EVENT, event.type);
+                }
+                break;
+
+            case STATE_CONDITION_MAP:
+                if (event.type == YAML_SCALAR_EVENT) {
+                    current_condition_name =
+                        reinterpret_cast<char*>(event.data.scalar.value);
+                    condition_sample_number = 0;
+                    state = STATE_SAMPLES;
+                }
+                else if (event.type == YAML_MAPPING_END_EVENT) {
+                    state = STATE_END;
+                }
+                else {
+                    parse_experiment_description_error(
+                        filename, YAML_SCALAR_EVENT, event.type);
+                }
+                break;
+
+            case STATE_SAMPLES:
+                if (event.type == YAML_SEQUENCE_START_EVENT) {
+                    state = STATE_SAMPLE_SEQUENCE;
+                }
+                else if (event.type == YAML_MAPPING_START_EVENT) {
+                    state = STATE_SAMPLE_MAPPING;
+                }
+                else {
+                    parse_experiment_description_error(
+                        filename, YAML_MAPPING_START_EVENT, event.type);
+                }
+                break;
+
+            case STATE_SAMPLE_SEQUENCE:
+                if (event.type == YAML_SCALAR_EVENT) {
+                    condition_names.push_back(current_condition_name);
+                    sample_names.push_back(
+                            current_condition_name + "-" +
+                            boost::lexical_cast<std::string>(condition_sample_number + 1));
+                    sample_filenames.push_back(
+                            reinterpret_cast<char*>(event.data.scalar.value));
+                }
+                else if (event.type == YAML_SEQUENCE_END_EVENT) {
+                    state = STATE_CONDITION_MAP;
+                }
+                else {
+                    parse_experiment_description_error(
+                        filename, YAML_SCALAR_EVENT, event.type);
+                }
+                break;
+
+            case STATE_SAMPLE_MAPPING:
+                if (event.type == YAML_SCALAR_EVENT) {
+                    condition_names.push_back(current_condition_name);
+                    sample_names.push_back(
+                            reinterpret_cast<char*>(event.data.scalar.value));
+                    state = STATE_SAMPLE_FILENAME;
+                }
+                else if (event.type == YAML_MAPPING_END_EVENT) {
+                    state = STATE_CONDITION_MAP;
+                }
+                else {
+                    parse_experiment_description_error(
+                        filename, YAML_SCALAR_EVENT, event.type);
+                }
+                break;
+
+            case STATE_SAMPLE_FILENAME:
+                if (event.type == YAML_SCALAR_EVENT) {
+                    sample_filenames.push_back(
+                            reinterpret_cast<char*>(event.data.scalar.value));
+                    state = STATE_SAMPLE_MAPPING;
+                }
+                else {
+                    parse_experiment_description_error(
+                        filename, YAML_SCALAR_EVENT, event.type);
+                }
+                break;
+
+            case STATE_END:
+                if (event.type == YAML_DOCUMENT_END_EVENT) {
+                    done = true;
+                }
+                else {
+                    parse_experiment_description_error(
+                        filename, YAML_DOCUMENT_END_EVENT, event.type);
+                }
+                break;
+
+            default:
+                Logger::abort("Unknown experiment description parser state.");
+        }
+
+        yaml_event_delete(&event);
+    }
+
+    yaml_parser_delete(&parser);
+    fclose(input);
+}
+
+
+static void parse_command_line_experiment_description(
+        char** argv, int argc,
+       std::vector<std::string>& condition_names,
+       std::vector<std::string>& sample_names,
+       std::vector<std::string>& sample_filenames)
+{
+    char condition_name[100];
+    int condition_num = 1;
+    for (int i = 0; i < argc; ++i) {
+        snprintf(condition_name, sizeof(condition_name), "condition-%d", condition_num);
+
+        const char* fn;
+        int sample_num = 1;
+        for (fn = strtok(argv[i], ","); fn; fn = strtok(NULL, ",")) {
+            condition_names.push_back(condition_name);
+            sample_names.push_back(
+                    std::string(condition_name) + "-" +
+                    boost::lexical_cast<std::string>(sample_num));
+            sample_filenames.push_back(fn);
+            ++sample_num;
+        }
+    }
+}
+
+
+static bool is_sam_file(const char* filename)
+{
+    samfile_t* sam_file = samopen(filename, "rb", NULL);
+    if (!sam_file || !sam_file->header || sam_file->header->n_targets == 0) {
+        if (sam_file) samclose(sam_file);
+
+        sam_file = samopen(filename, "r", NULL);
+        if (!sam_file || !sam_file->header || sam_file->header->n_targets == 0) {
+            return false;
+        }
+        else return true;
+    }
+    else return true;
+}
+
+
 int isolator_analyze(int argc, char* argv[])
 {
     static struct option long_options[] =
@@ -788,23 +1028,33 @@ int isolator_analyze(int argc, char* argv[])
     // write metadata
     write_cassette_exon_data(output_file_id, ts);
 
-    // initialize
     IsolatorMetadata metadata;
+
+    bool has_experiment_description = false;
+
+    if (optind + 1 == argc) {
+        const char* filename = argv[optind];
+        if (!is_sam_file(filename)) has_experiment_description = true;
+    }
+
+    if (has_experiment_description) {
+        parse_experiment_description(argv[optind],
+                                     metadata.sample_conditions,
+                                     metadata.sample_names,
+                                     metadata.sample_filenames);
+    }
+    else {
+        parse_command_line_experiment_description(
+                argv + optind, argc - optind,
+                metadata.sample_conditions,
+                metadata.sample_names,
+                metadata.sample_filenames);
+    }
+
     Analyze analyze(burnin, num_samples, ts, fa_fn, run_gc_correction);
-    int condition_num = 1;
-    for (; optind < argc; ++optind) {
-        char condition_name[100];
-        snprintf(condition_name, sizeof(condition_name), "condition_%d", condition_num);
-
-        const char* fn;
-        for (fn = strtok(argv[optind], ","); fn; fn = strtok(NULL, ",")) {
-            analyze.add_sample(condition_name, fn);
-            metadata.sample_filenames.push_back(fn);
-            metadata.sample_conditions.push_back(condition_name);
-            Logger::debug("Adding '%s' to condition '%s'", fn, condition_name);
-        }
-
-        ++condition_num;
+    for (size_t i = 0; i < metadata.sample_conditions.size(); ++i) {
+        analyze.add_sample(metadata.sample_conditions[i].c_str(),
+                           metadata.sample_filenames[i].c_str());
     }
 
     boost::timer::cpu_timer timer;

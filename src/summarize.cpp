@@ -135,6 +135,8 @@ Summarize::Summarize(const char* filename)
                     H5P_DEFAULT, &scale.data()[0]);
 
     H5Dclose(dataset);
+
+    read_metadata(metadata);
 }
 
 
@@ -473,14 +475,15 @@ void Summarize::median_transcript_expression(FILE* output,
     fprintf(output, "gene_name\tgene_id\ttranscript_id\t");
     for (unsigned int i = 0; i < K; ++i) {
         fprintf(output,
-                unnormalized ? "\tsample%u_tpm" : "\tsample%u_adjusted_tpm",
-                i+1);
+                unnormalized ? "\t%s_tpm" : "\t%s_adjusted_tpm",
+                metadata.sample_names[i].c_str());
         if (print_credible_interval) {
             fprintf(output,
                     unnormalized ?
-                        "\tsample%u_tpm_lower\tsample%u_tpm_upper" :
-                        "\tsample%u_adjusted_tpm_lower\tsample%u_adjusted_tpm_upper",
-                    i+1, i+1);
+                        "\t%s_tpm_lower\t%s_tpm_upper" :
+                        "\t%s_adjusted_tpm_lower\t%s_adjusted_tpm_upper",
+                    metadata.sample_names[i].c_str(),
+                    metadata.sample_names[i].c_str());
         }
     }
     fputc('\n', output);
@@ -538,14 +541,15 @@ void Summarize::median_gene_expression(FILE* output,
     fprintf(output, "gene_name\tgene_id\ttranscript_ids");
     for (unsigned int i = 0; i < K; ++i) {
         fprintf(output,
-                unnormalized ? "\tsample%u_tpm" : "\tsample%u_adjusted_tpm",
-                i+1);
+                unnormalized ? "\t%s_tpm" : "\t%s_adjusted_tpm",
+                metadata.sample_names[i].c_str());
         if (print_credible_interval) {
             fprintf(output,
                     unnormalized ?
-                        "\tsample%u_tpm_lower\tsample%u_tpm_upper" :
-                        "\tsample%u_adjusted_tpm_lower\tsample%u_adjusted_tpm_upper",
-                    i+1, i+1);
+                        "\t%s_tpm_lower\t%s_tpm_upper" :
+                        "\t%s_adjusted_tpm_lower\t%s_adjusted_tpm_upper",
+                    metadata.sample_names[i].c_str(),
+                    metadata.sample_names[i].c_str());
         }
     }
     fputc('\n', output);
@@ -678,7 +682,9 @@ void Summarize::differential_transcription(FILE* output, double credible_interva
                 }
 
                 // conditions
-                fprintf(output, "\t%u\t%u", condition_a + 1, condition_b + 1);
+                fprintf(output, "\t%s\t%s",
+                        metadata.sample_conditions[condition_a].c_str(),
+                        metadata.sample_conditions[condition_b].c_str());
 
                 double down_pr = 0, up_pr = 0;
                 for (size_t j = 0; j < num_samples; ++j) {
@@ -759,12 +765,12 @@ void Summarize::differential_splicing(FILE* output, double credible_interval,
                     up_pr /= num_samples;
 
                     std::sort(work.begin(), work.end());
-                    fprintf(output, "%s\t%s\t%s\t%lu\t%lu\t%0.3f\t%0.3f\t%e",
+                    fprintf(output, "%s\t%s\t%s\t%s\t%s\t%0.3f\t%0.3f\t%e",
                             gene_names[tid].get().c_str(),
                             gene_ids[tid].get().c_str(),
                             transcript_ids[tid].get().c_str(),
-                            (unsigned long) condition_a + 1,
-                            (unsigned long) condition_b + 1,
+                            metadata.sample_conditions[condition_a].c_str(),
+                            metadata.sample_conditions[condition_b].c_str(),
                             down_pr, up_pr, work[num_samples/2]);
                     if (print_credible_interval) {
                         fprintf(output, "\t%e\t%e",
@@ -1424,6 +1430,14 @@ void Summarize::read_metadata(IsolatorMetadata& metadata)
     metadata.sample_filenames.resize(num_samples);
     for (size_t i = 0; i < num_samples; ++i) {
         metadata.sample_filenames[i] = data[i];
+    }
+    H5Aclose(attr);
+
+    attr = H5Aopen_checked(group, "sample_names", H5P_DEFAULT);
+    H5Aread(attr, varstring_type, &data.at(0));
+    metadata.sample_names.resize(num_samples);
+    for (size_t i = 0; i < num_samples; ++i) {
+        metadata.sample_names[i] = data[i];
     }
     H5Aclose(attr);
 

@@ -79,11 +79,11 @@ bam_header_t *bam_header_read(bamFile fp)
 		// with ESPIPE.  Suppress the error message in this case.
 		if (errno != ESPIPE) perror("[bam_header_read] bgzf_check_EOF");
 	}
-	else if (i == 0) fprintf(stderr, "[bam_header_read] EOF marker is absent. The input is probably truncated.\n");
+	/*else if (i == 0) fprintf(stderr, "[bam_header_read] EOF marker is absent. The input is probably truncated.\n");*/
 	// read "BAM1"
 	magic_len = bam_read(fp, buf, 4);
 	if (magic_len != 4 || strncmp(buf, "BAM\001", 4) != 0) {
-		fprintf(stderr, "[bam_header_read] invalid BAM binary header (this is not a BAM file).\n");
+		/*fprintf(stderr, "[bam_header_read] invalid BAM binary header (this is not a BAM file).\n");*/
 		return 0;
 	}
 	header = bam_header_init();

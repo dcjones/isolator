@@ -25,6 +25,7 @@ struct IsolatorMetadata
     std::string elapsed_seconds;
     std::vector<std::string> sample_filenames;
     std::vector<std::string> sample_conditions;
+    std::vector<std::string> sample_names;
 };
 
 
@@ -105,6 +106,8 @@ class Summarize
 
         // number of tgroups
         size_t T;
+
+        IsolatorMetadata metadata;
 
         // transcript_id indexed by tid
         std::vector<TranscriptID> transcript_ids;
