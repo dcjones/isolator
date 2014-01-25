@@ -926,9 +926,6 @@ void Summarize::condition_splicing(FILE* output, double credible_interval)
             }
             fputc('\t', output);
 
-            // transcript_id
-            fprintf(output, "%s\t", transcript_ids[tid].get().c_str());
-
             // transcription_group
             first_item = true;
             BOOST_FOREACH (unsigned int tid, tgroup_tids[tgroup]) {
@@ -937,6 +934,9 @@ void Summarize::condition_splicing(FILE* output, double credible_interval)
                 fprintf(output, "%s", transcript_ids[tid].get().c_str());
             }
             fputc('\t', output);
+
+            // transcript_id
+            fprintf(output, "%s", transcript_ids[tid].get().c_str());
 
             for (size_t k = 0; k < C; ++k) {
                 for (size_t l = 0; l < num_samples; ++l) {
