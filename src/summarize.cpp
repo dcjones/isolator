@@ -481,7 +481,7 @@ void Summarize::transcript_expression(FILE* output, double credible_interval,
                                         unnormalized);
     }
 
-    fprintf(output, "gene_name\tgene_id\ttranscript_id\t");
+    fprintf(output, "gene_name\tgene_id\ttranscript_id");
     for (unsigned int i = 0; i < K; ++i) {
         fprintf(output,
                 unnormalized ? "\t%s_tpm" : "\t%s_adjusted_tpm",
