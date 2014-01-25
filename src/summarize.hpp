@@ -36,28 +36,34 @@ class Summarize
         ~Summarize();
 
         // pre-baked summarizations
-        void median_condition_tgroup_expression(FILE* output);
+        void transcript_expression(FILE* output,
+                                   double credible_interval,
+                                   bool unnormalized);
 
-        void median_experiment_tgroup_sd(FILE* output);
-
-        void median_transcript_expression(FILE* output,
-                                          double credible_interval,
-                                          bool unnormalized);
+        void gene_expression(FILE* output,
+                             double credible_interval,
+                             bool unnormalized);
 
         void differential_transcription(FILE* output, double credible_interval,
                                         double effect_size);
+
         void differential_splicing(FILE* output, double credible_interval,
                                    double effect_size);
 
-        void median_gene_expression(FILE* output,
-                                    double credible_interval,
-                                    bool unnormalized);
+        void condition_splicing(FILE* output, double credible_interval);
+
+        void condition_transcription(FILE* output, double credible_interval);
+
+        // TODO: these are not exposed. Either get rid of them, or make them
+        // accessable.
+        void median_condition_tgroup_expression(FILE* output);
+
+        void median_experiment_tgroup_sd(FILE* output);
 
         void tgroup_fold_change(FILE* output,
                                 unsigned int condition_a,
                                 unsigned int condition_b);
 
-        void condition_splicing(FILE* output);
         void expression_samples(FILE* output);
         void condition_pairwise_splicing(FILE* output);
         void cassette_exon_pairwise_splicing(FILE* output);
@@ -101,6 +107,9 @@ class Summarize
         // number of samples
         size_t K;
 
+        // number of conditions
+        size_t C;
+
         // number of transcripts
         size_t N;
 
@@ -108,6 +117,8 @@ class Summarize
         size_t T;
 
         IsolatorMetadata metadata;
+
+        std::vector<std::string> condition_names;
 
         // transcript_id indexed by tid
         std::vector<TranscriptID> transcript_ids;

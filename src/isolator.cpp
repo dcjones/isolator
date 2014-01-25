@@ -48,13 +48,13 @@ static void print_logo()
 }
 
 
-void print_describe_usage(FILE* fout)
+static void print_describe_usage(FILE* fout)
 {
     fprintf(fout, "Usage: isolator describe isolator-output.h5\n");
 }
 
 
-void print_describe_help(FILE* fout)
+static void print_describe_help(FILE* fout)
 {
     print_describe_usage(fout);
     fprintf(fout,
@@ -66,7 +66,7 @@ void print_describe_help(FILE* fout)
 }
 
 
-int isolator_describe(int argc, char* argv[])
+static int isolator_describe(int argc, char* argv[])
 {
     Logger::start();
 
@@ -187,13 +187,13 @@ int isolator_describe(int argc, char* argv[])
 }
 
 
-void print_summarize_usage(FILE* fout)
+static void print_summarize_usage(FILE* fout)
 {
     fprintf(fout, "Usage: isolator summarize strategy [options] isolator-output.h5\n");
 }
 
 
-void print_summarize_help(FILE* fout)
+static void print_summarize_help(FILE* fout)
 {
     print_summarize_usage(fout);
     fprintf(fout,
@@ -209,18 +209,22 @@ void print_summarize_help(FILE* fout)
 }
 
 
-void print_summarize_strategies(FILE* fout)
+static void print_summarize_strategies(FILE* fout)
 {
+    // TODO: I should really print descriptions of these
     fprintf(fout,
            "Available strategies:\n"
            "  transcript-expression\n"
            "  gene-expression\n"
            "  differential-transcription\n"
-           "  differential-splicing\n");
+           "  differential-splicing\n"
+           "  condition-splicing\n"
+           "  condition-transcription\n"
+           "\n");
 }
 
 
-int isolator_summarize(int argc, char* argv[])
+static int isolator_summarize(int argc, char* argv[])
 {
     Logger::start();
 
@@ -239,7 +243,7 @@ int isolator_summarize(int argc, char* argv[])
         {0, 0, 0, 0}
     };
 
-    const char* out_fn = "isolator_summarize.tsv";
+    const char* out_filename = NULL;
     Logger::level logger_level = Logger::INFO;
     unsigned int condition_a = 0, condition_b = 1;
 
@@ -264,7 +268,7 @@ int isolator_summarize(int argc, char* argv[])
                 break;
 
             case 'o':
-                out_fn = optarg;
+                out_filename = optarg;
                 break;
 
             case 'l':
@@ -315,19 +319,8 @@ int isolator_summarize(int argc, char* argv[])
         return 1;
     }
 
-    // TODO: I'm thinking the default behavior here should be to use the
-    // strategy as the output file name (appending .tsv)
-
-    FILE* out_file = stdout;
-    if (out_fn) {
-        out_file = fopen(out_fn, "w");
-        if (out_file == NULL) {
-            Logger::abort("Can't open file %s for writing.\n", out_fn);
-        }
-    }
-
     char* strategy = argv[optind];
-    const char* in_fn = argv[optind+1];
+    const char* in_filename = argv[optind+1];
 
     // strategies are not case sensitive
     for (char* c = strategy; *c; ++c) {
@@ -335,17 +328,26 @@ int isolator_summarize(int argc, char* argv[])
         if (*c == '_') *c = '-';
     }
 
+    std::string default_out_filename = std::string(strategy) + std::string(".tsv");
+
+    FILE* out_file = NULL;
+    if (!out_filename) out_filename = default_out_filename.c_str();
+    out_file = fopen(out_filename, "w");
+    if (out_file == NULL) {
+        Logger::abort("Can't open file %s for writing.\n", out_filename);
+    }
+
     minimum_effect_size = log2(minimum_effect_size);
 
-    Summarize summarize(in_fn);
+    Summarize summarize(in_filename);
 
     if (strcmp(strategy, "transcript-expression") == 0) {
-        summarize.median_transcript_expression(out_file, credible_interval,
-                                               unnormalized);
+        summarize.transcript_expression(out_file, credible_interval,
+                                        unnormalized);
     }
     else if (strcmp(strategy, "gene-expression") == 0) {
-        summarize.median_gene_expression(out_file, credible_interval,
-                                         unnormalized);
+        summarize.gene_expression(out_file, credible_interval,
+                                  unnormalized);
     }
     else if (strcmp(strategy, "differential-transcription") == 0) {
         summarize.differential_transcription(out_file, credible_interval,
@@ -354,6 +356,12 @@ int isolator_summarize(int argc, char* argv[])
     else if (strcmp(strategy, "differential-splicing") == 0) {
         summarize.differential_splicing(out_file, credible_interval,
                                         minimum_effect_size);
+    }
+    else if (strcmp(strategy, "condition-splicing") == 0) {
+        summarize.condition_splicing(out_file, credible_interval);
+    }
+    else if (strcmp(strategy, "condition-transcription") == 0) {
+        summarize.condition_transcription(out_file, credible_interval);
     }
     else {
         fprintf(stderr, "No such summarization strategy: %s\n\n", strategy);
@@ -368,7 +376,7 @@ int isolator_summarize(int argc, char* argv[])
 }
 
 
-void print_analyze_usage(FILE* fout)
+static void print_analyze_usage(FILE* fout)
 {
     fprintf(fout,
             "Usage: isolator analyze [options] genes.gtf a1.bam[,a2.bam...] [b1.bam[,b2.bam...]]\n\n"
@@ -376,7 +384,7 @@ void print_analyze_usage(FILE* fout)
             "       isolator analyze [options] genes.gtf experiment-description.yml\n");
 }
 
-void print_analyze_help(FILE* fout)
+static void print_analyze_help(FILE* fout)
 {
     print_analyze_usage(fout);
     fprintf(fout,
@@ -904,7 +912,7 @@ static bool is_sam_file(const char* filename)
 }
 
 
-int isolator_analyze(int argc, char* argv[])
+static int isolator_analyze(int argc, char* argv[])
 {
     static struct option long_options[] =
     {
@@ -1093,7 +1101,7 @@ int isolator_analyze(int argc, char* argv[])
 }
 
 
-void print_usage(FILE* fout)
+static void print_usage(FILE* fout)
 {
     fprintf(fout,
             "Usage: isolator <command> [<args>]\n"
@@ -1109,7 +1117,7 @@ void print_usage(FILE* fout)
 }
 
 
-int isolator_help(int argc, char* argv[])
+static int isolator_help(int argc, char* argv[])
 {
     if (argc <= 1) {
         print_usage(stdout);

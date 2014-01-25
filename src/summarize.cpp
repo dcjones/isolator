@@ -137,6 +137,16 @@ Summarize::Summarize(const char* filename)
     H5Dclose(dataset);
 
     read_metadata(metadata);
+
+    std::string last_condition_name;
+    BOOST_FOREACH (std::string& condition_name, metadata.sample_conditions) {
+        if (condition_name != last_condition_name) {
+            condition_names.push_back(condition_name);
+            last_condition_name = condition_name;
+        }
+    }
+
+    C = condition_names.size();
 }
 
 
@@ -451,9 +461,8 @@ void Summarize::median_ci_gene_expression(
 }
 
 
-void Summarize::median_transcript_expression(FILE* output,
-                                             double credible_interval,
-                                             bool unnormalized)
+void Summarize::transcript_expression(FILE* output, double credible_interval,
+                                      bool unnormalized)
 {
     bool print_credible_interval = !isnan(credible_interval);
 
@@ -508,9 +517,8 @@ void Summarize::median_transcript_expression(FILE* output,
 }
 
 
-void Summarize::median_gene_expression(FILE* output,
-                                       double credible_interval,
-                                       bool unnormalized)
+void Summarize::gene_expression(FILE* output, double credible_interval,
+                                bool unnormalized)
 {
     bool print_credible_interval = !isnan(credible_interval);
 
@@ -785,6 +793,179 @@ void Summarize::differential_splicing(FILE* output, double credible_interval,
 }
 
 
+void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& splicing)
+{
+    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/splice_mu", H5P_DEFAULT);
+
+    hid_t dataspace = H5Dget_space(dataset);
+    hsize_t dims[3]; // dims are: num_samples, C, spliced_tgroups
+    H5Sget_simple_extent_dims(dataspace, dims, NULL);
+    size_t num_samples = dims[0];
+    size_t C = dims[1];
+
+    if (dims[2] != spliced_tgroup_indexes.size()) {
+        Logger::abort("The /condition/splice_mu dataset is of incorrect size.");
+    }
+
+    hsize_t mem_dataspace_dims[1] = {dims[2]};
+    hid_t mem_dataspace = H5Screate_simple(1, mem_dataspace_dims, NULL);
+
+    hvl_t* buffer = new hvl_t[dims[2]];
+    hid_t memtype = H5Tvlen_create(H5T_NATIVE_FLOAT);
+
+    hsize_t dataspace_start[3] = {0, 0, 0};
+    hsize_t dataspace_count[3] = {1, 1, dims[2]};
+    herr_t status;
+
+    for (size_t i = 0; i < dims[2]; ++i) {
+        size_t tgroup = spliced_tgroup_indexes[i];
+        splicing[i].resize(boost::extents[dims[0]][dims[1]][tgroup_tids[tgroup].size()]);
+    }
+
+    for (size_t i = 0; i < num_samples; ++i) {
+        dataspace_start[0] = i;
+        for (size_t j = 0; j < C; ++j) {
+            dataspace_start[1] = j;
+            status = H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
+                                         dataspace_start, NULL,
+                                         dataspace_count, NULL);
+            if (status < 0) {
+                Logger::abort("HDF5 hyperslab selection failed.");
+            }
+
+            H5Dread_checked(dataset, memtype, mem_dataspace, dataspace,
+                            H5P_DEFAULT, buffer);
+
+            for (size_t k = 0; k < dims[2]; ++k) {
+                size_t tgroup = spliced_tgroup_indexes[k];
+                if (buffer[k].len != tgroup_tids[tgroup].size()) {
+                    Logger::abort("Spliced tgroup has an inconsistent transcript count.");
+                }
+
+                float sum = 0.0;
+                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
+                    splicing[k][i][j][l] =
+                        exp(reinterpret_cast<float*>(buffer[k].p)[l]);
+                    sum += splicing[k][i][j][l];
+                }
+
+                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
+                    splicing[k][i][j][l] /= sum;
+                }
+            }
+        }
+    }
+
+    H5Dvlen_reclaim(memtype, mem_dataspace, H5P_DEFAULT, buffer);
+    delete [] buffer;
+    H5Sclose(mem_dataspace);
+    H5Tclose(memtype);
+    H5Dclose(dataset);
+}
+
+
+void Summarize::condition_splicing(FILE* output, double credible_interval)
+{
+    bool print_credible_interval = !isnan(credible_interval);
+
+    double lower_quantile = 0.5 - credible_interval/2;
+    double upper_quantile = 0.5 + credible_interval/2;
+
+    // indexed by sample_num, condition, and within-tgroup transcript
+    typedef boost::multi_array<float, 3> marray_t;
+
+    // indexed by spliced tgroup
+    std::vector<marray_t> splicing(spliced_tgroup_indexes.size());
+
+    condition_splicing(splicing);
+
+    fprintf(output, "gene_names\tgene_ids\ttranscription_group\ttranscript_id");
+    for (size_t i = 0; i < C; ++i) {
+        if (print_credible_interval) {
+            fprintf(output, "\t%s_splice_rate\t%s_splice_rate_lower\t%s_splice_rate_upper",
+                    condition_names[i].c_str(), condition_names[i].c_str(),
+                    condition_names[i].c_str());
+        }
+        else {
+            fprintf(output, "\t%s_splice_rate", condition_names[i].c_str());
+        }
+    }
+    fputc('\n', output);
+
+    std::set<GeneID> tgroup_gene_ids;
+    std::set<GeneName> tgroup_gene_names;
+
+    std::vector<float> work(num_samples);
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        size_t tgroup = spliced_tgroup_indexes[i];
+        tgroup_gene_names.clear();
+        tgroup_gene_ids.clear();
+        BOOST_FOREACH (unsigned int tid, tgroup_tids[tgroup]) {
+            tgroup_gene_names.insert(gene_names[tid]);
+            tgroup_gene_ids.insert(gene_ids[tid]);
+        }
+
+        for (size_t j = 0; j < tgroup_tids[tgroup].size(); ++j) {
+            unsigned int tid = tgroup_tids[tgroup][j];
+
+            // gene_names
+            bool first_item = true;
+            BOOST_FOREACH (const GeneName& gene_name, tgroup_gene_names) {
+                if (!first_item) fputc(',', output);
+                else first_item = false;
+                fprintf(output, "%s", gene_name.get().c_str());
+            }
+            fputc('\t', output);
+
+            // gene_ids
+            first_item = true;
+            BOOST_FOREACH (const GeneID& gene_id, tgroup_gene_ids) {
+                if (!first_item) fputc(',', output);
+                else first_item = false;
+                fprintf(output, "%s", gene_id.get().c_str());
+            }
+            fputc('\t', output);
+
+            // transcript_id
+            fprintf(output, "%s\t", transcript_ids[tid].get().c_str());
+
+            // transcription_group
+            first_item = true;
+            BOOST_FOREACH (unsigned int tid, tgroup_tids[tgroup]) {
+                if (!first_item) fputc(',', output);
+                else first_item = false;
+                fprintf(output, "%s", transcript_ids[tid].get().c_str());
+            }
+            fputc('\t', output);
+
+            for (size_t k = 0; k < C; ++k) {
+                for (size_t l = 0; l < num_samples; ++l) {
+                    work[l] = splicing[i][l][k][j];
+                }
+                std::sort(work.begin(), work.end());
+
+                if (print_credible_interval) {
+                    fprintf(output, "\t%f\t%f\t%f",
+                            (double) work[lround((num_samples -1) * lower_quantile)],
+                            (double) work[num_samples/2],
+                            (double) work[lround((num_samples -1) * upper_quantile)]);
+                }
+                else {
+                    fprintf(output, "\t%f", (double) work[num_samples/2]);
+                }
+            }
+            fputc('\n', output);
+        }
+    }
+}
+
+
+void Summarize::condition_transcription(FILE* output, double credible_interval)
+{
+     // TODO: everything
+}
+
+
 void Summarize::tgroup_fold_change(FILE* output,
                                    unsigned int condition_a,
                                    unsigned int condition_b)
@@ -899,134 +1080,6 @@ void Summarize::tgroup_fold_change(FILE* output,
         }
 
         fprintf(output, "\t%f\t%f\n", log2fc_lower[i], log2fc_upper[i]);
-    }
-}
-
-
-void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& splicing)
-{
-    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/splice_mu", H5P_DEFAULT);
-
-    hid_t dataspace = H5Dget_space(dataset);
-    hsize_t dims[3]; // dims are: num_samples, C, spliced_tgroups
-    H5Sget_simple_extent_dims(dataspace, dims, NULL);
-    size_t num_samples = dims[0];
-    size_t C = dims[1];
-
-    if (dims[2] != spliced_tgroup_indexes.size()) {
-        Logger::abort("The /condition/splice_mu dataset is of incorrect size.");
-    }
-
-    hsize_t mem_dataspace_dims[1] = {dims[2]};
-    hid_t mem_dataspace = H5Screate_simple(1, mem_dataspace_dims, NULL);
-
-    hvl_t* buffer = new hvl_t[dims[2]];
-    hid_t memtype = H5Tvlen_create(H5T_NATIVE_FLOAT);
-
-    hsize_t dataspace_start[3] = {0, 0, 0};
-    hsize_t dataspace_count[3] = {1, 1, dims[2]};
-    herr_t status;
-
-    for (size_t i = 0; i < dims[2]; ++i) {
-        size_t tgroup = spliced_tgroup_indexes[i];
-        splicing[i].resize(boost::extents[dims[0]][dims[1]][tgroup_tids[tgroup].size()]);
-    }
-
-    for (size_t i = 0; i < num_samples; ++i) {
-        dataspace_start[0] = i;
-        for (size_t j = 0; j < C; ++j) {
-            dataspace_start[1] = j;
-            status = H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
-                                         dataspace_start, NULL,
-                                         dataspace_count, NULL);
-            if (status < 0) {
-                Logger::abort("HDF5 hyperslab selection failed.");
-            }
-
-            H5Dread_checked(dataset, memtype, mem_dataspace, dataspace,
-                            H5P_DEFAULT, buffer);
-
-            for (size_t k = 0; k < dims[2]; ++k) {
-                size_t tgroup = spliced_tgroup_indexes[k];
-                if (buffer[k].len != tgroup_tids[tgroup].size()) {
-                    Logger::abort("Spliced tgroup has an inconsistent transcript count.");
-                }
-
-                float sum = 0.0;
-                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
-                    splicing[k][i][j][l] =
-                        exp(reinterpret_cast<float*>(buffer[k].p)[l]);
-                    sum += splicing[k][i][j][l];
-                }
-
-                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
-                    splicing[k][i][j][l] /= sum;
-                }
-            }
-        }
-    }
-
-    H5Dvlen_reclaim(memtype, mem_dataspace, H5P_DEFAULT, buffer);
-    delete [] buffer;
-    H5Sclose(mem_dataspace);
-    H5Tclose(memtype);
-    H5Dclose(dataset);
-}
-
-
-void Summarize::condition_splicing(FILE* output)
-{
-    // TODO: pass these in
-    double upper_quantile = 0.95;
-    double lower_quantile = 0.05;
-
-    // indexed by sample_num, condition, and within-tgroup transcript
-    typedef boost::multi_array<float, 3> marray_t;
-
-    // indexed by spliced tgroup
-    std::vector<marray_t> splicing(spliced_tgroup_indexes.size());
-
-    condition_splicing(splicing);
-    size_t num_samples = 0;
-    size_t C = 0;
-    if (splicing.size() > 0) {
-        C = splicing[0].shape()[1];
-        num_samples = splicing[0].shape()[0];
-    }
-
-    // summarization
-    fprintf(output, "transcript_id\ttss_transcript_ids");
-    for (size_t i = 0; i < C; ++i) {
-        unsigned int cond = i + 1;
-        fprintf(output, "\tcondition%u_lower\tcondition%u_upper\tcondition%u_median",
-                cond, cond, cond);
-    }
-    fputc('\n', output);
-
-    std::vector<float> work(num_samples);
-
-    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
-        size_t tgroup = spliced_tgroup_indexes[i];
-        for (size_t j = 0; j < tgroup_tids[tgroup].size(); ++j) {
-            fprintf(output, "%s\t", transcript_ids[tgroup_tids[tgroup][j]].get().c_str());
-            for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
-                if (k != 0) fputc(',', output);
-                fprintf(output, "%s", transcript_ids[tgroup_tids[tgroup][k]].get().c_str());
-            }
-
-            for (size_t k = 0; k < C; ++k) {
-                for (size_t l = 0; l < num_samples; ++l) {
-                    work[l] = splicing[i][l][k][j];
-                }
-
-                std::sort(work.begin(), work.end());
-                fprintf(output, "\t%f\t%f\t%f",
-                        (double) work[lround(work.size() * lower_quantile)],
-                        (double) work[lround(work.size() * upper_quantile)],
-                        (double) work[work.size()/2]);
-            }
-            fputc('\n', output);
-        }
     }
 }
 
