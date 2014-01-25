@@ -882,6 +882,8 @@ static void parse_command_line_experiment_description(
             sample_filenames.push_back(fn);
             ++sample_num;
         }
+
+        ++condition_num;
     }
 }
 
