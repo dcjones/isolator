@@ -29,6 +29,12 @@ struct IsolatorMetadata
 };
 
 
+enum GeneFeatureType {
+    GENE_FEATURE_CASSETTE_EXON,
+    GENE_FEATURE_RETAINED_INTRON
+};
+
+
 class Summarize
 {
     public:
@@ -66,7 +72,7 @@ class Summarize
 
         void expression_samples(FILE* output);
         void condition_pairwise_splicing(FILE* output);
-        void cassette_exon_pairwise_splicing(FILE* output);
+        //void cassette_exon_pairwise_splicing(FILE* output);
 
         void read_metadata(IsolatorMetadata& metadata);
 
@@ -92,10 +98,11 @@ class Summarize
 
         void condition_splicing(std::vector<boost::multi_array<float, 3> >& output);
 
-        void read_cassette_exons(
-                std::vector<Interval>& cassette_exons,
+        void read_gene_features(
+                std::vector<Interval>& feature_intervals,
                 std::vector<std::vector<unsigned int> >& including_tids,
-                std::vector<std::vector<unsigned int> >& excluding_tids);
+                std::vector<std::vector<unsigned int> >& excluding_tids,
+                std::vector<GeneFeatureType>& feature_types);
 
         void read_tgroup_mean(boost::multi_array<float, 3>& output);
 

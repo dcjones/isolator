@@ -1177,11 +1177,12 @@ void Summarize::expression_samples(FILE* output)
 }
 
 
-void Summarize::read_cassette_exons(std::vector<Interval>& cassette_exons,
+void Summarize::read_gene_features(std::vector<Interval>& feature_intervals,
                                     std::vector<std::vector<unsigned int> >& including_tids,
-                                    std::vector<std::vector<unsigned int> >& excluding_tids)
+                                    std::vector<std::vector<unsigned int> >& excluding_tids,
+                                    std::vector<GeneFeatureType>& feature_types)
 {
-    hid_t dataset = H5Dopen2_checked(h5_file, "/cassette_exons/seqname", H5P_DEFAULT);
+    hid_t dataset = H5Dopen2_checked(h5_file, "/features/seqname", H5P_DEFAULT);
     hid_t dataspace = H5Dget_space(dataset);
     hsize_t dims[1];
     H5Sget_simple_extent_dims(dataspace, dims, NULL);
@@ -1196,28 +1197,28 @@ void Summarize::read_cassette_exons(std::vector<Interval>& cassette_exons,
     H5Dclose(dataset);
 
     // read starts
-    dataset = H5Dopen2_checked(h5_file, "/cassette_exons/start", H5P_DEFAULT);
+    dataset = H5Dopen2_checked(h5_file, "/features/start", H5P_DEFAULT);
     std::vector<long> starts(n);
     H5Dread_checked(dataset, H5T_NATIVE_LONG, H5S_ALL, H5S_ALL, H5P_DEFAULT,
                     &starts.at(0));
     H5Dclose(dataset);
 
     // read ends
-    dataset = H5Dopen2_checked(h5_file, "/cassette_exons/end", H5P_DEFAULT);
+    dataset = H5Dopen2_checked(h5_file, "/features/end", H5P_DEFAULT);
     std::vector<long> ends(n);
     H5Dread_checked(dataset, H5T_NATIVE_LONG, H5S_ALL, H5S_ALL, H5P_DEFAULT,
                     &ends.at(0));
     H5Dclose(dataset);
 
     // read strands
-    dataset = H5Dopen2_checked(h5_file, "/cassette_exons/strand", H5P_DEFAULT);
+    dataset = H5Dopen2_checked(h5_file, "/features/strand", H5P_DEFAULT);
     std::vector<char> strands(n);
     H5Dread_checked(dataset, H5T_NATIVE_CHAR, H5S_ALL, H5S_ALL, H5P_DEFAULT,
                     &strands.at(0));
     H5Dclose(dataset);
 
     // read including_tids
-    dataset = H5Dopen2_checked(h5_file, "/cassette_exons/including_tids", H5P_DEFAULT);
+    dataset = H5Dopen2_checked(h5_file, "/features/including_tid", H5P_DEFAULT);
     hid_t tids_type = H5Tvlen_create(H5T_NATIVE_UINT);
     std::vector<hvl_t> including_tids_data(n);
     H5Dread_checked(dataset, tids_type, H5S_ALL, H5S_ALL, H5P_DEFAULT,
@@ -1225,30 +1226,40 @@ void Summarize::read_cassette_exons(std::vector<Interval>& cassette_exons,
     H5Dclose(dataset);
 
     // read excluding_tids
-    dataset = H5Dopen2_checked(h5_file, "/cassette_exons/excluding_tids", H5P_DEFAULT);
+    dataset = H5Dopen2_checked(h5_file, "/features/excluding_tid", H5P_DEFAULT);
     std::vector<hvl_t> excluding_tids_data(n);
     H5Dread_checked(dataset, tids_type, H5S_ALL, H5S_ALL, H5P_DEFAULT,
                     &excluding_tids_data.at(0));
     H5Dclose(dataset);
 
+    // read types
+    dataset = H5Dopen2_checked(h5_file, "/features/type", H5P_DEFAULT);
+    std::vector<unsigned int> types_data(n);
+    H5Dread_checked(dataset, tids_type, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                    &types_data.at(0));
+    H5Dclose(dataset);
+
     // construct the data
-    cassette_exons.resize(n);
+    feature_intervals.resize(n);
     including_tids.resize(n);
     excluding_tids.resize(n);
+    feature_types.resize(n);
 
     for (size_t i = 0; i < n; ++i) {
-        cassette_exons[i].seqname = std::string(seqnames[i]);
-        cassette_exons[i].start = starts[i];
-        cassette_exons[i].end = ends[i];
+        feature_intervals[i].seqname = std::string(seqnames[i]);
+        feature_intervals[i].start = starts[i];
+        feature_intervals[i].end = ends[i];
         if (strands[i] == '+') {
-            cassette_exons[i].strand = strand_pos;
+            feature_intervals[i].strand = strand_pos;
         }
         else if (strands[i] == '-') {
-            cassette_exons[i].strand = strand_neg;
+            feature_intervals[i].strand = strand_neg;
         }
         else {
-            cassette_exons[i].strand = strand_na;
+            feature_intervals[i].strand = strand_na;
         }
+
+        feature_types[i] = (GeneFeatureType) types_data[i];
 
         including_tids[i].resize(including_tids_data[i].len);
         for (size_t j = 0; j < including_tids_data[i].len; ++j) {
@@ -1286,6 +1297,7 @@ void Summarize::read_tgroup_mean(boost::multi_array<float, 3>& output)
 }
 
 
+#if 0
 void Summarize::cassette_exon_pairwise_splicing(FILE* output)
 {
     // TODO: pass these in
@@ -1430,6 +1442,7 @@ void Summarize::cassette_exon_pairwise_splicing(FILE* output)
         }
     }
 }
+#endif
 
 
 Summarize::~Summarize()
