@@ -935,6 +935,64 @@ void TranscriptSet::get_cassette_exons(std::vector<Interval>& cassette_exons,
 }
 
 
+void TranscriptSet::get_retained_introns(
+        std::vector<Interval>& retained_introns,
+        std::vector<std::vector<unsigned int> >& including_tids,
+        std::vector<std::vector<unsigned int> >& excluding_tids)
+{
+    // This should work very much like cassette exons but inverted.
+    std::map<Interval, std::vector<unsigned int> > exons;
+    std::map<IntervalPair, std::vector<unsigned int> > flanking_exons;
+
+    // index exons
+    for (iterator t = begin(); t != end(); ++t) {
+        for (Transcript::iterator e = t->begin(); e != t->end(); ++e) {
+            Interval exon_interval(t->seqname, e->start, e->end, t->strand);
+            exons[exon_interval].push_back(t->id);
+        }
+    }
+
+    // index flanking exons
+    for (iterator t = begin(); t != end(); ++t) {
+        Transcript::iterator e1 = t->begin();
+        Transcript::iterator e2 = t->begin(); ++e2;
+
+        while (e2 != t->end()) {
+            Interval first(t->seqname, e1->start, e1->end, t->strand);
+            Interval second(t->seqname, e2->start, e2->end, t->strand);
+            IntervalPair flanks(first, second);
+            flanking_exons[flanks].push_back(t->id);
+            ++e1;
+            ++e2;
+        }
+    }
+
+    // find retained introns
+    typedef std::pair<IntervalPair, std::vector<unsigned int> > flank_keyval_t;
+    BOOST_FOREACH (const flank_keyval_t& keyval, flanking_exons) {
+        const IntervalPair& flanks = keyval.first;
+        const std::vector<unsigned int>& tids = keyval.second;
+
+        Interval retained_from_exon(flanks.first.seqname,
+                                    flanks.first.start,
+                                    flanks.second.end,
+                                    flanks.first.strand);
+        std::map<Interval, std::vector<unsigned int> >::iterator e =
+            exons.find(retained_from_exon);
+        if (e == exons.end()) continue;
+
+        Interval intron(flanks.first.seqname,
+                        flanks.first.end + 1,
+                        flanks.second.start - 1,
+                        flanks.first.strand);
+
+        retained_introns.push_back(intron);
+        including_tids.push_back(e->second);
+        excluding_tids.push_back(tids);
+    }
+}
+
+
 TranscriptSet::iterator TranscriptSet::begin()
 {
     return transcripts.begin();
