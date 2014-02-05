@@ -218,6 +218,7 @@ static void print_summarize_strategies(FILE* fout)
            "  gene-expression\n"
            "  differential-transcription\n"
            "  differential-splicing\n"
+           "  differential-feature-splicing\n"
            "  condition-splicing\n"
            "  condition-transcription\n"
            "\n");
@@ -356,6 +357,10 @@ static int isolator_summarize(int argc, char* argv[])
     else if (strcmp(strategy, "differential-splicing") == 0) {
         summarize.differential_splicing(out_file, credible_interval,
                                         minimum_effect_size);
+    }
+    else if (strcmp(strategy, "differential-feature-splicing") == 0) {
+        summarize.differential_feature_splicing(out_file, credible_interval,
+                                                minimum_effect_size);
     }
     else if (strcmp(strategy, "condition-splicing") == 0) {
         summarize.condition_splicing(out_file, credible_interval);

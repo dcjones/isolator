@@ -691,8 +691,8 @@ void Summarize::differential_transcription(FILE* output, double credible_interva
 
                 // conditions
                 fprintf(output, "\t%s\t%s",
-                        metadata.sample_conditions[condition_a].c_str(),
-                        metadata.sample_conditions[condition_b].c_str());
+                        condition_names[condition_a].c_str(),
+                        condition_names[condition_b].c_str());
 
                 double down_pr = 0, up_pr = 0;
                 for (size_t j = 0; j < num_samples; ++j) {
@@ -748,7 +748,7 @@ void Summarize::differential_splicing(FILE* output, double credible_interval,
 
     fprintf(output,
             "gene_name\tgene_id\ttranscript_id\tcondition_a\tcondition_b\t"
-            "down_pr\tup-pr\tmedian_log2_fold_change");
+            "down_pr\tup_pr\tmedian_log2_fold_change");
     if (print_credible_interval) {
         fprintf(output, "\tlower_log2_fold_change\tupper_log2_fold_change");
     }
@@ -777,8 +777,8 @@ void Summarize::differential_splicing(FILE* output, double credible_interval,
                             gene_names[tid].get().c_str(),
                             gene_ids[tid].get().c_str(),
                             transcript_ids[tid].get().c_str(),
-                            metadata.sample_conditions[condition_a].c_str(),
-                            metadata.sample_conditions[condition_b].c_str(),
+                            condition_names[condition_a].c_str(),
+                            condition_names[condition_b].c_str(),
                             down_pr, up_pr, work[num_samples/2]);
                     if (print_credible_interval) {
                         fprintf(output, "\t%e\t%e",
@@ -861,6 +861,199 @@ void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& s
     H5Sclose(mem_dataspace);
     H5Tclose(memtype);
     H5Dclose(dataset);
+}
+
+
+void Summarize::differential_feature_splicing(FILE* output,
+                                              double credible_interval,
+                                              double effect_size)
+{
+    bool print_credible_interval = !isnan(credible_interval);
+    double lower_quantile = 0.5 - credible_interval/2;
+    double upper_quantile = 0.5 + credible_interval/2;
+
+    std::vector<Interval> feature_intervals;
+    std::vector<std::vector<unsigned int> > including_tids;
+    std::vector<std::vector<unsigned int> > excluding_tids;
+    std::vector<GeneFeatureType> feature_types;
+    read_gene_features(feature_intervals, including_tids, excluding_tids,
+                       feature_types);
+
+    // construct an index mapping tids to their index within their tgroup
+    std::vector<unsigned int> tid_tgroup_index(N);
+    BOOST_FOREACH (const std::vector<unsigned int>& tids, tgroup_tids) {
+        for (size_t i = 0; i < tids.size(); ++i) {
+            tid_tgroup_index[tids[i]] = i;
+        }
+    }
+
+    // construct an index mapping tgroup to a spliced tgroup index
+    std::vector<unsigned int> tgroup_spliced_tgroup(T);
+    std::fill(tgroup_spliced_tgroup.begin(), tgroup_spliced_tgroup.end(), (unsigned int) -1);
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        tgroup_spliced_tgroup[spliced_tgroup_indexes[i]] = i;
+    }
+
+    // indexed by spliced tgroup, sample, condition, within tgroup index
+    typedef boost::multi_array<float, 3> marray_t;
+    std::vector<marray_t> splicing(spliced_tgroup_indexes.size());
+    condition_splicing(splicing);
+
+    marray_t tgroup_means;
+    read_tgroup_mean(tgroup_means);
+
+    std::vector<float> work(num_samples);
+
+    fprintf(output,
+            "gene_names"
+            "\tgene_ids"
+            "\ttranscript_ids"
+            "\tlocus"
+            "\ttype"
+            "\tcondition_a"
+            "\tcondition_b"
+            "\tdown_pr"
+            "\tup_pr"
+            "\tmedian_log2_fold_change");
+
+    if (print_credible_interval) {
+        fprintf(output, "\tlower_log2_fold_change\tupper_log2_fold_change");
+    }
+    fputc('\n', output);
+
+    boost::multi_array<float, 2> spliced_in_proportion(
+            boost::extents[C][num_samples]);
+
+    std::set<GeneName> feature_gene_names;
+    std::set<GeneID> feature_gene_ids;
+    std::set<TranscriptID> feature_transcript_ids;
+    bool first_item;
+
+    for (size_t i = 0; i < feature_intervals.size(); ++i) {
+        // pre-compute spliced in proportions
+        for (unsigned int j = 0; j < C; ++j) {
+            for (size_t k = 0; k < num_samples; ++k) {
+                double spliced_in = 0.0;
+                BOOST_FOREACH (unsigned int tid, including_tids[i]) {
+                    unsigned int tg = tgroup[tid];
+                    unsigned int stg = tgroup_spliced_tgroup[tg];
+                    if (stg == (unsigned int) -1) continue;
+                    unsigned int stid = tid_tgroup_index[tid];
+                    spliced_in += log(splicing[stg][k][j][stid]) +
+                                  tgroup_means[k][j][tg];
+                }
+
+                double spliced_out = 0.0;
+                BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
+                    unsigned int tg = tgroup[tid];
+                    unsigned int stg = tgroup_spliced_tgroup[tg];
+                    if (stg == (unsigned int) -1) continue;
+                    unsigned int stid = tid_tgroup_index[tid];
+                    spliced_out += log(splicing[stg][k][j][stid]) +
+                                   tgroup_means[k][j][tg];
+                }
+
+                spliced_in_proportion[j][k] =
+                    (spliced_in - logaddexp(spliced_in, spliced_out)) / M_LN2;
+            }
+        }
+
+        for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
+            for (unsigned int condition_b = condition_a + 1; condition_b < C; ++condition_b) {
+                gene_names.clear();
+                gene_ids.clear();
+                transcript_ids.clear();
+
+                BOOST_FOREACH (unsigned int tid, including_tids[i]) {
+                    feature_gene_names.insert(gene_names[tid]);
+                    feature_gene_ids.insert(gene_ids[tid]);
+                    feature_transcript_ids.insert(transcript_ids[tid]);
+                }
+
+                BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
+                    feature_gene_names.insert(gene_names[tid]);
+                    feature_gene_ids.insert(gene_ids[tid]);
+                    feature_transcript_ids.insert(transcript_ids[tid]);
+                }
+
+                // gene_names
+                first_item = true;
+                BOOST_FOREACH (const GeneName& gene_name, feature_gene_names) {
+                    if (!first_item) fputc(',', output);
+                    else first_item = false;
+                    fputs(gene_name.get().c_str(), output);
+                }
+
+                // gene_ids
+                fputc('\t', output);
+                first_item = true;
+                BOOST_FOREACH (const GeneID& gene_id, feature_gene_ids) {
+                    if (!first_item) fputc(',', output);
+                    else first_item = false;
+                    fputs(gene_id.get().c_str(), output);
+                }
+
+                // transcript_ids
+                fputc('\t', output);
+                first_item = true;
+                BOOST_FOREACH (const TranscriptID& transcript_id, feature_transcript_ids) {
+                    if (!first_item) fputc(',', output);
+                    else first_item = false;
+                    fputs(transcript_id.get().c_str(), output);
+                }
+
+                // locus
+                fputc('\t', output);
+                fprintf(output, "%s:%ld-%ld(%c)",
+                        feature_intervals[i].seqname.get().c_str(),
+                        feature_intervals[i].start,
+                        feature_intervals[i].end,
+                        feature_intervals[i].strand == strand_pos ? '+' :
+                        feature_intervals[i].strand == strand_neg ? '-' : '.');
+
+                // type
+                fputc('\t', output);
+                if (feature_types[i] == GENE_FEATURE_CASSETTE_EXON) {
+                    fputs("cassette_exon", output);
+                }
+                else if (feature_types[i] == GENE_FEATURE_RETAINED_INTRON) {
+                    fputs("retained_intron", output);
+                }
+                else {
+                    fputs("unknown_feature", output);
+                }
+
+                // condition_a, condition_b
+                fprintf(output, "\t%s\t%s",
+                        condition_names[condition_a].c_str(),
+                        condition_names[condition_b].c_str());
+
+                double down_pr = 0.0, up_pr = 0.0;
+                std::fill(work.begin(), work.end(), 0.0);
+                for (size_t k = 0; k < num_samples; ++k) {
+                    work[k] = spliced_in_proportion[condition_a][k] -
+                              spliced_in_proportion[condition_b][k];
+                    if (fabs(work[k]) >= effect_size) {
+                        if (work[k] <= 0) down_pr += 1;
+                        else up_pr += 1;
+                    }
+                }
+                down_pr /= num_samples;
+                up_pr /= num_samples;
+
+                std::sort(work.begin(), work.end());
+                fprintf(output, "\t%0.3f\t%0.3f\t%e",
+                        down_pr, up_pr, work[num_samples/2]);
+                if (print_credible_interval) {
+                    fprintf(output, "\t%e\t%e",
+                            work[lround((num_samples - 1) * lower_quantile)],
+                            work[lround((num_samples - 1) * upper_quantile)]);
+                }
+                fputc('\t', output);
+            }
+        }
+    }
+
 }
 
 
@@ -1295,154 +1488,6 @@ void Summarize::read_tgroup_mean(boost::multi_array<float, 3>& output)
                     H5P_DEFAULT, output.data());
     H5Dclose(dataset);
 }
-
-
-#if 0
-void Summarize::cassette_exon_pairwise_splicing(FILE* output)
-{
-    // TODO: pass these in
-    double upper_quantile = 0.95;
-    double lower_quantile = 0.05;
-
-    // indexed by sample_num, condition, and within-tgroup transcript
-    typedef boost::multi_array<float, 3> marray_t;
-
-    // indexed by spliced tgroup
-    std::vector<marray_t> splicing(spliced_tgroup_indexes.size());
-
-    condition_splicing(splicing);
-    size_t num_samples = 0;
-    size_t C = 0;
-    if (splicing.size() > 0) {
-        C = splicing[0].shape()[1];
-        num_samples = splicing[0].shape()[0];
-    }
-
-    boost::multi_array<float, 3> tgroup_means;
-    read_tgroup_mean(tgroup_means);
-
-    std::vector<Interval> cassette_exons;
-    std::vector<std::vector<unsigned int> > including_tids;
-    std::vector<std::vector<unsigned int> > excluding_tids;
-
-    read_cassette_exons(cassette_exons, including_tids, excluding_tids);
-
-
-    // construct an index mapping tids to their index within their tgroup
-    std::vector<unsigned int> tid_tgroup_index(N);
-    BOOST_FOREACH (const std::vector<unsigned int>& tids, tgroup_tids) {
-        for (size_t i = 0; i < tids.size(); ++i) {
-            tid_tgroup_index[tids[i]] = i;
-        }
-    }
-
-    // construct an index mapping tgroup to a spliced tgroup index
-    std::vector<unsigned int> tgroup_spliced_tgroup(T);
-    std::fill(tgroup_spliced_tgroup.begin(), tgroup_spliced_tgroup.end(), (unsigned int) -1);
-    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
-        tgroup_spliced_tgroup[spliced_tgroup_indexes[i]] = i;
-    }
-
-    fprintf(output,
-            "seqname\tstart\tend\tstrand\tspliced_in_transcript_ids\t"
-            "spliced_out_transcript_ids\t"
-            "condition_a\tcondition_b\tlog2fc_lower\t"
-            "log2fc_median\tlog2fc_upper\n");
-
-    boost::multi_array<float, 2> condition_spliced_in_proportion(
-            boost::extents[C][num_samples]);
-    std::vector<float> work(num_samples);
-
-    for (size_t i = 0; i < cassette_exons.size(); ++i) {
-        for (size_t j = 0; j < C; ++j) {
-            for (size_t k = 0; k < num_samples; ++k) {
-                float spliced_in = 0.0;
-                BOOST_FOREACH (unsigned int tid, including_tids[i]) {
-                    unsigned int tg = tgroup[tid];
-                    float tmix = 0.0;
-                    if (tgroup_spliced_tgroup[tg] < (unsigned int) -1) {
-                        tmix = log(splicing[tgroup_spliced_tgroup[tg]][k][j][tid_tgroup_index[tid]]);
-                    }
-
-                    spliced_in += tmix + tgroup_means[k][j][tg];
-                }
-
-                float spliced_out = 0.0;
-                BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
-                    unsigned int tg = tgroup[tid];
-                    float tmix = 0.0;
-                    if (tgroup_spliced_tgroup[tg] < (unsigned int) -1) {
-                        tmix = log(splicing[tgroup_spliced_tgroup[tg]][k][j][tid_tgroup_index[tid]]);
-                    }
-
-                    spliced_out += tmix + tgroup_means[k][j][tg];
-                }
-
-                // compute the proportion spliced in
-                condition_spliced_in_proportion[j][k] =
-                    (spliced_in - logaddexp(spliced_in, spliced_out)) / M_LN2;
-            }
-        }
-
-        for (size_t cond_a = 0; cond_a < C; ++cond_a) {
-            for (size_t cond_b = 0; cond_b < C; ++cond_b) {
-                if (cond_a == cond_b) continue;
-
-                for (size_t k = 0; k < num_samples; ++k) {
-                    work[k] = condition_spliced_in_proportion[cond_a][k] -
-                              condition_spliced_in_proportion[cond_b][k];
-                }
-
-                std::sort(work.begin(), work.end());
-
-                fprintf(output, "%s\t%ld\t%ld\t",
-                        cassette_exons[i].seqname.get().c_str(),
-                        cassette_exons[i].start,
-                        cassette_exons[i].end);
-
-                switch (cassette_exons[i].strand) {
-                    case strand_pos:
-                        fputc('+', output);
-                        break;
-                    case strand_neg:
-                        fputc('-', output);
-                        break;
-                    default:
-                        fputc('.', output);
-                }
-                fputc('\t', output);
-
-
-                bool first = true;
-                BOOST_FOREACH (unsigned int tid, including_tids[i]) {
-                    if (!first) {
-                        fputc(',', output);
-                    }
-                    else first = false;
-                    fputs(transcript_ids[tid].get().c_str(), output);
-                }
-                fputc('\t', output);
-
-                first = true;
-                BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
-                    if (!first) {
-                        fputc(',', output);
-                    }
-                    else first = false;
-                    fputs(transcript_ids[tid].get().c_str(), output);
-                }
-                fputc('\t', output);
-
-                fprintf(output, "%lu\t%lu\t%f\t%f\t%f\n",
-                        cond_a + 1, cond_b + 1,
-                        work[(int)(lower_quantile * num_samples)],
-                        work[num_samples/2],
-                        work[(int)(upper_quantile * num_samples)]);
-            }
-        }
-    }
-}
-#endif
 
 
 Summarize::~Summarize()

@@ -56,6 +56,10 @@ class Summarize
         void differential_splicing(FILE* output, double credible_interval,
                                    double effect_size);
 
+        void differential_feature_splicing(FILE* output,
+                                           double credible_interval,
+                                           double effect_size);
+
         void condition_splicing(FILE* output, double credible_interval);
 
         void condition_transcription(FILE* output, double credible_interval);
