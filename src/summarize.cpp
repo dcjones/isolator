@@ -960,9 +960,9 @@ void Summarize::differential_feature_splicing(FILE* output,
 
         for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
             for (unsigned int condition_b = condition_a + 1; condition_b < C; ++condition_b) {
-                gene_names.clear();
-                gene_ids.clear();
-                transcript_ids.clear();
+                feature_gene_names.clear();
+                feature_gene_ids.clear();
+                feature_transcript_ids.clear();
 
                 BOOST_FOREACH (unsigned int tid, including_tids[i]) {
                     feature_gene_names.insert(gene_names[tid]);
@@ -1049,7 +1049,7 @@ void Summarize::differential_feature_splicing(FILE* output,
                             work[lround((num_samples - 1) * lower_quantile)],
                             work[lround((num_samples - 1) * upper_quantile)]);
                 }
-                fputc('\t', output);
+                fputc('\n', output);
             }
         }
     }
@@ -1428,7 +1428,7 @@ void Summarize::read_gene_features(std::vector<Interval>& feature_intervals,
     // read types
     dataset = H5Dopen2_checked(h5_file, "/features/type", H5P_DEFAULT);
     std::vector<unsigned int> types_data(n);
-    H5Dread_checked(dataset, tids_type, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+    H5Dread_checked(dataset, H5T_NATIVE_UINT, H5S_ALL, H5S_ALL, H5P_DEFAULT,
                     &types_data.at(0));
     H5Dclose(dataset);
 
