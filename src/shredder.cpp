@@ -143,6 +143,11 @@ static double sq(double x)
 }
 
 
+static double cb(double x)
+{
+    return x * x * x;
+}
+
 static double lbeta(double x, double y)
 {
     return lgamma(x) + lgamma(y) - lgamma(x + y);
@@ -158,6 +163,17 @@ double NormalLogPdf::f(double mu, double sigma, const double* xs, size_t n)
     }
 
     return part1 - part2;
+}
+
+
+double NormalLogPdf::df_dsigma(double mu, double sigma, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += sq(xs[i] - mu);
+    }
+
+    return part / cb(sigma) - n/sigma;
 }
 
 

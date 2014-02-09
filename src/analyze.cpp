@@ -28,6 +28,17 @@ static void assert_finite(double x)
 }
 
 
+static double sq(double x) {
+    return x * x;
+}
+
+
+static double splice_sigma_rescale(double sigma, double mu)
+{
+    double exp_mu = exp(mu);
+    return sigma * sq(exp_mu + 1) / exp_mu;
+}
+
 
 class BetaDistributionSampler : public Shredder
 {
@@ -130,6 +141,56 @@ class NormalSigmaSampler
 
     private:
         rng_t rng;
+};
+
+
+class LogisticNormalSigmaSampler : public Shredder
+{
+    public:
+        LogisticNormalSigmaSampler()
+            : Shredder(1e-16, 100.0)
+        {
+        }
+
+        double sample(double sigma0, const double* xs, const double* mu, size_t n,
+                      double prior_alpha, double prior_beta)
+        {
+            this->xs = xs;
+            this->mu = mu;
+            this->n = n;
+            this->prior_alpha = prior_alpha;
+            this->prior_beta = prior_beta;
+
+            return Shredder::sample(sigma0);
+        }
+
+    private:
+        NormalLogPdf likelihood_pdf;
+        SqInvGammaLogPdf prior_pdf;
+
+        const double* xs;
+        const double* mu;
+        size_t n;
+        double prior_alpha;
+        double prior_beta;
+
+    protected:
+        double f(double unscaled_sigma, double& d)
+        {
+            double lp = 0.0;
+            d = 0.0;
+
+            lp += prior_pdf.f(prior_alpha, prior_beta, &unscaled_sigma, 1);
+            d += prior_pdf.df_dx(prior_alpha, prior_beta, &unscaled_sigma, 1);
+
+            for (size_t i = 0; i < n; ++i) {
+                double scaled_sigma = splice_sigma_rescale(unscaled_sigma, mu[i]);
+                lp += likelihood_pdf.f(mu[i], scaled_sigma, &xs[i], 1);
+                d += likelihood_pdf.df_dsigma(mu[i], scaled_sigma, &xs[i], 1);
+            }
+
+            return lp;
+        }
 };
 
 
@@ -282,6 +343,7 @@ class SpliceMuSigmaSamplerThread
         {
             // temporary array for storing observation marginals
             std::vector<double> data(K);
+            std::vector<double> mu_c(K);
 
             // temporary space for sampling precision
             size_t max_size2 = 0;
@@ -327,7 +389,8 @@ class SpliceMuSigmaSamplerThread
                         }
 
                         mu[i][j][k] =
-                            mu_sampler.sample(sigma[j][k],
+                            mu_sampler.sample(splice_sigma_rescale(sigma[j][k],
+                                                                   mu[i][j][k]),
                                               &data.at(0),
                                               condition_samples[i].size(),
                                               experiment_mu[j][k],
@@ -338,12 +401,14 @@ class SpliceMuSigmaSamplerThread
                 for (size_t k = 0; k < tgroup_tids[tgroup].size() - 1; ++k) {
                     matrix_column<matrix<double> > col(dataj, k);
                     std::copy(col.begin(), col.end(), data.begin());
+
+
                     for (size_t l = 0; l < K; ++l) {
-                        data[l] -= mu[condition[l]][j][k];
+                        mu_c[l] = mu[condition[l]][j][k];
                     }
 
                     sigma[j][k] =
-                        sigma_sampler.sample(&data.at(0), K,
+                        sigma_sampler.sample(sigma[j][k], &data.at(0), &mu_c.at(0), K,
                                              splice_alpha, splice_beta);
                 }
 
@@ -388,7 +453,7 @@ class SpliceMuSigmaSamplerThread
 
         size_t C, K;
         NormalMuSampler mu_sampler;
-        NormalSigmaSampler sigma_sampler;
+        LogisticNormalSigmaSampler sigma_sampler;
         rng_t rng;
 
         boost::thread* thread;

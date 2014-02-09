@@ -42,6 +42,7 @@ class NormalLogPdf
 {
     public:
         double f(double mu, double sigma, const double* xs, size_t n);
+        double df_dsigma(double mu, double sigma, const double* xs, size_t n);
 };
 
 
