@@ -927,30 +927,59 @@ void Summarize::differential_feature_splicing(FILE* output,
     std::set<GeneName> feature_gene_names;
     std::set<GeneID> feature_gene_ids;
     std::set<TranscriptID> feature_transcript_ids;
+    std::set<unsigned int> used_tgroups, including_tgroups, excluding_tgroups;
     bool first_item;
 
     for (size_t i = 0; i < feature_intervals.size(); ++i) {
+        // whitelist tgroups that actually both spliceforms
+        including_tgroups.clear();
+        excluding_tgroups.clear();
+        used_tgroups.clear();
+        BOOST_FOREACH (unsigned int tid, including_tids[i]) {
+            including_tgroups.insert(tgroup[tid]);
+        }
+
+        BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
+            excluding_tgroups.insert(tgroup[tid]);
+        }
+
+        std::set_intersection(including_tgroups.begin(), including_tgroups.end(),
+                              excluding_tgroups.begin(), excluding_tgroups.end(),
+                              std::inserter(used_tgroups, used_tgroups.begin()));
+
+        if (used_tgroups.empty()) continue;
+
         // pre-compute spliced in proportions
         for (unsigned int j = 0; j < C; ++j) {
             for (size_t k = 0; k < num_samples; ++k) {
-                double spliced_in = 0.0;
+                double spliced_in = -INFINITY;
                 BOOST_FOREACH (unsigned int tid, including_tids[i]) {
                     unsigned int tg = tgroup[tid];
+                    if (used_tgroups.find(tg) == used_tgroups.end()) continue;
+
                     unsigned int stg = tgroup_spliced_tgroup[tg];
                     if (stg == (unsigned int) -1) continue;
                     unsigned int stid = tid_tgroup_index[tid];
-                    spliced_in += log(splicing[stg][k][j][stid]) +
-                                  tgroup_means[k][j][tg];
+
+                    double x = log(splicing[stg][k][j][stid]) +
+                               tgroup_means[k][j][tg];
+                    if (isinf(spliced_in)) spliced_in = x;
+                    else spliced_in = logaddexp(spliced_in, x);
                 }
 
-                double spliced_out = 0.0;
+                double spliced_out = -INFINITY;
                 BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
                     unsigned int tg = tgroup[tid];
+                    if (used_tgroups.find(tg) == used_tgroups.end()) continue;
+
                     unsigned int stg = tgroup_spliced_tgroup[tg];
                     if (stg == (unsigned int) -1) continue;
                     unsigned int stid = tid_tgroup_index[tid];
-                    spliced_out += log(splicing[stg][k][j][stid]) +
-                                   tgroup_means[k][j][tg];
+
+                    double x = log(splicing[stg][k][j][stid]) +
+                               tgroup_means[k][j][tg];
+                    if (isinf(spliced_out)) spliced_out = x;
+                    else spliced_out = logaddexp(spliced_out, x);
                 }
 
                 spliced_in_proportion[j][k] =
@@ -958,24 +987,30 @@ void Summarize::differential_feature_splicing(FILE* output,
             }
         }
 
+        feature_gene_names.clear();
+        feature_gene_ids.clear();
+        feature_transcript_ids.clear();
+
+        BOOST_FOREACH (unsigned int tid, including_tids[i]) {
+            if (used_tgroups.find(tgroup[tid]) == used_tgroups.end()) {
+                continue;
+            }
+            feature_gene_names.insert(gene_names[tid]);
+            feature_gene_ids.insert(gene_ids[tid]);
+            feature_transcript_ids.insert(transcript_ids[tid]);
+        }
+
+        BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
+            if (used_tgroups.find(tgroup[tid]) == used_tgroups.end()) {
+                continue;
+            }
+            feature_gene_names.insert(gene_names[tid]);
+            feature_gene_ids.insert(gene_ids[tid]);
+            feature_transcript_ids.insert(transcript_ids[tid]);
+        }
+
         for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
             for (unsigned int condition_b = condition_a + 1; condition_b < C; ++condition_b) {
-                feature_gene_names.clear();
-                feature_gene_ids.clear();
-                feature_transcript_ids.clear();
-
-                BOOST_FOREACH (unsigned int tid, including_tids[i]) {
-                    feature_gene_names.insert(gene_names[tid]);
-                    feature_gene_ids.insert(gene_ids[tid]);
-                    feature_transcript_ids.insert(transcript_ids[tid]);
-                }
-
-                BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
-                    feature_gene_names.insert(gene_names[tid]);
-                    feature_gene_ids.insert(gene_ids[tid]);
-                    feature_transcript_ids.insert(transcript_ids[tid]);
-                }
-
                 // gene_names
                 first_item = true;
                 BOOST_FOREACH (const GeneName& gene_name, feature_gene_names) {

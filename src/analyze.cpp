@@ -734,7 +734,7 @@ Analyze::Analyze(size_t burnin,
     experiment_tgroup_sigma0 = 5.0;
 
     experiment_splice_mu0 = 0;
-    experiment_splice_sigma0 = 0.1;
+    experiment_splice_sigma0 = 1.0;
 
     tgroup_expr.resize(T);
     tgroup_row_data.resize(T);
@@ -1623,7 +1623,7 @@ void Analyze::sample()
                              &condition_splice_sigma_work.at(0),
                              condition_splice_sigma_work.size());
 #endif
-    splice_beta = 0.1;
+    splice_beta = 5.0;
 
     assert_finite(splice_beta);
 }

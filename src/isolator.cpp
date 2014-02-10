@@ -953,7 +953,7 @@ static int isolator_analyze(int argc, char* argv[])
     Logger::level logger_level = Logger::INFO;
     unsigned int burnin = 100;
     unsigned int num_samples = 250;
-    pos_t tss_cluster_dist = 30;
+    pos_t tss_cluster_dist = 150;
     bool run_gc_correction = true;
     constants::num_threads = boost::thread::hardware_concurrency();
     const char* fa_fn  = NULL;
