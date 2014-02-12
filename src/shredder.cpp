@@ -75,7 +75,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
 
     while (fabs(lp) > lp_eps && fabs(x_bound_upper - x_bound_lower) > x_eps) {
         double x1;
-        if (fabs(d) < d_eps) {
+        if (isnan(d) || fabs(d) < d_eps) {
             x1 = (x_bound_lower + x_bound_upper) / 2;
         }
         else {
@@ -115,7 +115,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
                 lp = f(x, d) - slice_height;
 
                 //if (boost::math::isinf(lp) || boost::math::isinf(d)) {
-                if (!boost::math::isfinite(lp) || !boost::math::isfinite(d)) {
+                if (!boost::math::isfinite(lp)) {
                     if (direction < 0) x_bound_lower = x;
                     else               x_bound_upper = x;
                 }
@@ -128,7 +128,6 @@ double Shredder::find_slice_edge(double x0, double slice_height,
         }
 
         assert_finite(lp);
-        assert_finite(d);
     }
 
     assert_finite(x);
@@ -163,6 +162,26 @@ double NormalLogPdf::f(double mu, double sigma, const double* xs, size_t n)
     }
 
     return part1 - part2;
+}
+
+
+double NormalLogPdf::df_dx(double mu, double sigma, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += mu - xs[i];
+    }
+    return part / sq(sigma);
+}
+
+
+double NormalLogPdf::df_dmu(double mu, double sigma, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += xs[i] - mu;
+    }
+    return part / sq(sigma);
 }
 
 
@@ -333,8 +352,7 @@ double SqInvGammaLogPdf::df_dx(double alpha, double beta, const double* xs, size
 {
     double part = 0.0;
     for (size_t i = 0; i < n; ++i) {
-        double x = xs[i] * xs[i];
-        part += beta / sq(x) - (alpha + 1) / x;
+        part += 2 * beta / cb(xs[i]) - (2 * alpha + 2) / xs[i];
     }
 
     return part;

@@ -841,7 +841,15 @@ void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& s
                 if (buffer[k].len != tgroup_tids[tgroup].size()) {
                     Logger::abort("Spliced tgroup has an inconsistent transcript count.");
                 }
+                // XXX
+#if 0
+                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
+                    splicing[k][i][j][l] =
+                        reinterpret_cast<float*>(buffer[k].p)[l];
+                }
+#endif
 
+//#if 0
                 float sum = 0.0;
                 for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
                     splicing[k][i][j][l] =
@@ -852,6 +860,7 @@ void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& s
                 for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
                     splicing[k][i][j][l] /= sum;
                 }
+//#endif
             }
         }
     }
@@ -907,7 +916,8 @@ void Summarize::differential_feature_splicing(FILE* output,
     fprintf(output,
             "gene_names"
             "\tgene_ids"
-            "\ttranscript_ids"
+            "\tincluding_transcript_ids"
+            "\texcluding_transcript_ids"
             "\tlocus"
             "\ttype"
             "\tcondition_a"
@@ -926,7 +936,7 @@ void Summarize::differential_feature_splicing(FILE* output,
 
     std::set<GeneName> feature_gene_names;
     std::set<GeneID> feature_gene_ids;
-    std::set<TranscriptID> feature_transcript_ids;
+    std::set<TranscriptID> feature_including_tids, feature_excluding_tids;
     std::set<unsigned int> used_tgroups, including_tgroups, excluding_tgroups;
     bool first_item;
 
@@ -989,7 +999,8 @@ void Summarize::differential_feature_splicing(FILE* output,
 
         feature_gene_names.clear();
         feature_gene_ids.clear();
-        feature_transcript_ids.clear();
+        feature_including_tids.clear();
+        feature_excluding_tids.clear();
 
         BOOST_FOREACH (unsigned int tid, including_tids[i]) {
             if (used_tgroups.find(tgroup[tid]) == used_tgroups.end()) {
@@ -997,7 +1008,7 @@ void Summarize::differential_feature_splicing(FILE* output,
             }
             feature_gene_names.insert(gene_names[tid]);
             feature_gene_ids.insert(gene_ids[tid]);
-            feature_transcript_ids.insert(transcript_ids[tid]);
+            feature_including_tids.insert(transcript_ids[tid]);
         }
 
         BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
@@ -1006,7 +1017,7 @@ void Summarize::differential_feature_splicing(FILE* output,
             }
             feature_gene_names.insert(gene_names[tid]);
             feature_gene_ids.insert(gene_ids[tid]);
-            feature_transcript_ids.insert(transcript_ids[tid]);
+            feature_excluding_tids.insert(transcript_ids[tid]);
         }
 
         for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
@@ -1031,7 +1042,15 @@ void Summarize::differential_feature_splicing(FILE* output,
                 // transcript_ids
                 fputc('\t', output);
                 first_item = true;
-                BOOST_FOREACH (const TranscriptID& transcript_id, feature_transcript_ids) {
+                BOOST_FOREACH (const TranscriptID& transcript_id, feature_including_tids) {
+                    if (!first_item) fputc(',', output);
+                    else first_item = false;
+                    fputs(transcript_id.get().c_str(), output);
+                }
+
+                fputc('\t', output);
+                first_item = true;
+                BOOST_FOREACH (const TranscriptID& transcript_id, feature_excluding_tids) {
                     if (!first_item) fputc(',', output);
                     else first_item = false;
                     fputs(transcript_id.get().c_str(), output);
