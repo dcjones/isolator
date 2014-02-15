@@ -2010,7 +2010,7 @@ void Analyze::choose_initial_values()
     splice_alpha = 20.0;
     splice_beta = 0.001;
 
-    experiment_splice_alpha = 1.0;
-    experiment_splice_beta = 0.1;
+    experiment_splice_alpha = 10.0;
+    experiment_splice_beta = 0.01;
 }
 

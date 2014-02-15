@@ -60,7 +60,8 @@ class Summarize
                                            double credible_interval,
                                            double effect_size);
 
-        void condition_splicing(FILE* output, double credible_interval);
+        void condition_splicing(FILE* output, double credible_interval,
+                                bool normalize=true);
 
         void condition_transcription(FILE* output, double credible_interval);
 
@@ -100,7 +101,8 @@ class Summarize
         void read_condition_tgroup_mean(unsigned int condition,
                                         boost::numeric::ublas::matrix<float>& data);
 
-        void condition_splicing(std::vector<boost::multi_array<float, 3> >& output);
+        void condition_splicing(std::vector<boost::multi_array<float, 3> >& output,
+                                bool normalize=true);
 
         void read_gene_features(
                 std::vector<Interval>& feature_intervals,

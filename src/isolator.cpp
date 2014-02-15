@@ -220,6 +220,7 @@ static void print_summarize_strategies(FILE* fout)
            "  differential-splicing\n"
            "  differential-feature-splicing\n"
            "  condition-splicing\n"
+           "  condition-splicing-params\n"
            "  condition-transcription\n"
            "\n");
 }
@@ -364,6 +365,9 @@ static int isolator_summarize(int argc, char* argv[])
     }
     else if (strcmp(strategy, "condition-splicing") == 0) {
         summarize.condition_splicing(out_file, credible_interval);
+    }
+    else if (strcmp(strategy, "condition-splicing-params") == 0) {
+        summarize.condition_splicing(out_file, credible_interval, false);
     }
     else if (strcmp(strategy, "condition-transcription") == 0) {
         summarize.condition_transcription(out_file, credible_interval);

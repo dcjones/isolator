@@ -1469,8 +1469,7 @@ class InterTranscriptSampler
                 double wtmixv = (S.tmix[v] / S.transcript_weights[v]) / wtgroupmix0;
                 marginal_splice_mu = S.hp.splice_mu[u] - log(wtmixv/wtmixlast);
                 prior_lp0 += splice_prior.f(marginal_splice_mu, S.hp.splice_sigma[u],
-                                            wtmixu);
-                                            //wtmixu / (wtmixu + wtmixv));
+                                            wtmixu / (wtmixu + wtmixv));
 
                 lp0 += prior_lp0;
                 assert_finite(prior_lp0);
@@ -1671,12 +1670,10 @@ class InterTranscriptSampler
                 double wtmixv = (tmixv / S.transcript_weights[v]) / wtgroupmix;
                 prior_lp_delta += splice_prior.f(marginal_splice_mu,
                                                  S.hp.splice_sigma[u],
-                                                 wtmixu);
-                                                 //wtmixu / (wtmixu + wtmixv));
+                                                 wtmixu / (wtmixu + wtmixv));
                 d += splice_prior.df_dx(marginal_splice_mu,
                                         S.hp.splice_sigma[u],
-                                        wtmixu);
-                                        //wtmixu / (wtmixu + wtmixv));
+                                        wtmixu / (wtmixu + wtmixv));
             }
 
             return lp0 - lpf01 +

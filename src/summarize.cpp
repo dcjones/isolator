@@ -793,7 +793,8 @@ void Summarize::differential_splicing(FILE* output, double credible_interval,
 }
 
 
-void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& splicing)
+void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& splicing,
+                                   bool normalize)
 {
     hid_t dataset = H5Dopen2_checked(h5_file, "/condition/splice_mu", H5P_DEFAULT);
 
@@ -841,26 +842,25 @@ void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& s
                 if (buffer[k].len != tgroup_tids[tgroup].size()) {
                     Logger::abort("Spliced tgroup has an inconsistent transcript count.");
                 }
-                // XXX
-#if 0
-                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
-                    splicing[k][i][j][l] =
-                        reinterpret_cast<float*>(buffer[k].p)[l];
-                }
-#endif
 
-//#if 0
-                float sum = 0.0;
-                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
-                    splicing[k][i][j][l] =
-                        exp(reinterpret_cast<float*>(buffer[k].p)[l]);
-                    sum += splicing[k][i][j][l];
-                }
+                if (normalize) {
+                    float sum = 0.0;
+                    for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
+                        splicing[k][i][j][l] =
+                            exp(reinterpret_cast<float*>(buffer[k].p)[l]);
+                        sum += splicing[k][i][j][l];
+                    }
 
-                for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
-                    splicing[k][i][j][l] /= sum;
+                    for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
+                        splicing[k][i][j][l] /= sum;
+                    }
                 }
-//#endif
+                else {
+                    for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
+                        splicing[k][i][j][l] =
+                            reinterpret_cast<float*>(buffer[k].p)[l];
+                    }
+                }
             }
         }
     }
@@ -1111,7 +1111,8 @@ void Summarize::differential_feature_splicing(FILE* output,
 }
 
 
-void Summarize::condition_splicing(FILE* output, double credible_interval)
+void Summarize::condition_splicing(FILE* output, double credible_interval,
+                                   bool normalize)
 {
     bool print_credible_interval = !isnan(credible_interval);
 
@@ -1124,7 +1125,7 @@ void Summarize::condition_splicing(FILE* output, double credible_interval)
     // indexed by spliced tgroup
     std::vector<marray_t> splicing(spliced_tgroup_indexes.size());
 
-    condition_splicing(splicing);
+    condition_splicing(splicing, normalize);
 
     fprintf(output, "gene_names\tgene_ids\ttranscription_group\ttranscript_id");
     for (size_t i = 0; i < C; ++i) {
