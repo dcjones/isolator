@@ -14,7 +14,6 @@
 
 #include "analyze.hpp"
 #include "constants.hpp"
-#include "logitnorm.hpp"
 #include "shredder.hpp"
 
 using namespace boost::numeric::ublas;
@@ -225,176 +224,6 @@ class NormalSigmaSampler
 
     private:
         rng_t rng;
-};
-
-
-class LogisticNormalMuSampler : public Shredder
-{
-    public:
-        LogisticNormalMuSampler(bool use_sigma_scaling)
-            : Shredder(-5.0, 5.0)
-            , use_sigma_scaling(use_sigma_scaling)
-        {
-        }
-
-        double sample(double mu0, double unscaled_sigma, double const* xs, size_t n,
-                      double prior_mu, double prior_sigma,
-                      double* x_min=NULL, double* x_max=NULL,
-                      double* x_min_lp=NULL, double* x_max_lp=NULL)
-        {
-            this->unscaled_sigma = unscaled_sigma;
-            this->xs = xs;
-            this->n = n;
-            this->prior_mu = prior_mu;
-            this->prior_sigma = prior_sigma;
-
-            // TODO: if I decide to do this, I should really clean it up.
-            // metropolis-hastings in case we are stuck on the wrong side of the
-            // gap
-            size_t mh_rounds = 5;
-            for (size_t i = 0; i < mh_rounds; ++i) {
-                boost::random::normal_distribution<double> proposal_dist(-mu0, 6.0 - i * 1.0);
-                double mu_proposed = proposal_dist(rng);
-                mu_proposed = std::min(upper_limit, std::max(lower_limit, mu_proposed));
-                double d;
-                double lp0 = f(mu0, d);
-                double lp1 = f(mu_proposed, d);
-                if (log(random_uniform_01(rng)) < lp1 - lp0) {
-                    mu0 = mu_proposed;
-                }
-            }
-
-            double ans = Shredder::sample(mu0);
-
-            if (x_min) *x_min = this->x_min;
-            if (x_max) *x_max = this->x_max;
-            if (x_min_lp) *x_min_lp = this->x_min_lp;
-            if (x_max_lp) *x_max_lp = this->x_max_lp;
-
-            return ans;
-        }
-
-        std::vector<std::pair<double, double> > estimate_modes(double unscaled_sigma, double const* xs, size_t n,
-                                           double prior_mu, double prior_sigma)
-        {
-            this->unscaled_sigma = unscaled_sigma;
-            this->xs = xs;
-            this->n = n;
-            this->prior_mu = prior_mu;
-            this->prior_sigma = prior_sigma;
-
-            double d;
-            double step = 0.001;
-            int increase_count = 0;
-            std::vector<std::pair<double, double> > modes;
-            for (double mu = lower_limit + step; mu < upper_limit; mu += step) {
-                if (f(mu, d) > f(mu - step, d)) {
-                    ++increase_count;
-                }
-                else {
-                    if (increase_count > 5) {
-                        modes.push_back(
-                                std::make_pair(mu - step, f(mu - step, d)));
-                        increase_count = 0;
-                    }
-                }
-            }
-
-            return modes;
-        }
-
-    private:
-        double unscaled_sigma;
-        const double* xs;
-        size_t n;
-        double prior_mu;
-        double prior_sigma;
-
-        bool use_sigma_scaling;
-
-        //NormalLogPdf prior_pdf;
-        //NormalLogPdf likelihood_pdf;
-
-        LogisticNormalLogPdf prior_pdf;
-        //StudentsTLogPdf prior_pdf;
-        LogisticNormalLogPdf likelihood_pdf;
-
-    public:
-        double f(double mu, double& d)
-        {
-            double lp = 0.0;
-
-            //lp += prior_pdf.f(prior_mu, prior_sigma, &mu, 1);
-            if (!isnan(prior_mu) && !isnan(prior_sigma)) {
-                // TODO: put this somewhere
-                //const double nu = 1.0;
-                //lp += prior_pdf.f(nu, prior_mu, prior_sigma, &mu, 1);
-                lp += prior_pdf.f(prior_mu, prior_sigma, invlogit(mu));
-            }
-
-            double scaled_sigma = use_sigma_scaling ?
-                logitnorm_sd_sigma(mu, unscaled_sigma) : unscaled_sigma;
-            //lp += likelihood_pdf.f(mu, scaled_sigma, xs, n);
-            for (size_t i = 0; i < n; ++i) {
-                lp += likelihood_pdf.f(mu, scaled_sigma, invlogit(xs[i]));
-            }
-
-            // don't use newton's method for this. The gradient is hard to work
-            // out and its not a bottleneck.
-            d = NAN;
-            return lp;
-        }
-};
-
-
-class LogisticNormalSigmaSampler : public Shredder
-{
-    public:
-        LogisticNormalSigmaSampler()
-            : Shredder(0.01, 0.2)
-        {
-        }
-
-        double sample(double unscaled_sigma0, const double* xs, const double* mu, size_t n,
-                      double prior_alpha, double prior_beta)
-        {
-            this->xs = xs;
-            this->mu = mu;
-            this->n = n;
-            this->prior_alpha = prior_alpha;
-            this->prior_beta = prior_beta;
-
-            double ans = Shredder::sample(unscaled_sigma0);
-            return ans;
-        }
-
-    private:
-        LogisticNormalLogPdf likelihood_pdf;
-        //NormalLogPdf likelihood_pdf;
-        SqInvGammaLogPdf prior_pdf;
-
-        const double* xs;
-        const double* mu;
-        size_t n;
-        double prior_alpha;
-        double prior_beta;
-
-    protected:
-        double f(double unscaled_sigma, double& d)
-        {
-            double lp = 0.0;
-            d = NAN;
-
-            lp += prior_pdf.f(prior_alpha, prior_beta, &unscaled_sigma, 1);
-
-            for (size_t i = 0; i < n; ++i) {
-                double scaled_sigma = logitnorm_sd_sigma(mu[i], unscaled_sigma);
-                //lp += likelihood_pdf.f(mu[i], scaled_sigma, &xs[i], 1);
-                lp += likelihood_pdf.f(mu[i], scaled_sigma, invlogit(xs[i]));
-            }
-
-            return lp;
-        }
 };
 
 
@@ -696,8 +525,6 @@ class ExperimentSpliceMuSigmaSamplerThread
                 const std::vector<std::vector<unsigned int> >& tgroup_tids,
                 double experiment_prior_mu,
                 double experiment_prior_sigma,
-                double experiment_splice_alpha,
-                double experiment_splice_beta,
                 Queue<int>& spliced_tgroup_queue,
                 Queue<int>& notify_queue)
             : experiment_nu(experiment_nu)
@@ -708,8 +535,6 @@ class ExperimentSpliceMuSigmaSamplerThread
             , tgroup_tids(tgroup_tids)
             , experiment_prior_mu(experiment_prior_mu)
             , experiment_prior_sigma(experiment_prior_sigma)
-            , experiment_splice_alpha(experiment_splice_alpha)
-            , experiment_splice_beta(experiment_splice_beta)
             , spliced_tgroup_queue(spliced_tgroup_queue)
             , notify_queue(notify_queue)
             , burnin_state(true)
@@ -799,8 +624,6 @@ class ExperimentSpliceMuSigmaSamplerThread
         const std::vector<std::vector<unsigned int> >& tgroup_tids;
         double experiment_prior_mu;
         double experiment_prior_sigma;
-        double experiment_splice_alpha;
-        double experiment_splice_beta;
         Queue<int>& spliced_tgroup_queue;
         Queue<int>& notify_queue;
 
@@ -918,8 +741,6 @@ class ExperimentTgroupMuSigmaSamplerThread
                 double prior_mu,
                 double prior_sigma,
                 std::vector<double>& experiment_tgroup_sigma,
-                double& experiment_tgroup_alpha,
-                double& experiment_tgroup_beta,
                 matrix<double>& tgroup_mu,
                 Queue<int>& tgroup_queue,
                 Queue<int>& notify_queue)
@@ -927,8 +748,6 @@ class ExperimentTgroupMuSigmaSamplerThread
             , prior_mu(prior_mu)
             , prior_sigma(prior_sigma)
             , experiment_tgroup_sigma(experiment_tgroup_sigma)
-            , experiment_tgroup_alpha(experiment_tgroup_alpha)
-            , experiment_tgroup_beta(experiment_tgroup_beta)
             , tgroup_mu(tgroup_mu)
             , tgroup_queue(tgroup_queue)
             , notify_queue(notify_queue)
@@ -980,8 +799,6 @@ class ExperimentTgroupMuSigmaSamplerThread
         std::vector<double>& experiment_tgroup_mu;
         double prior_mu, prior_sigma;
         std::vector<double>& experiment_tgroup_sigma;
-        double& experiment_tgroup_alpha;
-        double& experiment_tgroup_beta;
         matrix<double>& tgroup_mu;
 
         Queue<int>& tgroup_queue;
@@ -1011,15 +828,6 @@ Analyze::Analyze(size_t burnin,
 
     N = transcripts.size();
     T = transcripts.num_tgroups();
-
-    for (TranscriptSet::iterator t = transcripts.begin();
-            t != transcripts.end(); ++t) {
-        //if (t->transcript_id == "NFIX.bAug10") {
-        //if (t->transcript_id == "FCGRT.cAug10") {
-        if (t->transcript_id == "KLK6.cAug10") {
-            Logger::info("transcript of interest: %lu", (unsigned long) t->id);
-        }
-    }
 
     // TODO: constants (also maybe command line options eventually)
     tgroup_alpha_alpha = 1.0;
@@ -1647,8 +1455,7 @@ void Analyze::run(hid_t output_file_id)
     BOOST_FOREACH (ExperimentTgroupMuSigmaSamplerThread*& thread, experiment_musigma_sampler_threads) {
         thread = new ExperimentTgroupMuSigmaSamplerThread(
             experiment_tgroup_mu, experiment_tgroup_mu0, experiment_tgroup_sigma0,
-            experiment_tgroup_sigma, experiment_tgroup_alpha, experiment_tgroup_beta,
-            tgroup_mu, experiment_musigma_sampler_tick_queue,
+            experiment_tgroup_sigma, tgroup_mu, experiment_musigma_sampler_tick_queue,
             experiment_musigma_sampler_notify_queue);
 
         thread->start();
@@ -1681,8 +1488,6 @@ void Analyze::run(hid_t output_file_id)
                 tgroup_tids,
                 experiment_splice_mu0,
                 experiment_splice_sigma0,
-                experiment_splice_alpha,
-                experiment_splice_beta,
                 experiment_splice_mu_sigma_sampler_tick_queue,
                 experiment_splice_mu_sigma_sampler_notify_queue);
         thread->start();

@@ -27,7 +27,6 @@ add_executable(isolator
                isolator.cpp
                linalg.cpp
                logger.cpp
-               logitnorm.cpp
                pos_table.cpp
                read_set.cpp
                sampler.cpp
