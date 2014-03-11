@@ -1,106 +1,52 @@
 #!/usr/bin/env julia
 
-# Subway Plots: a visualization for isoform abundance.
-#
-#
+using Compose, Color, DataFrames, Base.Collections
 
-## along an axis
-function amap(f::Function, A::StridedArray, axis::Integer)
-    dimsA = size(A)
-    ndimsA = ndims(A)
-    axis_size = dimsA[axis]
+import Base: isless
 
-    if axis_size == 0
-        return f(A)
+function weighted_color_mean{S <: Number}(
+        cs::AbstractArray{LAB,1}, ws::AbstractArray{S,1})
+    l = 0.0
+    a = 0.0
+    b = 0.0
+    sumws = sum(ws)
+    for (c, w) in zip(cs, ws)
+        w /= sumws
+        l += w * c.l
+        a += w * c.a
+        b += w * c.b
     end
-
-    idx = ntuple(ndimsA, j -> j == axis ? 1 : 1:dimsA[j])
-    r = f(sub(A, idx))
-    R = Array(typeof(r), axis_size)
-    R[1] = r
-
-    for i = 2:axis_size
-        idx = ntuple(ndimsA, j -> j == axis ? i : 1:dimsA[j])
-        R[i] = f(sub(A, idx))
-    end
-
-    return R
+    LAB(l, a, b)
 end
 
-using Compose
-using Color
-using Heap
 
-import Base.isless
-
-# Very simple parsing of GTF files.
-
-module GTF
-
-type Entry
-    seqname::String
-    name::String
-    feature::String
-    startpos::Int
-    endpos::Int
-    score::String
-    strand::String
-    frame::Union(Int, Nothing)
-    attributes::Dict{String,String}
-end
-
-const attrib_pat = r"\s*(\S+)\s+(\"([^\"]*)\"|([^\"\s]*))[\s*;]?"
-
-function parse_entry(line)
-    line = strip(line)
-    if isempty(line)
-        return nothing
+# Then functions return functions suitable for ContinuousColorScales.
+function lab_gradient(cs::ColorValue...)
+    if length(cs) < 2
+        error("Two or more colors are needed for gradients")
     end
 
-    fields = split(line, "\t")
-    if length(fields) != 9
-        error("Malformed GTF")
+    cs_lab = [convert(LAB, c) for c in cs]
+    n = length(cs_lab)
+    function f(p::Float64)
+        @assert 0.0 <= p <= 1.0
+        i = 1 + min(n - 2, max(0, int(floor(p*(n-1)))))
+        w = p*(n-1) + 1 - i
+        weighted_color_mean([cs_lab[i], cs_lab[i+1]], [1.0 - w, w])
     end
-
-    attributes = Dict{String,String}()
-    for mat in each_match(attrib_pat, fields[9])
-        attributes[mat.captures[1]] = mat.captures[3]
-    end
-
-    Entry(fields[1], fields[2], fields[3], int(fields[4]), int(fields[5]),
-          fields[6], fields[7], fields[8] == "." ? nothing : int(fields[8]),
-          attributes)
+    f
 end
 
-end # module GTF
 
-import GTF
+#colorer = lab_gradient(color("#001F3F"), color("#FFDC01"))
+colorer = lab_gradient(
+    LCHab(84,85,278),
+    LCHab(84,85,87))
+#color("#001F3F"), color("#FFDC01"))
+#colorer = lab_gradient(color("grey20"), color("white"))
 
-if length(ARGS) < 1
-    println("Usage: isolator-subway-plot genes.gtf samples.db gene_id")
-    exit(1)
-end
 
-genes_fn, samples_fn, gene_id = ARGS[1:3]
-
-print("Reading samples ... ");
-cmd = `./isolator-dump-samples.py --gene_id=$gene_id $samples_fn`
-transcript_ids = String[]
-S = {}
-for line in each_line(cmd)
-    _, transcript_id, samples = split(strip(line), "\t")
-    push(transcript_ids, transcript_id)
-    push(S, map(float, split(samples, ",")))
-end
-S = hcat(S...)
-println("done.")
-
-# compute posterior means
-posterior_means = amap(sum, S, 2)
-posterior_means = posterior_means / sum(posterior_means)
-posterior_means = [id => mu for (id, mu) in zip(transcript_ids, posterior_means)]
-
-type Exon
+immutable Exon
     startpos::Int
     endpos::Int
     transcript_id::String
@@ -116,121 +62,127 @@ function isless(a::Exon, b::Exon)
 end
 
 
-exons = Exon[]
+# Parse the exons from a GTF corresponding to the specified gene id
+function parse_gtf_gene_exons(filename, transcript_ids)
+    transcript_id_pat = r"transcript_id\s+\"?([^\s]+)\"?;"
 
-print("Reading GTF ... ");
-ids = Set{String}()
+    exons = Exon[]
 
-# This is a hack, since parsing is pretty slow right row. (Grep is much faster.)
-pat = @sprintf("gene_id\\s+\"%s\"", gene_id)
-genes_f = `grep -P $pat $genes_fn`
-for line in each_line(genes_f)
-    entry = GTF.parse_entry(line)
-    if entry === nothing
-        break
-    end
-    if entry.feature == "exon" &&
-       has(entry.attributes, "gene_id") &&
-       entry.attributes["gene_id"] == gene_id
-        add(ids, entry.attributes["transcript_id"])
-        hpush(exons, Exon(entry.startpos - 1, entry.endpos - 1,
-                          entry.attributes["transcript_id"]))
-    end
-end
-@printf("done (%d exons)\n", length(exons))
+    for line in eachline(open(filename))
+        row = split(line, '\t')
 
-S = Set{String}[]
-exon_group = Exon[]
-while !isempty(exons)
-    exon = hpop(exons)
-    startpos = exon.startpos
-    push!(exon_group, exon)
-
-    while !isempty(exons) && exons[1].startpos == startpos
-        push(exon_group, hpop(exons))
-    end
-
-    endpos = min([exon.endpos for exon in exon_group])
-    if !isempty(exons) && exons[1].startpos - 1 < endpos
-        endpos = exons[1].startpos - 1
-    end
-
-    group_ids = Set{String}([exon.transcript_id for exon in exon_group]...)
-    while !isempty(exon_group)
-        exon = pop!(exon_group)
-        if exon.endpos > endpos
-            hpush(exons, Exon(endpos + 1, exon.endpos, exon.transcript_id))
-        end
-    end
-
-    push!(S, group_ids)
-end
-
-
-function lab_rainbow(l, c, h0, n)
-    ColorValue[LCHab(l, c, h0 + 360.0 * (i - 1) / n) for i in 1:n]
-end
-
-
-n = length(S)
-m = length(ids)
-
-colors = [id => c for (id, c) in zip(ids, lab_rainbow(90, 54, 0, m))]
-
-function avg_colors(cs::LCHab...)
-    LCHab(sum([c.l for c in cs]) / length(cs),
-          sum([c.c for c in cs]) / length(cs),
-          sum([c.h for c in cs]) / length(cs))
-end
-
-
-function weighted_avg_color(ws::Vector{Float64}, cs::LCHab...)
-    sumws = sum(ws)
-    LCHab(sum([w * c.l for (w, c) in zip(ws, cs)]) / sumws,
-          sum([w * c.c for (w, c) in zip(ws, cs)]) / sumws,
-          sum([w * c.h for (w, c) in zip(ws, cs)]) / sumws)
-end
-
-
-base_canvas = canvas(Units(-1, -1, 2, 2))
-
-base_canvas <<= text(0, 0, gene_id, hcenter, vcenter) <<
-                font("PT Sans") << fontsize(10pt) << fill("grey90") <<
-                stroke(nothing)
-
-
-# Position of the ith node
-function nodeangle(i)
-    p = 0.9
-    p * 2pi * i/n + pi/2 + (1.0 - p)/2 * 2pi
-end
-
-function nodepos(i)
-    theta = nodeangle(i)
-    cos(theta), sin(theta)
-end
-
-# draw nodes
-for (i, s) in enumerate(S)
-    node_abundances = Float64[posterior_means[id] for id in s]
-    abundance = sum(node_abundances)
-    x, y = nodepos(i)
-    c = weighted_avg_color(node_abundances, [colors[id] for id in s]...)
-    base_canvas <<= circle(x, y, 1mm * abundance + 0.2mm) << fill(c)
-end
-base_canvas <<= stroke(nothing)
-
-# draw edges
-for i in 1:n
-    ids_i = S[i]
-    for j in (i+1):n
-        if isempty(ids_i)
-            break
+        if row[3] != "exon"
+            continue
         end
 
-        ids = intersect(ids_i, S[j])
-        ids_i -= S[j]
-        if !isempty(ids)
+        m = match(transcript_id_pat, row[9])
+        @assert m != nothing
+        row_transcript_id = m.captures[1]
+
+        if !(row_transcript_id in transcript_ids)
+            continue
+        end
+
+        push!(exons, Exon(parseint(row[4]), parseint(row[5]), row_transcript_id))
+    end
+
+    return exons
+end
+
+
+immutable Feature
+    ids::Set{String}
+    startpos::Int
+    endpos::Int
+end
+
+
+# Figure out nodes and edges of the graph from a sorted array of exons.
+function exon_graph_features(exon_array)
+    i = 1
+    exons = copy(exon_array)
+    heapify!(exons)
+
+    features = Feature[]
+    exon_group = Exon[]
+    while !isempty(exons)
+        exon = heappop!(exons)
+        startpos = exon.startpos
+        push!(exon_group, exon)
+
+        while !isempty(exons) && exons[1].startpos == startpos
+            push!(exon_group, heappop!(exons))
+        end
+
+        endpos = minimum([exon.endpos for exon in exon_group])
+        if !isempty(exons) && exons[1].startpos - 1 < endpos
+            endpos = exons[1].startpos - 1
+        end
+
+        group_ids = Set{String}([exon.transcript_id for exon in exon_group]...)
+        while !isempty(exon_group)
+            exon = pop!(exon_group)
+            if exon.endpos > endpos
+                heappush!(exons, Exon(endpos + 1, exon.endpos, exon.transcript_id))
+            end
+        end
+
+        push!(features, Feature(group_ids, startpos, endpos))
+    end
+
+    return features
+end
+
+
+function draw_graph(features, transcript_abundance)
+    n = length(features)
+
+    function nodeangle(i)
+        p = 0.9
+        p * 2pi * i/n + pi/2 + (1.0 - p)/2 * 2pi
+    end
+
+    function nodepos(i)
+        theta = nodeangle(i)
+        cos(theta), sin(theta)
+    end
+
+    # draw nodes
+    node_canvases = Array(Compose.Canvas, n)
+    nodesize = 4mm
+    for (i, feature) in enumerate(features)
+        theta = nodeangle(i)
+        feature_abundance = 0.0
+        for tid in feature.ids
+            feature_abundance += transcript_abundance[tid]
+        end
+        x, y = nodepos(i)
+        #node_forms[i] = compose(circle(x, y, 2mm), fill(colorer(feature_abundance)))
+        node_canvases[i] = compose(
+            canvas(0w, 0h, 1w, 1h, units_inherited=true,
+                   rotation=Rotation(theta, x, y)),
+            rectangle(x*cx - nodesize/2, y*cy - nodesize/2,
+                      nodesize, nodesize),
+            stroke("grey30"),
+            fill(colorer(feature_abundance)))
+    end
+
+    # draw edges
+    edge_forms = Compose.Form[]
+    for i in 1:n
+        ids_i = copy(features[i].ids)
+        for j in (i+1):n
+            if isempty(ids_i)
+                break
+            end
+            ids_j = features[j].ids
+
+            ids = intersect(ids_i, ids_j)
+            setdiff!(ids_i, ids_j)
+            if isempty(ids)
+                continue
+            end
+
             x0, y0 = nodepos(i)
             x1, y1 = nodepos(j)
 
@@ -243,19 +195,87 @@ for i in 1:n
             theta = (nodeangle(i) + nodeangle(j)) / 2
             ctrl = (r * cos(theta), r * sin(theta))
 
-            line_abundances = Float64[posterior_means[id] for id in ids]
-            abundance = sum(line_abundances)
-            base_canvas <<=
-                curve((x0, y0), ctrl, ctrl, (x1, y1))  <<
-                linewidth(1.5mm * abundance) <<
-                stroke(weighted_avg_color(line_abundances,
-                                          [colors[id] for id in ids]...))
+            line_abundance = sum([transcript_abundance[id] for id in ids])
+            isintron = features[i].endpos + 1 < features[j].startpos
+
+            push!(edge_forms,
+                  compose(curve((x0, y0), ctrl, ctrl, (x1, y1)),
+                          isintron ? linewidth(0.5mm) : linewidth(1.5mm),
+                          stroke(colorer(line_abundance))))
         end
     end
+    #form = Compose.combine(
+        #Compose.combine(node_forms...),
+        #Compose.combine(edge_forms...))
+    return set_box(
+        pad_inner(compose(
+            canvas(unit_box=UnitBox(-1, -1, 2, 2)),
+            Compose.combine(edge_forms...),
+            node_canvases...),
+
+        5mm),
+        BoundingBox(0, 0, 1w, 1h))
 end
 
-img = SVG("try.svg", 4inch, 4inch)
-draw(img, canvas() << (rectangle() << fill("grey20")) << pad(base_canvas, 5mm))
-finish(img)
+
+function draw_scale(width)
+    step = 0.01
+    return compose(
+        canvas(0, 0, width, 1h),
+        compose(canvas(1cm, 2cm, 1cm, 10cm),
+                Compose.combine([compose(rectangle(0, k, 1, step), fill(colorer(k)))
+                                 for k in 0:step:1]...),
+                svgattribute("shape-rendering", "crispEdges")))
+end
+
+
+function main()
+    if length(ARGS) < 3
+        println(STDERR, "Usage: isolator-subway-plot.jl genes.gtf transcript_id condition-splicing.tsv")
+        return
+    end
+
+    gtf_filename = ARGS[1]
+    transcript_id = ARGS[2]
+    condition_splicing_filename = ARGS[3]
+
+    splicing = readtable(condition_splicing_filename, separator='\t', header=true)
+    splicing_tid_row = splicing[splicing[:transcript_id] .== transcript_id, :]
+    if size(splicing_tid_row, 1) == 0
+        error("Transcript $(transcript_id) not found in the isolator output.")
+    end
+
+    transcript_ids = splicing_tid_row[:transcription_group][1]
+    println(STDERR, "transcript_ids: ", transcript_ids)
+
+    transcript_id_set = Set(split(transcript_ids, ',')...)
+
+    print(STDERR, "Parsing GTF file...")
+    exons = parse_gtf_gene_exons(gtf_filename, transcript_id_set)
+    println(STDERR, "done. (", length(exons), " exons)")
+
+    features = exon_graph_features(exons)
+
+    # TODO: we should plot multiple conditions side-by-side
+    # This is awkward: one tgroup doesn't correspond to one gene_id.
+
+    splicing = splicing[splicing[:transcription_group] .== transcript_ids, :]
+    graphs = {}
+    for i in 5:size(splicing, 2)
+        splicing[i] ./= sum(splicing[i])
+        transcript_abundance =
+            [tid => prop for (tid, prop) in zip(splicing[:transcript_id], splicing[i])]
+        push!(graphs, draw_graph(features, transcript_abundance))
+    end
+
+    scale = draw_scale((1/6)w)
+
+    draw(SVG("subway-plot.svg", 6inch * length(graphs) + (1/6)inch, 6inch),
+         compose(canvas(), (rectangle(), fill("grey20")), hstack(graphs..., scale)))
+end
+
+
+main()
+
 
 
