@@ -155,7 +155,7 @@ class Analyze
         std::vector<std::vector<double> > experiment_splice_mu;
 
         // prior parameters for experimient_splice_mu
-        double experiment_splice_mu0, experiment_splice_sigma0;
+        double experiment_splice_nu, experiment_splice_mu0, experiment_splice_sigma0;
 
         // per-spliced-tgroup experiment precision
         std::vector<std::vector<double> > experiment_splice_sigma;

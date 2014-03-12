@@ -85,6 +85,13 @@ float fastlog2(float x_)
 /* AVX versions */
 
 PS32_CONST(1, 1.0f);
+
+//union {
+    //uint32_t i;
+    //float    f;
+//} inv_mant_mask_int = {~0x7f800000};
+//const unsigned int inv_mant_mask_int = ~0x7f800000;
+//PI32_CONST(inv_mant_mask, *reinterpret_cast<const float*>(&inv_mant_mask_int));
 PI32_CONST(inv_mant_mask, ~0x7f800000);
 PI16_CONST(0x7f, 0x7f);
 
@@ -424,7 +431,7 @@ void acopy_sse(void* dest_, const void* src_, size_t n)
 
 
 PS16_CONST(1, 1.0f);
-PS16_CONST(inv_mant_mask, ~0x7f800000);
+PI16_CONST(inv_mant_mask, ~0x7f800000);
 
 PS16_CONST(log2_c0, 3.1157899f);
 PS16_CONST(log2_c1, -3.3241990f);

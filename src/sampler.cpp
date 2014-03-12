@@ -4,6 +4,7 @@
 #include <boost/random.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
+#include <boost/lexical_cast.hpp>
 #include <climits>
 
 #include "constants.hpp"
@@ -210,6 +211,10 @@ class WeightMatrix
                 for (unsigned int j = 0; j < rowlens[i]; ++j) {
                     if (idxs[i][j] >= ncol) ncol = idxs[i][j] + 1;
                 }
+            }
+            if (ncol == 0) {
+                Logger::abort("Dataset has no viable fragments. "
+                              "This is most likely a bug.");
             }
 
             unsigned int* newidx = new unsigned int [ncol];
@@ -1436,6 +1441,11 @@ class InterTranscriptSampler
 
         double sample(unsigned int u, unsigned int v)
         {
+            this->u = u;
+            this->v = v;
+
+            double x0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
+
             c = S.transcript_component[u];
             assert(c == S.transcript_component[v]);
 
@@ -1452,24 +1462,16 @@ class InterTranscriptSampler
                     wtgroupmix0 += S.tmix[tid] / S.transcript_weights[tid];
                 }
 
-                /* XXX: Note to morning self:
-                 *
-                 * I made changes to sample from tmixu / (tmixu + tmixv). I
-                 * think that's actually wrong, but might not show up as wrong
-                 * here since most tgroups have only two transcripts.
-                 *
-                 * What's more likely the issue is using tgroup_tmix to compute
-                 * wtgroupmix above while using tmix everywhere else.
-                 *
-                 */
-
-                unsigned int last_tid = S.tgroup_tids[tgroup].back();
-                double wtmixlast = (S.tmix[last_tid] / S.transcript_weights[last_tid]) / wtgroupmix0;
                 double wtmixu = (S.tmix[u] / S.transcript_weights[u]) / wtgroupmix0;
                 double wtmixv = (S.tmix[v] / S.transcript_weights[v]) / wtgroupmix0;
-                marginal_splice_mu = S.hp.splice_mu[u] - log(wtmixv/wtmixlast);
-                prior_lp0 += splice_prior.f(marginal_splice_mu, S.hp.splice_sigma[u],
-                                            wtmixu / (wtmixu + wtmixv));
+
+                prior_lp0 += splice_prior.f(S.hp.splice_mu[u], S.hp.splice_sigma[u],
+                                            &wtmixu, 1);
+
+                prior_lp0 += splice_prior.f(S.hp.splice_mu[v], S.hp.splice_sigma[v],
+                                            &wtmixv, 1);
+
+                prior_lp0 += log_weight_transform_gradient(x0);
 
                 lp0 += prior_lp0;
                 assert_finite(prior_lp0);
@@ -1497,10 +1499,6 @@ class InterTranscriptSampler
             lpf01 = dotlog(S.frag_counts[c] + f0, S.frag_probs[c] + f0, f1 - f0) / M_LOG2E;
             assert_finite(lpf01);
 
-            this->u = u;
-            this->v = v;
-
-            double x0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
 
             return sample(x0);
         }
@@ -1525,16 +1523,9 @@ class InterTranscriptSampler
                 double lp = f(x, d);
 
                 if (lp >= slice_height) break;
-                else if (x > x0) x_max = x0;
-                else             x_min = x0;
+                else if (x > x0) x_max = x;
+                else             x_min = x;
             }
-
-            //std::string id_of_interest("CA-320159-3239-14793-14932-17325[INC][1/1][UPT]-included");
-            //if (S.use_priors && (S.transcript_ids[u] == id_of_interest ||
-                                 //S.transcript_ids[v] == id_of_interest)) {
-            //if (S.use_priors && component_size == 0) {
-                //fprintf(stderr, "here\n");
-            //}
 
             return x;
         }
@@ -1543,9 +1534,9 @@ class InterTranscriptSampler
                                double lp0, double d0, int direction,
                                double* last_lp)
         {
-            const double lp_eps = 1e-2;
-            const double d_eps  = 1e-5;
-            const double x_eps  = 1e-3;
+            const double lp_eps = 1e-3;
+            const double d_eps  = 1e-7;
+            const double x_eps  = 1e-6;
 
             double lp = lp0 - slice_height;
             double d = d0;
@@ -1571,8 +1562,8 @@ class InterTranscriptSampler
 
                 // if we are very close to the boundry, and this iteration moves us past
                 // the boundry, just give up.
-                //if (direction < 0 && fabs(x - lower_limit) <= x_eps && (x1 < x || lp > 0.0)) break;
-                //if (direction > 0 && fabs(x - upper_limit) <= x_eps && (x1 > x || lp > 0.0)) break;
+                if (direction < 0 && fabs(x - lower_limit) <= x_eps && (x1 < x || lp > 0.0)) break;
+                if (direction > 0 && fabs(x - upper_limit) <= x_eps && (x1 > x || lp > 0.0)) break;
 
                 // if we are moving in the wrong direction (i.e. toward the other root),
                 // use bisection to correct course.
@@ -1602,7 +1593,8 @@ class InterTranscriptSampler
                         lp = f(x, d) - slice_height;
 
                         //if (boost::math::isinf(lp) || boost::math::isinf(d)) {
-                        if (!boost::math::isfinite(lp) || !boost::math::isfinite(d)) {
+                        //if (!boost::math::isfinite(lp) || !boost::math::isfinite(d)) {
+                        if (!boost::math::isfinite(lp)) {
                             if (direction < 0) x_bound_lower = x;
                             else               x_bound_upper = x;
                         }
@@ -1615,7 +1607,7 @@ class InterTranscriptSampler
                 }
 
                 assert_finite(lp);
-                assert_finite(d);
+                //assert_finite(d);
             }
 
             assert_finite(x);
@@ -1625,6 +1617,37 @@ class InterTranscriptSampler
         }
 
     protected:
+        // Since the prior is specified over weighted transcript abundance, we
+        // have to account for the transform, or else the results can be a bit
+        // biased.
+        double log_weight_transform_gradient(double x)
+        {
+
+            double wu = S.transcript_weights[u];
+            double wv = S.transcript_weights[v];
+            double c = S.tmix[u] + S.tmix[v];
+            double a = wtgroupmix0 - S.tmix[u] / wu - S.tmix[v] / wv;
+
+            // derivative of: (x*c/u) / (x*c/u + (1-x)*c/v + a))
+            double su =
+                (c * wu * wv * (a * wv + c)) /
+                sq(-a * wu * wv + c * wu * x - c * wu - c * wv * x);
+
+            double log_su = log(su);
+            assert_finite(su);
+
+            // derivative of: ((1-x)*c/v) / (x*c/u + (1-x)*c/v + a))
+            double sv =
+                - (c * wu * wv * (a * wu + c)) /
+                sq(-a * wu * wv + c * wu * x - c * wu - c * wv * x);
+
+            double log_sv = log(-sv);
+            assert_finite(sv);
+
+            return log_su + log_sv;
+        }
+
+
         double f(double x, double& d)
         {
             double tmixu = x * (S.tmix[u] + S.tmix[v]);
@@ -1668,12 +1691,25 @@ class InterTranscriptSampler
 
                 double wtmixu = (tmixu / S.transcript_weights[u]) / wtgroupmix;
                 double wtmixv = (tmixv / S.transcript_weights[v]) / wtgroupmix;
-                prior_lp_delta += splice_prior.f(marginal_splice_mu,
+
+                prior_lp_delta += splice_prior.f(S.hp.splice_mu[u],
                                                  S.hp.splice_sigma[u],
-                                                 wtmixu / (wtmixu + wtmixv));
-                d += splice_prior.df_dx(marginal_splice_mu,
-                                        S.hp.splice_sigma[u],
-                                        wtmixu / (wtmixu + wtmixv));
+                                                 &wtmixu, 1);
+
+                prior_lp_delta += splice_prior.f(S.hp.splice_mu[v],
+                                                 S.hp.splice_sigma[v],
+                                                 &wtmixv, 1);
+
+                prior_lp_delta += log_weight_transform_gradient(x);
+
+                // TODO: work out (i.e. get wolfram to work out) the derivative
+                //d += su * splice_prior.df_dx(S.hp.splice_mu[u],
+                                             //S.hp.splice_sigma[u],
+                                             //&wtmixu, 1);
+
+                //d += sv * splice_prior.df_dx(S.hp.splice_mu[v],
+                                             //S.hp.splice_sigma[v],
+                                             //&wtmixv, 1);
             }
 
             return lp0 - lpf01 +
@@ -1683,18 +1719,16 @@ class InterTranscriptSampler
 
 
     private:
-        LogisticNormalLogPdf splice_prior;
+        NormalLogPdf splice_prior;
 
         unsigned int u, v, c, tgroup;
         double lp0, lpf01, prior_lp0;
         unsigned int component_size;
         double wtgroupmix0;
-        double marginal_splice_mu;
         unsigned int f0, f1;
 
         Sampler& S;
 
-        ////
         // Bounds on the parameter being sampled over
         double lower_limit, upper_limit;
 
@@ -1852,7 +1886,6 @@ float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 float AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
 {
     float lp = gamma_lnpdf(S.frag_count_sums[c] +
-                           S.component_tgroups[c].size() *
                            constants::tmix_prior_prec, 1.0, cmixc);
 
     if (S.use_priors) {
@@ -1900,18 +1933,7 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
           (S.component_frag[c + 1] - S.component_frag[c]) * sizeof(float));
 
     if (S.component_tgroups[c].size() > 1) {
-        // TODO: constant
-        for (unsigned int i = 0; i < std::min<size_t>(5, S.component_tgroups[c].size() - 1); ++i) {
-#if 0
-            double r = random_uniform_01(rng);
-            unsigned int u = 0;
-            BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-                if (r <= S.tgroupmix[tgroup]) break;
-                r -= S.tgroupmix[tgroup];
-                ++u;
-            }
-            if (u == S.component_tgroups[c].size()) --u;
-#endif
+        for (unsigned int i = 0; i < S.component_tgroups[c].size(); ++i) {
             random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
                         0, S.component_tgroups[c].size() - 1));
             unsigned int u = random_uniform_int(rng);
@@ -1994,27 +2016,15 @@ void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u,
 void AbundanceSamplerThread::sample_intra_tgroup(unsigned int tgroup)
 {
     if (S.tgroup_tids[tgroup].size() > 1) {
-        // TODO: constant
-        for (unsigned int i = 0; i < std::min<size_t>(5, S.tgroup_tids[tgroup].size() - 1); ++i) {
-#if 0
-            double r = random_uniform_01(rng);
-            unsigned int u = 0.0;
-            while (u < S.tgroup_tids[tgroup].size() - 1 &&
-                   r > S.tgroup_tmix[S.tgroup_tids[tgroup][u]]) {
-                r -= S.tgroup_tmix[S.tgroup_tids[tgroup][u]];
-                ++u;
-            }
-#endif
+        for (unsigned int i = 0; i < S.tgroup_tids[tgroup].size() - 1; ++i) {
             random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
                         0, S.tgroup_tids[tgroup].size() - 1));
             unsigned int u = random_uniform_int(rng);
 
-            random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
-                        0, S.tgroup_tids[tgroup].size() - 2));
-            unsigned int v = random_uniform_int(rng);
-            if (v >= u) ++ v;
-
-            if (u > v) std::swap(u, v);
+            unsigned int v = u;
+            while (v == u) {
+                v = random_uniform_int(rng);
+            }
 
             sample_inter_transcript(S.tgroup_tids[tgroup][u],
                                     S.tgroup_tids[tgroup][v]);
@@ -2090,10 +2100,6 @@ void AbundanceSamplerThread::sample_component(unsigned int c)
     }
 
     float x0 = S.cmix[c];
-
-    // Why does this not work just as well?
-    //float x0 = S.cmix[c] * S.total_frag_count +
-               //S.component_num_transcripts[c] * constants::tmix_prior_prec;
 
     float lp0 = compute_component_probability(c, x0);
     float slice_height = lp0 + log(random_uniform_01(rng));
@@ -2339,11 +2345,7 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
             0);
     transcript_component = new unsigned int [ts.size()];
     transcript_tgroup = new unsigned int [ts.size()];
-    transcript_ids.resize(ts.size());
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-        // XXX
-        transcript_ids[t->id] = t->transcript_id.get();
-
         unsigned int c = ds[weight_matrix->ncol + t->id];
         transcript_tgroup[t->id] = t->tgroup;
         transcript_component[t->id] = c;
@@ -2497,8 +2499,8 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
     hp.tgroup_sigma.resize(ts.num_tgroups(), 0.0);
     hp.splice_mu.resize(ts.size());
     hp.splice_sigma.resize(ts.size());
-    std::fill(hp.splice_mu.begin(), hp.splice_mu.end(), 0.0);
-    std::fill(hp.splice_sigma.begin(), hp.splice_sigma.end(), 1.0);
+    std::fill(hp.splice_mu.begin(), hp.splice_mu.end(), 0.5);
+    std::fill(hp.splice_sigma.begin(), hp.splice_sigma.end(), 0.5);
 
     if (fm.sb[0] && run_gc_correction) {
         gc_correct = new GCCorrection(ts, transcript_gc);
@@ -2569,29 +2571,16 @@ void Sampler::start()
 
     /* Initial mixtures */
     for (unsigned int i = 0; i < num_components; ++i) {
-        unsigned int j_max = 0;
         unsigned int max_frags = 0;
         for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
             unsigned int u = component_transcripts[i][j];
             if (weight_matrix->rowlens[u] > max_frags) {
-                j_max = j;
                 max_frags = weight_matrix->rowlens[u];
             }
         }
 
-#if 0
-        double eps = 1e-2;
-        tmix[component_transcripts[i][j_max]] =
-            1.0 - component_num_transcripts[i] * eps;
-#endif
-
         for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
             tmix[component_transcripts[i][j]] = 1.0 / component_num_transcripts[i];
-#if 0
-            if (j != j_max) {
-                tmix[component_transcripts[i][j]] = eps;
-            }
-#endif
         }
     }
 
@@ -2603,7 +2592,7 @@ void Sampler::start()
     /* Initial cmix */
     for (unsigned int c = 0; c < num_components; ++c) {
         cmix[c] =
-            component_tgroups[c].size() * constants::tmix_prior_prec +
+            constants::tmix_prior_prec +
             frag_count_sums[c];
     }
 }

@@ -10,9 +10,11 @@
 #include <boost/numeric/ublas/matrix_proxy.hpp>
 #include <boost/random/normal_distribution.hpp>
 #include <boost/thread.hpp>
+#include <boost/lexical_cast.hpp>
 
 #include "analyze.hpp"
 #include "constants.hpp"
+#include "logitnorm.hpp"
 #include "shredder.hpp"
 
 using namespace boost::numeric::ublas;
@@ -25,18 +27,6 @@ static void assert_finite(double x)
     if (!boost::math::isfinite(x)) {
         Logger::abort("%f found where finite value expected.", x);
     }
-}
-
-
-static double sq(double x) {
-    return x * x;
-}
-
-
-static double splice_sigma_scale(double mu)
-{
-    double exp_mu = exp(mu);
-    return sq(exp_mu + 1) / exp_mu;
 }
 
 
@@ -118,6 +108,100 @@ class NormalMuSampler
 };
 
 
+class NormalTMuSampler : public Shredder
+{
+    public:
+        NormalTMuSampler()
+            : Shredder(-1, 2)
+        {
+        }
+
+        double sample(double mu0, double sigma, const double* xs, size_t n,
+                      double prior_nu, double prior_mu, double prior_sigma,
+                      double* xmin, double* xmax,
+                      double* xmin_lp, double* xmax_lp)
+        {
+            this->sigma = sigma;
+            this->prior_nu = prior_nu;
+            this->prior_mu = prior_mu;
+            this->prior_sigma = prior_sigma;
+            this->xs = xs;
+            this->n = n;
+
+            double ans = Shredder::sample(mu0);
+
+            if (xmin) *xmin = this->x_min;
+            if (xmax) *xmax = this->x_max;
+            if (xmin_lp) *xmin_lp = this->x_min_lp;
+            if (xmax_lp) *xmax_lp = this->x_max_lp;
+
+            return ans;
+        }
+
+    private:
+        StudentsTLogPdf prior_logpdf;
+        NormalLogPdf likelihood_logpdf;
+        double sigma;
+        double prior_nu;
+        double prior_mu;
+        double prior_sigma;
+        const double* xs;
+        size_t n;
+
+    public:
+        double f(double mu, double& d)
+        {
+            d = likelihood_logpdf.df_dx(mu, sigma, xs, n) +
+                prior_logpdf.df_dx(prior_nu, prior_mu, prior_sigma, &mu, 1);
+
+            return likelihood_logpdf.f(mu, sigma, xs, n) +
+                   prior_logpdf.f(prior_nu, prior_mu, prior_sigma, &mu, 1);
+        }
+};
+
+
+
+class StudentTMuSampler : public Shredder
+{
+    public:
+        StudentTMuSampler()
+            : Shredder(-1, 2)
+        {
+        }
+
+        double sample(double mu0, double nu, double sigma, const double* xs, size_t n,
+                      double prior_mu, double prior_sigma)
+        {
+            this->nu = nu;
+            this->sigma = sigma;
+            this->prior_mu = prior_mu;
+            this->prior_sigma = prior_sigma;
+            this->xs = xs;
+            this->n = n;
+
+            return Shredder::sample(mu0);
+        }
+
+
+    private:
+        StudentsTLogPdf likelihood_logpdf;
+        double nu;
+        double sigma;
+        double prior_mu;
+        double prior_sigma;
+        const double* xs;
+        size_t n;
+
+
+    protected:
+        double f(double mu, double& d)
+        {
+            d = likelihood_logpdf.df_dx(nu, mu, sigma, xs, n);
+            return likelihood_logpdf.f(nu, mu, sigma, xs, n);
+        }
+};
+
+
 class NormalSigmaSampler
 {
     public:
@@ -147,79 +231,116 @@ class NormalSigmaSampler
 class LogisticNormalMuSampler : public Shredder
 {
     public:
-        LogisticNormalMuSampler()
-            : Shredder(-3, 3)
+        LogisticNormalMuSampler(bool use_sigma_scaling)
+            : Shredder(-5.0, 5.0)
+            , use_sigma_scaling(use_sigma_scaling)
         {
         }
 
-        double sample(double mu0, double sigma, double const* xs, size_t n,
-                      double prior_mu, double prior_sigma)
+        double sample(double mu0, double unscaled_sigma, double const* xs, size_t n,
+                      double prior_mu, double prior_sigma,
+                      double* x_min=NULL, double* x_max=NULL,
+                      double* x_min_lp=NULL, double* x_max_lp=NULL)
         {
-            this->sigma = sigma;
+            this->unscaled_sigma = unscaled_sigma;
             this->xs = xs;
             this->n = n;
             this->prior_mu = prior_mu;
             this->prior_sigma = prior_sigma;
 
+            // TODO: if I decide to do this, I should really clean it up.
             // metropolis-hastings in case we are stuck on the wrong side of the
             // gap
             size_t mh_rounds = 5;
             for (size_t i = 0; i < mh_rounds; ++i) {
-                boost::random::normal_distribution<double> proposal_dist(mu0, 4.0);
+                boost::random::normal_distribution<double> proposal_dist(-mu0, 6.0 - i * 1.0);
                 double mu_proposed = proposal_dist(rng);
-                mu_proposed = std::min(3.0, std::max(-3.0, mu_proposed));
-                mu_proposed = Shredder::sample(mu0);
+                mu_proposed = std::min(upper_limit, std::max(lower_limit, mu_proposed));
                 double d;
                 double lp0 = f(mu0, d);
                 double lp1 = f(mu_proposed, d);
                 if (log(random_uniform_01(rng)) < lp1 - lp0) {
-#if 0
-                    if (abs(mu_proposed - mu0) > 4) {
-                        fprintf(stderr, "large step: %e -> %e (%e)\n",
-                                     mu0, mu_proposed, sigma);
-                        for (size_t i = 0; i < n; ++i) {
-                            fprintf(stderr, "%e\n", xs[i]);
-                        }
-                    }
-#endif
                     mu0 = mu_proposed;
                 }
             }
 
-            // New theory: maybe slice sampling does jump the gap sometimes?
             double ans = Shredder::sample(mu0);
+
+            if (x_min) *x_min = this->x_min;
+            if (x_max) *x_max = this->x_max;
+            if (x_min_lp) *x_min_lp = this->x_min_lp;
+            if (x_max_lp) *x_max_lp = this->x_max_lp;
 
             return ans;
         }
 
+        std::vector<std::pair<double, double> > estimate_modes(double unscaled_sigma, double const* xs, size_t n,
+                                           double prior_mu, double prior_sigma)
+        {
+            this->unscaled_sigma = unscaled_sigma;
+            this->xs = xs;
+            this->n = n;
+            this->prior_mu = prior_mu;
+            this->prior_sigma = prior_sigma;
+
+            double d;
+            double step = 0.001;
+            int increase_count = 0;
+            std::vector<std::pair<double, double> > modes;
+            for (double mu = lower_limit + step; mu < upper_limit; mu += step) {
+                if (f(mu, d) > f(mu - step, d)) {
+                    ++increase_count;
+                }
+                else {
+                    if (increase_count > 5) {
+                        modes.push_back(
+                                std::make_pair(mu - step, f(mu - step, d)));
+                        increase_count = 0;
+                    }
+                }
+            }
+
+            return modes;
+        }
+
     private:
-        double sigma;
+        double unscaled_sigma;
         const double* xs;
         size_t n;
         double prior_mu;
         double prior_sigma;
 
-        NormalLogPdf prior_pdf;
-        NormalLogPdf likelihood_pdf;
+        bool use_sigma_scaling;
 
-    protected:
+        //NormalLogPdf prior_pdf;
+        //NormalLogPdf likelihood_pdf;
+
+        LogisticNormalLogPdf prior_pdf;
+        //StudentsTLogPdf prior_pdf;
+        LogisticNormalLogPdf likelihood_pdf;
+
+    public:
         double f(double mu, double& d)
         {
             double lp = 0.0;
 
-            lp += prior_pdf.f(prior_mu, prior_sigma, &mu, 1);
-            //d += prior_pdf.df_dx(prior_mu, prior_sigma, &mu, 1);
+            //lp += prior_pdf.f(prior_mu, prior_sigma, &mu, 1);
+            if (!isnan(prior_mu) && !isnan(prior_sigma)) {
+                // TODO: put this somewhere
+                //const double nu = 1.0;
+                //lp += prior_pdf.f(nu, prior_mu, prior_sigma, &mu, 1);
+                lp += prior_pdf.f(prior_mu, prior_sigma, invlogit(mu));
+            }
 
-            double s = splice_sigma_scale(mu);
+            double scaled_sigma = use_sigma_scaling ?
+                logitnorm_sd_sigma(mu, unscaled_sigma) : unscaled_sigma;
+            //lp += likelihood_pdf.f(mu, scaled_sigma, xs, n);
+            for (size_t i = 0; i < n; ++i) {
+                lp += likelihood_pdf.f(mu, scaled_sigma, invlogit(xs[i]));
+            }
 
-            lp += likelihood_pdf.f(mu, s * sigma, xs, n);
-            // TODO: The derivative is going to differ since sigma is now a
-            // function of mu.
-            //
-            // I had wolfraw work out the derivative and its pretty bonkers. Not
-            // sure if its worth it.
-            //d += likelihood_pdf.df_dmu(mu, s * sigma, xs, n);
-
+            // don't use newton's method for this. The gradient is hard to work
+            // out and its not a bottleneck.
             d = NAN;
             return lp;
         }
@@ -230,11 +351,11 @@ class LogisticNormalSigmaSampler : public Shredder
 {
     public:
         LogisticNormalSigmaSampler()
-            : Shredder(1e-16, 1.0)
+            : Shredder(0.01, 0.2)
         {
         }
 
-        double sample(double sigma0, const double* xs, const double* mu, size_t n,
+        double sample(double unscaled_sigma0, const double* xs, const double* mu, size_t n,
                       double prior_alpha, double prior_beta)
         {
             this->xs = xs;
@@ -243,12 +364,13 @@ class LogisticNormalSigmaSampler : public Shredder
             this->prior_alpha = prior_alpha;
             this->prior_beta = prior_beta;
 
-            double ans = Shredder::sample(sigma0);
+            double ans = Shredder::sample(unscaled_sigma0);
             return ans;
         }
 
     private:
-        NormalLogPdf likelihood_pdf;
+        LogisticNormalLogPdf likelihood_pdf;
+        //NormalLogPdf likelihood_pdf;
         SqInvGammaLogPdf prior_pdf;
 
         const double* xs;
@@ -261,17 +383,14 @@ class LogisticNormalSigmaSampler : public Shredder
         double f(double unscaled_sigma, double& d)
         {
             double lp = 0.0;
-            d = 0.0;
+            d = NAN;
 
             lp += prior_pdf.f(prior_alpha, prior_beta, &unscaled_sigma, 1);
-            d += prior_pdf.df_dx(prior_alpha, prior_beta, &unscaled_sigma, 1);
 
             for (size_t i = 0; i < n; ++i) {
-                double s = splice_sigma_scale(mu[i]);
-                double scaled_sigma = unscaled_sigma * s;
-
-                lp += likelihood_pdf.f(mu[i], scaled_sigma, &xs[i], 1);
-                d += s * likelihood_pdf.df_dsigma(mu[i], scaled_sigma, &xs[i], 1);
+                double scaled_sigma = logitnorm_sd_sigma(mu[i], unscaled_sigma);
+                //lp += likelihood_pdf.f(mu[i], scaled_sigma, &xs[i], 1);
+                lp += likelihood_pdf.f(mu[i], scaled_sigma, invlogit(xs[i]));
             }
 
             return lp;
@@ -394,6 +513,7 @@ class SpliceMuSigmaSamplerThread
         SpliceMuSigmaSamplerThread(
                         std::vector<std::vector<std::vector<double> > >& mu,
                         std::vector<std::vector<double> >& sigma,
+                        double experiment_nu,
                         const std::vector<std::vector<double> >& experiment_mu,
                         const std::vector<std::vector<double> >& experiment_sigma,
                         const double& splice_alpha,
@@ -407,6 +527,7 @@ class SpliceMuSigmaSamplerThread
                         Queue<int>& notify_queue)
             : mu(mu)
             , sigma(sigma)
+            , experiment_nu(experiment_nu)
             , experiment_mu(experiment_mu)
             , experiment_sigma(experiment_sigma)
             , splice_alpha(splice_alpha)
@@ -418,17 +539,24 @@ class SpliceMuSigmaSamplerThread
             , condition_samples(condition_samples)
             , spliced_tgroup_queue(spliced_tgroup_queue)
             , notify_queue(notify_queue)
+            , burnin_state(true)
             , thread(NULL)
         {
             C = mu.size();
             K = Q.size1();
         }
 
+
+        void end_burnin()
+        {
+            burnin_state = false;
+        }
+
+
         void run()
         {
             // temporary array for storing observation marginals
             std::vector<double> data(K);
-            std::vector<double> mu_c(K);
 
             // temporary space for sampling precision
             size_t max_size2 = 0;
@@ -451,74 +579,58 @@ class SpliceMuSigmaSamplerThread
                     for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                         unsigned int tid = tgroup_tids[tgroup][k];
                         dataj(i, k) = Q(i, tid);
-                        _data_raw(i, k) = dataj(i, k);
                         datasum += dataj(i, k);
                     }
 
                     for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                         dataj(i, k) /= datasum;
-                    }
-
-                    size_t klast = tgroup_tids[tgroup].size() - 1;
-                    for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
-                        dataj(i, k) = log(dataj(i, k) / dataj(i, klast));
+                        _data_raw(i, k) = dataj(i, k);
                     }
                 }
 
                 // sample parameters for each condition
                 for (size_t i = 0; i < C; ++i) {
-                    for (size_t k = 0; k < tgroup_tids[tgroup].size() - 1; ++k) {
+                    for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                         for (size_t l = 0; l < condition_samples[i].size(); ++l) {
                             size_t sample_idx = condition_samples[i][l];
                             data[l] = dataj(sample_idx, k);
                         }
 
-#if 0
-                        double s = splice_sigma_scale(mu[i][j][k]);
+                        double x_min, x_max, x_min_lp, x_max_lp;
+
                         mu[i][j][k] =
-                            mu_sampler.sample(s * sigma[j][k],
+                            mu_sampler.sample(mu[i][j][k],
+                                              sigma[j][k],
                                               &data.at(0),
                                               condition_samples[i].size(),
+                                              experiment_nu,
                                               experiment_mu[j][k],
-                                              experiment_sigma[j][k]);
-#endif
-
-                        double s = splice_sigma_scale(experiment_mu[j][k]);
-                        mu[i][j][k] =
-                            mu_sampler.sample(mu[i][j][k], sigma[j][k],
-                                              &data.at(0),
-                                              condition_samples[i].size(),
-                                              experiment_mu[j][k],
-                                              s * experiment_sigma[j][k]);
-
-                        // XXX
-                        // ANGPTL4.gAug10
-                        if (tgroup_tids[tgroup][k] == 2421) {
-                            double _mu = mu[i][j][k];
-                            double _sigma = sigma[j][k];
-                            double _ex_mu = experiment_mu[j][k];
-                            double _ex_sigma = experiment_sigma[j][k];
-                            Logger::info("FSD1.fAug10 mu: %e  sigma: %e  ex_sigma: %e",
-                                         _mu, _sigma, _ex_sigma);
-                        }
-
+                                              experiment_sigma[j][k],
+                                              &x_min, &x_max,
+                                              &x_min_lp, &x_max_lp);
                     }
                 }
 
-                for (size_t k = 0; k < tgroup_tids[tgroup].size() - 1; ++k) {
+                for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                     matrix_column<matrix<double> > col(dataj, k);
                     std::copy(col.begin(), col.end(), data.begin());
 
-
-                    for (size_t l = 0; l < K; ++l) {
-                        mu_c[l] = mu[condition[l]][j][k];
+                    for (size_t i = 0; i < K; ++i) {
+                        data[i] = data[i] - mu[condition[i]][j][k];
                     }
 
-                    sigma[j][k] =
-                        sigma_sampler.sample(sigma[j][k], &data.at(0), &mu_c.at(0), K,
-                                             splice_alpha, splice_beta);
-                    // XXX
-                    //sigma[j][k] = 0.05;
+                    // During burn-in we force the condition variance
+                    // to be quite high. Otherwise, if a gene is initalized
+                    // in a very low probability state it can be slow to make
+                    // progress towards reasonable values.
+                    if (burnin_state) {
+                        sigma[j][k] = 0.1;
+                    }
+                    else {
+                        sigma[j][k] =
+                            sigma_sampler.sample(&data.at(0), K,
+                                                 splice_alpha, splice_beta);
+                    }
                 }
 
                 notify_queue.push(1);
@@ -543,6 +655,7 @@ class SpliceMuSigmaSamplerThread
         std::vector<std::vector<std::vector<double> > >& mu;
         std::vector<std::vector<double> >& sigma;
 
+        double experiment_nu;
         const std::vector<std::vector<double> >& experiment_mu;
         const std::vector<std::vector<double> >& experiment_sigma;
 
@@ -561,9 +674,10 @@ class SpliceMuSigmaSamplerThread
         Queue<int>& notify_queue;
 
         size_t C, K;
-        LogisticNormalMuSampler mu_sampler;
-        LogisticNormalSigmaSampler sigma_sampler;
+        NormalTMuSampler mu_sampler;
+        NormalSigmaSampler sigma_sampler;
         rng_t rng;
+        bool burnin_state;
 
         boost::thread* thread;
 };
@@ -573,6 +687,7 @@ class ExperimentSpliceMuSigmaSamplerThread
 {
     public:
         ExperimentSpliceMuSigmaSamplerThread(
+                double experiment_nu,
                 std::vector<std::vector<double> >& experiment_mu,
                 std::vector<std::vector<double> >& experiment_sigma,
                 const std::vector<std::vector<std::vector<double> > >&
@@ -585,7 +700,8 @@ class ExperimentSpliceMuSigmaSamplerThread
                 double experiment_splice_beta,
                 Queue<int>& spliced_tgroup_queue,
                 Queue<int>& notify_queue)
-            : experiment_mu(experiment_mu)
+            : experiment_nu(experiment_nu)
+            , experiment_mu(experiment_mu)
             , experiment_sigma(experiment_sigma)
             , condition_mu(condition_mu)
             , spliced_tgroup_indexes(spliced_tgroup_indexes)
@@ -596,15 +712,26 @@ class ExperimentSpliceMuSigmaSamplerThread
             , experiment_splice_beta(experiment_splice_beta)
             , spliced_tgroup_queue(spliced_tgroup_queue)
             , notify_queue(notify_queue)
+            , burnin_state(true)
             , thread(NULL)
         {
             C = condition_mu.size();
         }
 
+
+        void end_burnin()
+        {
+            burnin_state = false;
+        }
+
+
         void run()
         {
             // temporary space for marginals
             std::vector<double> data(C);
+
+            // mu parameters for a transcript
+            std::vector<double> mu_k(C);
 
             // temporary space for sampling precision
             size_t max_size2 = 0;
@@ -620,31 +747,28 @@ class ExperimentSpliceMuSigmaSamplerThread
 
                 size_t tgroup = spliced_tgroup_indexes[j];
 
-                for (size_t k = 0; k < tgroup_tids[tgroup].size() - 1; ++k) {
+                for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                     for (size_t i = 0; i < C; ++i) {
                         data[i] = condition_mu[i][j][k];
                     }
 
                     experiment_mu[j][k] =
-                        mu_sampler.sample(experiment_sigma[j][k],
+                        mu_sampler.sample(experiment_mu[j][k],
+                                          experiment_nu,
+                                          experiment_sigma[j][k],
                                           &data.at(0), C,
                                           experiment_prior_mu,
                                           experiment_prior_sigma);
 
                     for (size_t i = 0; i < C; ++i) {
-                        data[i] -= experiment_mu[j][k];
+                        mu_k[i] = experiment_mu[j][k];
                     }
 
-                    // TODO: I'm starting to wonder if it's worth having
-                    // and experiment sigma parameter for every spliced tgroup.
-                    // That seems like overkill.
-                    // TODO: we may want to consider scaling things here as well
-                    // since this also applied on a logit scale.
-                    //experiment_sigma[j][k] = 1.0;
                     //experiment_sigma[j][k] =
-                        //sigma_sampler.sample(&data.at(0), C,
-                                             //experiment_splice_alpha,
-                                             //experiment_splice_beta);
+                        //sigma_sampler.sample(experiment_sigma[j][k], &data.at(0), &mu_k.at(0), C,
+                                             //experiment_splice_alpha, experiment_splice_beta);
+
+                    // TODO: constants
                     experiment_sigma[j][k] = 0.05;
                 }
 
@@ -666,6 +790,7 @@ class ExperimentSpliceMuSigmaSamplerThread
         }
 
     private:
+        double experiment_nu;
         std::vector<std::vector<double> >& experiment_mu;
         std::vector<std::vector<double> >& experiment_sigma;
         const std::vector<std::vector<std::vector<double> > >&
@@ -680,9 +805,10 @@ class ExperimentSpliceMuSigmaSamplerThread
         Queue<int>& notify_queue;
 
         size_t C;
-        NormalMuSampler mu_sampler;
+        StudentTMuSampler mu_sampler;
         NormalSigmaSampler sigma_sampler;
         rng_t rng;
+        bool burnin_state;
 
         boost::thread* thread;
 };
@@ -724,8 +850,11 @@ class AlphaSampler : public Shredder
             d = 0.0;
             double fx = 0.0;
 
-            d += prior_logpdf.df_dx(alpha_alpha, beta_alpha, &alpha, 1);
-            fx += prior_logpdf.f(alpha_alpha, beta_alpha, &alpha, 1);
+            double prior_d = prior_logpdf.df_dx(alpha_alpha, beta_alpha, &alpha, 1);
+            double prior_fx = prior_logpdf.f(alpha_alpha, beta_alpha, &alpha, 1);
+
+            d += prior_d;
+            fx += prior_fx;
 
             d += likelihood_logpdf.df_dalpha(alpha, beta, sigmas, n);
             fx += likelihood_logpdf.f(alpha, beta, sigmas, n);
@@ -751,9 +880,7 @@ class BetaSampler : public Shredder
             this->beta_beta = beta_beta;
             this->sigmas = sigmas;
             this->n = n;
-            double ans = Shredder::sample(beta0);
-            return ans;
-            //return Shredder::sample(beta0);
+            return Shredder::sample(beta0);
         }
 
     private:
@@ -833,21 +960,6 @@ class ExperimentTgroupMuSigmaSamplerThread
 
                 experiment_tgroup_mu[tgroup] = posterior_mu + random_normal(rng) * posterior_sigma;
 
-                // sample experiment_tgroup_sigma[tgroup]
-#if 0
-                double mu = experiment_tgroup_mu[tgroup];
-                double posterior_alpha = experiment_tgroup_alpha + C/2;
-                part = 0.0;
-                for (size_t i = 0; i < C; ++i) {
-                    part += (col[i] - mu) * (col[i] - mu);
-                }
-                double posterior_beta = experiment_tgroup_beta + part/2;
-
-                boost::random::gamma_distribution<double> dist(posterior_alpha, 1/posterior_beta);
-
-                experiment_tgroup_sigma[tgroup] = sqrt(1 / dist(rng));
-#endif
-
                 notify_queue.push(1);
             }
         }
@@ -896,16 +1008,18 @@ Analyze::Analyze(size_t burnin,
     , N(0)
     , T(0)
 {
-    // XXX:
-    for (TranscriptSet::iterator t = transcripts.begin();
-            t != transcripts.end(); ++t) {
-        if (t->transcript_id == "ANGPTL4.gAug10") {
-            Logger::info("transcript of interest: %lu", (unsigned long) t->id);
-        }
-    }
 
     N = transcripts.size();
     T = transcripts.num_tgroups();
+
+    for (TranscriptSet::iterator t = transcripts.begin();
+            t != transcripts.end(); ++t) {
+        //if (t->transcript_id == "NFIX.bAug10") {
+        //if (t->transcript_id == "FCGRT.cAug10") {
+        if (t->transcript_id == "KLK6.cAug10") {
+            Logger::info("transcript of interest: %lu", (unsigned long) t->id);
+        }
+    }
 
     // TODO: constants (also maybe command line options eventually)
     tgroup_alpha_alpha = 1.0;
@@ -913,8 +1027,8 @@ Analyze::Analyze(size_t burnin,
     tgroup_alpha_beta  = 1.0;
     tgroup_beta_beta   = 5.0;
 
-    splice_alpha_alpha = 0.001;
-    splice_beta_alpha  = 500.0;
+    splice_alpha_alpha = 0.1;
+    splice_beta_alpha  = 0.1;
 
     splice_alpha_beta  = 50.0;
     splice_beta_beta   = 15.0;
@@ -922,8 +1036,9 @@ Analyze::Analyze(size_t burnin,
     experiment_tgroup_mu0 = -10;
     experiment_tgroup_sigma0 = 5.0;
 
-    experiment_splice_mu0 = 0;
-    experiment_splice_sigma0 = 3.0;
+    experiment_splice_nu = 5.0;
+    experiment_splice_mu0 = 0.5;
+    experiment_splice_sigma0 = 10;
 
     tgroup_expr.resize(T);
     tgroup_row_data.resize(T);
@@ -1398,16 +1513,15 @@ void Analyze::qsampler_update_hyperparameters()
                   qsamplers[i]->hp.splice_mu.end(), 0.0);
 
         std::fill(qsamplers[i]->hp.splice_sigma.begin(),
-                  qsamplers[i]->hp.splice_sigma.end(), 1.0);
+                  qsamplers[i]->hp.splice_sigma.end(), 0.1);
 
         for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
             unsigned int tgroup = spliced_tgroup_indexes[j];
             for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                 qsamplers[i]->hp.splice_mu[tgroup_tids[tgroup][k]] =
                     condition_splice_mu[c][j][k];
-                double s = splice_sigma_scale(condition_splice_mu[c][j][k]);
                 qsamplers[i]->hp.splice_sigma[tgroup_tids[tgroup][k]] =
-                    s * condition_splice_sigma[j][k];
+                    condition_splice_sigma[j][k];
             }
         }
     }
@@ -1544,7 +1658,7 @@ void Analyze::run(hid_t output_file_id)
     BOOST_FOREACH (SpliceMuSigmaSamplerThread*& thread, splice_mu_sigma_sampler_threads) {
         thread = new SpliceMuSigmaSamplerThread(
                 condition_splice_mu, condition_splice_sigma,
-                experiment_splice_mu, experiment_splice_sigma,
+                experiment_splice_nu, experiment_splice_mu, experiment_splice_sigma,
                 splice_alpha, splice_beta, Q,
                 spliced_tgroup_indexes,
                 tgroup_tids,
@@ -1559,6 +1673,7 @@ void Analyze::run(hid_t output_file_id)
     BOOST_FOREACH (ExperimentSpliceMuSigmaSamplerThread*& thread,
                    experiment_splice_mu_sigma_sampler_threads) {
         thread = new ExperimentSpliceMuSigmaSamplerThread(
+                experiment_splice_nu,
                 experiment_splice_mu,
                 experiment_splice_sigma,
                 condition_splice_mu,
@@ -1583,6 +1698,14 @@ void Analyze::run(hid_t output_file_id)
         Logger::get_task(task_name).inc();
     }
 
+    BOOST_FOREACH (SpliceMuSigmaSamplerThread* thread, splice_mu_sigma_sampler_threads) {
+        thread->end_burnin();
+    }
+
+    BOOST_FOREACH (ExperimentSpliceMuSigmaSamplerThread* thread,
+                   experiment_splice_mu_sigma_sampler_threads) {
+        thread->end_burnin();
+    }
 
     for (size_t i = 0; i < num_samples; ++i) {
         sample();
@@ -1649,6 +1772,10 @@ void Analyze::warmup()
 {
     // An attempt at a more efficient warm-up procedure.
 
+    BOOST_FOREACH (Sampler* sampler, qsamplers) {
+        sampler->engage_priors();
+    }
+#if 0
     // draw a few samples from the quantification samplers without priors
     for (size_t i = 0; i < 10; ++i) {
         for (size_t j = 0; j < K; ++j) {
@@ -1660,14 +1787,12 @@ void Analyze::warmup()
         }
     }
 
-    BOOST_FOREACH (Sampler* sampler, qsamplers) {
-        sampler->engage_priors();
-    }
-
     compute_ts();
     compute_ts_scaling();
     compute_xs();
+#endif
 
+#if 0
     // choose ml estimates for tgroup_mu
     for (size_t i = 0; i < C; ++i) {
         for (size_t j = 0; j < T; ++j) {
@@ -1678,24 +1803,25 @@ void Analyze::warmup()
             tgroup_mu(i, j) = mu / condition_samples[i].size();
         }
     }
+#endif
 
     // choose initially flat values for splicing parameters
     for (size_t i = 0; i < C; ++i) {
         for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
             std::fill(condition_splice_mu[i][j].begin(),
-                      condition_splice_mu[i][j].end(), 0.0);
+                      condition_splice_mu[i][j].end(), 0.5);
         }
     }
 
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
         std::fill(condition_splice_sigma[i].begin(),
-                  condition_splice_sigma[i].end(), 1.0);
+                  condition_splice_sigma[i].end(), 0.1);
     }
 
     // initialially flat values for experiment splicing
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
         std::fill(experiment_splice_mu[i].begin(),
-                  experiment_splice_mu[i].end(), 0.0);
+                  experiment_splice_mu[i].end(), 0.5);
 
         std::fill(experiment_splice_sigma[i].begin(),
                   experiment_splice_sigma[i].end(), 0.1);
@@ -1796,15 +1922,12 @@ void Analyze::sample()
         }
     }
 
-#if 0
     splice_alpha =
         alpha_sampler->sample(splice_alpha, splice_beta,
                               splice_alpha_alpha, splice_beta_alpha,
                               &condition_splice_sigma_work.at(0),
                               condition_splice_sigma_work.size());
-    Logger::info("splice_alpha = %e", splice_alpha);
-#endif
-    splice_alpha = 10.0;
+    //Logger::info("splice_alpha = %f\n", splice_alpha);
 
     assert_finite(splice_alpha);
 
@@ -1817,7 +1940,7 @@ void Analyze::sample()
                              &condition_splice_sigma_work.at(0),
                              condition_splice_sigma_work.size());
 #endif
-    splice_beta = 0.01;
+    splice_beta = 0.002;
 
     assert_finite(splice_beta);
 }
@@ -1827,7 +1950,6 @@ void Analyze::write_output(size_t sample_num)
 {
     hsize_t file_start2[2] = {sample_num, 0};
     hsize_t file_count2[2] = {1, T};
-    herr_t status;
 
     H5Sselect_hyperslab_checked(h5_experiment_tgroup_dataspace, H5S_SELECT_SET,
                                 file_start2, NULL, file_count2, NULL);
@@ -1845,8 +1967,8 @@ void Analyze::write_output(size_t sample_num)
 
     hsize_t file_start3[3] = {sample_num, 0, 0};
     hsize_t file_count3[3] = {1, 1, T};
-    status = H5Sselect_hyperslab(h5_condition_tgroup_dataspace, H5S_SELECT_SET,
-                                 file_start2, NULL, file_count2, NULL);
+    H5Sselect_hyperslab_checked(h5_condition_tgroup_dataspace, H5S_SELECT_SET,
+                                file_start2, NULL, file_count2, NULL);
 
     for (size_t i = 0; i < C; ++i) {
         file_start3[1] = i;
@@ -1955,7 +2077,6 @@ void Analyze::write_output(size_t sample_num)
 }
 
 
-/* TODO: We need to think carefully about */
 void Analyze::compute_ts_scaling()
 {
     size_t effective_size =
@@ -1996,9 +2117,7 @@ void Analyze::choose_initial_values()
     std::fill(tgroup_mu.data().begin(), tgroup_mu.data().end(), tgroup_mu_0);
 
     // tgroup_sigma
-    const double tgroup_sigma_0 = 1.0;
-    //const double tgroup_sigma_0 =
-        //(tgroup_alpha_alpha / tgroup_beta_alpha) / (tgroup_alpha_beta / tgroup_beta_beta);
+    const double tgroup_sigma_0 = 0.1;
     std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);
     std::fill(experiment_tgroup_sigma.begin(), experiment_tgroup_sigma.end(), tgroup_sigma_0);
 
@@ -2007,10 +2126,10 @@ void Analyze::choose_initial_values()
     experiment_tgroup_alpha = 0.1;
     experiment_tgroup_beta = 1.0;
 
-    splice_alpha = 20.0;
-    splice_beta = 0.001;
+    splice_alpha = 2.0;
+    splice_beta = 0.01;
 
-    experiment_splice_alpha = 10.0;
+    experiment_splice_alpha = 0.05;
     experiment_splice_beta = 0.01;
 }
 

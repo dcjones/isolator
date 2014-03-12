@@ -31,23 +31,29 @@ double Shredder::sample(double x0)
 {
     double d0;
     double lp0 = f(x0, d0);
+    double d;
     assert_finite(lp0);
 
     double slice_height = log(random_uniform_01(rng)) + lp0;
 
-    double x_min = find_slice_edge(x0, slice_height, lp0, d0, -1);
-    double x_max = find_slice_edge(x0, slice_height, lp0, d0,  1);
+    x_min = find_slice_edge(x0, slice_height, lp0, d0, -1);
+    x_min_lp = f(x_min, d);
+    x_max = find_slice_edge(x0, slice_height, lp0, d0,  1);
+    x_max_lp = f(x_max, d);
 
-    double x;
-    while (true) {
+    double x = (x_max + x_min) / 2;
+    const double x_eps  = 1e-8;
+    while (x_max - x_min > x_eps) {
         x = x_min + (x_max - x_min) * random_uniform_01(rng);
         double d;
         double lp = f(x, d);
 
         if (lp >= slice_height) break;
-        else if (x > x0) x_max = x0;
-        else             x_min = x0;
+        else if (x > x0) x_max = x;
+        else             x_min = x;
     }
+
+    assert(lower_bound <= x && x <= upper_bound);
 
     return x;
 }

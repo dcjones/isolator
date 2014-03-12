@@ -112,6 +112,13 @@ struct TranscriptCmpTSS
 };
 
 
+/* Comparator to order transcripts by gene_id. */
+struct TranscriptCmpGeneId
+{
+    bool operator()(const Transcript&, const Transcript& b) const;
+};
+
+
 enum IntronExonType {
     EXONIC_INTERVAL_TYPE,
     INTRONIC_INTERVAL_TYPE

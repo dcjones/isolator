@@ -182,6 +182,12 @@ bool TranscriptCmpTSS::operator()(const Transcript& a, const Transcript& b) cons
 }
 
 
+bool TranscriptCmpGeneId::operator()(const Transcript& a, const Transcript& b) const
+{
+    return a.gene_name < b.gene_name;
+}
+
+
 TranscriptIntronExonIterator::TranscriptIntronExonIterator()
     : owner(NULL)
 {
@@ -365,7 +371,6 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
 
     // set transcripts ids and default transcription groups
     typedef std::map<Interval, std::vector<unsigned int> > TSMap;
-    typedef std::pair<const Interval, std::vector<unsigned int> > TSMapItem;
     TSMap tss_group;
 
     std::vector<Transcript> sorted_transcripts;
@@ -376,10 +381,6 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
          ++t) {
         sorted_transcripts.push_back(*t->second);
     }
-    /* Ok, I need to do clustering of transcription start sites. I can't just
-     * index by tss. How can I go about that?
-     */
-
 
     // assign tids
     std::sort(sorted_transcripts.begin(), sorted_transcripts.end());
@@ -389,6 +390,22 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
     }
 
     // assign tgroups
+
+    // TODO: we should add an option to assign tgroups according te gene_ids.
+    std::sort(sorted_transcripts.begin(), sorted_transcripts.end(),
+              TranscriptCmpGeneId());
+    unsigned int next_tgroup = 0;
+    for (size_t i = 0; i < sorted_transcripts.size(); ++i) {
+        if (i > 0 && sorted_transcripts[i].gene_id == sorted_transcripts[i-1].gene_id) {
+            sorted_transcripts[i].tgroup = sorted_transcripts[i-1].tgroup;
+        }
+        else {
+            sorted_transcripts[i].tgroup = next_tgroup++;
+        }
+    }
+    _num_tgroups = next_tgroup;
+
+#if 0
     std::sort(sorted_transcripts.begin(), sorted_transcripts.end(),
               TranscriptCmpTSS());
     unsigned int next_tgroup = 0;
@@ -405,6 +422,7 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
         }
     }
     _num_tgroups = next_tgroup;
+#endif
 
     // optionally extend the ends of transcripts before inserting them into the
     // set

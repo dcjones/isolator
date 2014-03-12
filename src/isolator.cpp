@@ -199,11 +199,8 @@ static void print_summarize_help(FILE* fout)
     fprintf(fout,
             "\nOptions:\n"
             "-h, --help                Print this help message\n"
-            "-v, --verbose             Print a bunch of information useful mainly for debugging.\n"
             "-o, --out=FILE            Output summary to the given file. (default: standard out).\n"
             "-l, --list                List summarization strategies.\n"
-            "-a, --condition_a         First condition for pairwise comparisons.\n"
-            "-b, --condition_b         First condition for pairwise comparisons.\n"
             "\n"
             "See 'isolator help summarize' for more.\n");
 }
@@ -215,13 +212,15 @@ static void print_summarize_strategies(FILE* fout)
     fprintf(fout,
            "Available strategies:\n"
            "  transcript-expression\n"
+           "  transcript-splicing\n"
            "  gene-expression\n"
            "  differential-transcription\n"
            "  differential-splicing\n"
            "  differential-feature-splicing\n"
            "  condition-splicing\n"
-           "  condition-splicing-params\n"
            "  condition-transcription\n"
+           "  experiment-splicing-sigma\n"
+           "  trace\n"
            "\n");
 }
 
@@ -233,12 +232,9 @@ static int isolator_summarize(int argc, char* argv[])
     static struct option long_options[] =
     {
         {"help",         no_argument,       NULL, 'h'},
-        {"verbose",      no_argument,       NULL, 'v'},
         {"out",          required_argument, NULL, 'o'},
         {"list",         no_argument,       NULL, 'l'},
         {"strategy",     required_argument, NULL, 's'},
-        {"condition_a",  required_argument, NULL, 'a'},
-        {"condition_b",  required_argument, NULL, 'b'},
         {"unnormalized", no_argument,       NULL, 'u'},
         {"credible",     required_argument, NULL, 'c'},
         {"effect-size",  required_argument, NULL, 'e'},
@@ -246,17 +242,15 @@ static int isolator_summarize(int argc, char* argv[])
     };
 
     const char* out_filename = NULL;
-    Logger::level logger_level = Logger::INFO;
-    unsigned int condition_a = 0, condition_b = 1;
 
     int opt;
     int opt_idx;
     double credible_interval = NAN;
-    double minimum_effect_size = 1.5;
+    double minimum_effect_size = NAN;
     bool unnormalized = false;
 
     while (true) {
-        opt = getopt_long(argc, argv, "hvo:s:l", long_options, &opt_idx);
+        opt = getopt_long(argc, argv, "ho:s:l", long_options, &opt_idx);
 
         if (opt == -1) break;
 
@@ -265,10 +259,6 @@ static int isolator_summarize(int argc, char* argv[])
                 print_summarize_help(stdout);
                 return 0;
 
-            case 'v':
-                logger_level = Logger::DEBUG;
-                break;
-
             case 'o':
                 out_filename = optarg;
                 break;
@@ -276,14 +266,6 @@ static int isolator_summarize(int argc, char* argv[])
             case 'l':
                 print_summarize_strategies(stdout);
                 return 0;
-
-            case 'a':
-                condition_a = strtoul(optarg, NULL, 10);
-                break;
-
-            case 'b':
-                condition_b = strtoul(optarg, NULL, 10);
-                break;
 
             case 'u':
                 unnormalized = true;
@@ -339,19 +321,23 @@ static int isolator_summarize(int argc, char* argv[])
         Logger::abort("Can't open file %s for writing.\n", out_filename);
     }
 
-    minimum_effect_size = log2(minimum_effect_size);
 
     Summarize summarize(in_filename);
 
     if (strcmp(strategy, "transcript-expression") == 0) {
         summarize.transcript_expression(out_file, credible_interval,
-                                        unnormalized);
+                                        unnormalized, false);
+    }
+    else if (strcmp(strategy, "transcript-splicing") == 0) {
+        summarize.transcript_expression(out_file, credible_interval,
+                                        unnormalized, true);
     }
     else if (strcmp(strategy, "gene-expression") == 0) {
         summarize.gene_expression(out_file, credible_interval,
                                   unnormalized);
     }
     else if (strcmp(strategy, "differential-transcription") == 0) {
+        minimum_effect_size = log2(minimum_effect_size);
         summarize.differential_transcription(out_file, credible_interval,
                                              minimum_effect_size);
     }
@@ -366,11 +352,11 @@ static int isolator_summarize(int argc, char* argv[])
     else if (strcmp(strategy, "condition-splicing") == 0) {
         summarize.condition_splicing(out_file, credible_interval);
     }
-    else if (strcmp(strategy, "condition-splicing-params") == 0) {
-        summarize.condition_splicing(out_file, credible_interval, false);
+    else if (strcmp(strategy, "experiment-splicing-sigma") == 0) {
+        summarize.experiment_splicing_sigma(out_file, credible_interval);
     }
-    else if (strcmp(strategy, "condition-transcription") == 0) {
-        summarize.condition_transcription(out_file, credible_interval);
+    else if (strcmp(strategy, "experiment-splicing") == 0) {
+        summarize.experiment_splicing(out_file, credible_interval);
     }
     else {
         fprintf(stderr, "No such summarization strategy: %s\n\n", strategy);
@@ -957,7 +943,7 @@ static int isolator_analyze(int argc, char* argv[])
     Logger::level logger_level = Logger::INFO;
     unsigned int burnin = 100;
     unsigned int num_samples = 250;
-    pos_t tss_cluster_dist = 50;
+    pos_t tss_cluster_dist = 150;
     bool run_gc_correction = true;
     constants::num_threads = boost::thread::hardware_concurrency();
     const char* fa_fn  = NULL;
@@ -1125,6 +1111,119 @@ static int isolator_analyze(int argc, char* argv[])
 }
 
 
+static void print_trace_usage(FILE* fout)
+{
+    fprintf(fout, "Usage: isolator trace transcript_id isolator-output.h5\n");
+}
+
+
+static void print_trace_help(FILE* fout)
+{
+    print_trace_usage(fout);
+    fprintf(fout,
+        "\nOptions:\n"
+        "-h, --help                Print this help message\n"
+        "-o, --out=FILE            Output summary to the given file. (default: standard out).\n" );
+}
+
+
+static int isolator_trace(int argc, char* argv[])
+{
+    // TODO: we should add an option to specify wether we are output a trace
+    // of the splicing parameters or transcription parameters. Right now I'm just
+    // doing splicing because thats what I need to debug.
+
+    Logger::start();
+
+    static struct option long_options[] =
+    {
+        {"help", no_argument,       NULL, 'h'},
+        {"out",  required_argument, NULL, 'o'},
+        {0, 0, 0, 0}
+    };
+
+    const char* out_filename = NULL;
+    int opt;
+    int opt_idx;
+
+    while (true) {
+        opt = getopt_long(argc, argv, "ho:", long_options, &opt_idx);
+        if (opt == -1) break;
+
+        switch (opt) {
+            case 'h':
+                print_summarize_help(stdout);
+                return 0;
+
+            case 'o':
+                out_filename = optarg;
+                break;
+
+            case '?':
+                fprintf(stderr, "\n");
+                print_trace_help(stderr);
+                return 1;
+
+            default:
+                abort();
+        }
+
+    }
+
+    if (optind + 1 >= argc) {
+        fprintf(stderr, "Too few arguments.\n\n");
+        print_trace_usage(stdout);
+        return 0;
+    }
+
+    if (optind + 2 < argc) {
+        fprintf(stderr, "Too many arguments.\n\n");
+        return 1;
+    }
+
+    const char* transcript_id = argv[optind];
+    const char* in_filename = argv[optind+1];
+
+    std::string default_out_filename = std::string(transcript_id) + std::string("-trace.tsv");
+
+    FILE* out_file = NULL;
+    if (!out_filename) out_filename = default_out_filename.c_str();
+    out_file = fopen(out_filename, "w");
+    if (out_file == NULL) {
+        Logger::abort("Can't open file %s for writing.\n", out_filename);
+    }
+
+    Summarize summarize(in_filename);
+
+    std::vector<float> ex_mu =
+        summarize.transcript_experiment_splicing(transcript_id);
+    std::vector<std::vector<float> > cond_mus =
+        summarize.transcript_condition_splicing(transcript_id);
+
+    size_t num_samples = ex_mu.size();
+    size_t C = cond_mus.size();
+    fprintf(out_file, "round\tex_mu");
+    for (size_t i = 0; i < C; ++i) {
+        fprintf(out_file, "\tmu%lu", (unsigned long) i);
+    }
+    fputc('\n', out_file);
+
+    for (size_t i = 0; i < num_samples; ++i) {
+        fprintf(out_file, "%lu\t%f", (unsigned long) i + 1, ex_mu[i]);
+        for (size_t j = 0; j < C; ++j) {
+            fprintf(out_file, "\t%f", cond_mus[j][i]);
+        }
+        fputc('\n', out_file);
+    }
+
+    if (out_file != stdout) fclose(out_file);
+
+    Logger::end();
+    return EXIT_SUCCESS;
+}
+
+
+
 static void print_usage(FILE* fout)
 {
     fprintf(fout,
@@ -1188,9 +1287,10 @@ int main(int argc, char* argv[])
     else if (strcmp(argv[0], "help") == 0) {
         return isolator_help(argc, argv);
     }
+    else if (strcmp(argv[0], "trace") == 0) {
+        return isolator_trace(argc, argv);
+    }
 
     fprintf(stderr, "Unknown command %s.\n\n", argv[0]);
     return EXIT_FAILURE;
 }
-
-

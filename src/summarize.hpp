@@ -44,7 +44,7 @@ class Summarize
         // pre-baked summarizations
         void transcript_expression(FILE* output,
                                    double credible_interval,
-                                   bool unnormalized);
+                                   bool unnormalized, bool splicing_rate);
 
         void gene_expression(FILE* output,
                              double credible_interval,
@@ -60,10 +60,19 @@ class Summarize
                                            double credible_interval,
                                            double effect_size);
 
-        void condition_splicing(FILE* output, double credible_interval,
-                                bool normalize=true);
+        void condition_splicing(FILE* output, double credible_interval);
 
-        void condition_transcription(FILE* output, double credible_interval);
+        void condition_splicing_sigma(FILE* output, double credible_interval);
+
+
+        void experiment_splicing(FILE* output, double credible_interval);
+
+        void experiment_splicing_sigma(FILE* output, double credible_interal);
+
+        // get raw sampler output for a particular trasncript or tgroup
+        std::vector<float> transcript_experiment_splicing(const char* transcript_id);
+        std::vector<std::vector<float> > transcript_condition_splicing(const char* transcript_id);
+
 
         // TODO: these are not exposed. Either get rid of them, or make them
         // accessable.
@@ -90,7 +99,8 @@ class Summarize
                 boost::numeric::ublas::matrix<float>* med,
                 boost::numeric::ublas::matrix<float>* lower,
                 boost::numeric::ublas::matrix<float>* upper,
-                double credible_interval, bool unnormalized);
+                double credible_interval, bool unnormalized,
+                bool splicing_rate);
 
         void median_ci_gene_expression(
                 boost::numeric::ublas::matrix<float>* med,
@@ -101,8 +111,7 @@ class Summarize
         void read_condition_tgroup_mean(unsigned int condition,
                                         boost::numeric::ublas::matrix<float>& data);
 
-        void condition_splicing(std::vector<boost::multi_array<float, 3> >& output,
-                                bool normalize=true);
+        void condition_splicing(std::vector<boost::multi_array<float, 3> >& output);
 
         void read_gene_features(
                 std::vector<Interval>& feature_intervals,

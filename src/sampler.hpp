@@ -235,8 +235,6 @@ class Sampler
         /* Samples indexed by transcript id */
         float** samples;
 
-        std::vector<std::string> transcript_ids;
-
         friend class InferenceThread;
         friend class AbundanceSamplerThread;
         friend class MultireadSamplerThread;

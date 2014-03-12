@@ -9,4 +9,7 @@ add_library(yaml
             scanner.c
             writer.c)
 
+# Not my code. Supress compiler warnings.
+set_target_properties(yaml PROPERTIES COMPILE_FLAGS "-w")
+
 include_directories()
