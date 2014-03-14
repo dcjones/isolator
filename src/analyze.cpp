@@ -456,9 +456,10 @@ class SpliceMuSigmaSamplerThread
                         sigma[j][k] = 0.1;
                     }
                     else {
-                        sigma[j][k] =
-                            sigma_sampler.sample(&data.at(0), K,
-                                                 splice_alpha, splice_beta);
+                        sigma[j][k] = 0.03;
+                        //sigma[j][k] =
+                            //sigma_sampler.sample(&data.at(0), K,
+                                                 //splice_alpha, splice_beta);
                     }
                 }
 
@@ -594,7 +595,7 @@ class ExperimentSpliceMuSigmaSamplerThread
                                              //experiment_splice_alpha, experiment_splice_beta);
 
                     // TODO: constants
-                    experiment_sigma[j][k] = 0.05;
+                    experiment_sigma[j][k] = 0.15;
                 }
 
                 notify_queue.push(1);
@@ -1727,6 +1728,7 @@ void Analyze::sample()
         }
     }
 
+    //splice_alpha = 0.1;
     splice_alpha =
         alpha_sampler->sample(splice_alpha, splice_beta,
                               splice_alpha_alpha, splice_beta_alpha,
