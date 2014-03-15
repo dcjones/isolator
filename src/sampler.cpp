@@ -1536,7 +1536,7 @@ class InterTranscriptSampler
         {
             const double lp_eps = 1e-3;
             const double d_eps  = 1e-7;
-            const double x_eps  = 1e-6;
+            const double x_eps  = 1e-3;
 
             double lp = lp0 - slice_height;
             double d = d0;

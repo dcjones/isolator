@@ -392,6 +392,7 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
     // assign tgroups
 
     // TODO: we should add an option to assign tgroups according te gene_ids.
+#if 0
     std::sort(sorted_transcripts.begin(), sorted_transcripts.end(),
               TranscriptCmpGeneId());
     unsigned int next_tgroup = 0;
@@ -404,8 +405,8 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
         }
     }
     _num_tgroups = next_tgroup;
+#endif
 
-#if 0
     std::sort(sorted_transcripts.begin(), sorted_transcripts.end(),
               TranscriptCmpTSS());
     unsigned int next_tgroup = 0;
@@ -422,7 +423,6 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
         }
     }
     _num_tgroups = next_tgroup;
-#endif
 
     // optionally extend the ends of transcripts before inserting them into the
     // set
