@@ -131,8 +131,6 @@ class NormalTMuSampler : public Shredder
 
             if (xmin) *xmin = this->x_min;
             if (xmax) *xmax = this->x_max;
-            if (xmin_lp) *xmin_lp = this->x_min_lp;
-            if (xmax_lp) *xmax_lp = this->x_max_lp;
 
             return ans;
         }

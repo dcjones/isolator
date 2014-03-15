@@ -37,9 +37,7 @@ double Shredder::sample(double x0)
     double slice_height = log(random_uniform_01(rng)) + lp0;
 
     x_min = find_slice_edge(x0, slice_height, lp0, d0, -1);
-    x_min_lp = f(x_min, d);
     x_max = find_slice_edge(x0, slice_height, lp0, d0,  1);
-    x_max_lp = f(x_max, d);
 
     double x = (x_max + x_min) / 2;
     const double x_eps  = 1e-8;
@@ -63,7 +61,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
                                  double lp0, double d0, int direction)
 {
     const double lp_eps = 1e-2;
-    const double d_eps  = 1e-5;
+    const double d_eps  = 1e-3;
     const double x_eps  = 1e-8;
 
     double lp = lp0 - slice_height;

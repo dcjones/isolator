@@ -20,7 +20,6 @@ class Shredder
 
         // These are kept as public fields to ease debugging and diagnostics.
         double x_min, x_max;
-        double x_min_lp, x_max_lp;
 
     protected:
         // Probability function. Return the log-probibility at x, as well as the

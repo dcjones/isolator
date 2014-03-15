@@ -1516,10 +1516,11 @@ class InterTranscriptSampler
             double x_min = find_slice_edge(x0, slice_height, lp0, d0, -1, &x_min_lp);
             double x_max = find_slice_edge(x0, slice_height, lp0, d0,  1, &x_max_lp);
 
-            double x;
-            while (true) {
+            const double x_eps = 1e-3;
+            double d;
+            double x = (x_min + x_max) / 2;
+            while (fabs(x_max - x_min) > x_eps) {
                 x = x_min + (x_max - x_min) * random_uniform_01(rng);
-                double d;
                 double lp = f(x, d);
 
                 if (lp >= slice_height) break;
@@ -1534,8 +1535,8 @@ class InterTranscriptSampler
                                double lp0, double d0, int direction,
                                double* last_lp)
         {
-            const double lp_eps = 1e-3;
-            const double d_eps  = 1e-7;
+            const double lp_eps = 1e-1;
+            const double d_eps  = 1e-1;
             const double x_eps  = 1e-3;
 
             double lp = lp0 - slice_height;
