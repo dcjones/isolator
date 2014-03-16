@@ -1,4 +1,3 @@
-
 ![Isolator](http://homes.cs.washington.edu/~dcjones/isolator/logo.svg)
 
 Isolator analyzes RNA-Seq experiments.
@@ -178,7 +177,7 @@ isolator summarize transcript-expression --credible=0.95 isolator-output.h5
 
 Expression can also be summarized on the gene level:
 ```sh
-isolator summarize transcript-expression isolator-output.h5
+isolator summarize gene-expression isolator-output.h5
 ```
 
 ### Differential Expression, Transcription, and Splicing
