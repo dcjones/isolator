@@ -506,13 +506,15 @@ void Summarize::transcript_expression(FILE* output, double credible_interval,
     fprintf(output, "gene_name\tgene_id\ttranscript_id");
     for (unsigned int i = 0; i < K; ++i) {
         fprintf(output,
-                unnormalized ? "\t%s_tpm" : "\t%s_adjusted_tpm",
+                splicing_rate ? "\t%s_splice_rate" :
+                    (unnormalized ?  "\t%s_tpm" : "\t%s_adjusted_tpm"),
                 metadata.sample_names[i].c_str());
         if (print_credible_interval) {
             fprintf(output,
-                    unnormalized ?
+                    splicing_rate ? "\t%s_splice_rate_lower\t%s_splice_rate_upper" :
+                    (unnormalized ?
                         "\t%s_tpm_lower\t%s_tpm_upper" :
-                        "\t%s_adjusted_tpm_lower\t%s_adjusted_tpm_upper",
+                        "\t%s_adjusted_tpm_lower\t%s_adjusted_tpm_upper"),
                     metadata.sample_names[i].c_str(),
                     metadata.sample_names[i].c_str());
         }
@@ -522,6 +524,10 @@ void Summarize::transcript_expression(FILE* output, double credible_interval,
     double expr_scale = splicing_rate ? 1.0 : 1e6;
 
     for (size_t i = 0; i < N; ++i) {
+        if (splicing_rate && tgroup_tids[tgroup[i]].size() < 2) {
+            continue;
+        }
+
         fprintf(output, "%s\t%s\t%s",
                 gene_names[i].get().c_str(),
                 gene_ids[i].get().c_str(),

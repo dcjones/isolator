@@ -229,7 +229,7 @@ static void print_summarize_strategies(FILE* fout)
 
 static int isolator_summarize(int argc, char* argv[])
 {
-    Logger::start();
+    //Logger::start();
 
     static struct option long_options[] =
     {
@@ -368,7 +368,7 @@ static int isolator_summarize(int argc, char* argv[])
 
     if (out_file != stdout) fclose(out_file);
 
-    Logger::end();
+    //Logger::end();
     return EXIT_SUCCESS;
 }
 
