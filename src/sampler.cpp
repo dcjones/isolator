@@ -1261,7 +1261,7 @@ class InterTgroupSampler : public Shredder
         {
         }
 
-        double sample(unsigned int c, unsigned int u, unsigned int v)
+        double sample(rng_t& rng, unsigned int c, unsigned int u, unsigned int v)
         {
             double x0 = S.tgroupmix[u] / (S.tgroupmix[u] + S.tgroupmix[v]);
 
@@ -1312,7 +1312,7 @@ class InterTgroupSampler : public Shredder
             }
 
 
-            return Shredder::sample(x0);
+            return Shredder::sample(rng, x0);
         }
 
     protected:
@@ -1752,9 +1752,6 @@ class AbundanceSamplerThread
             , hillclimb(false)
             , thread(NULL)
         {
-            unsigned long seed = reinterpret_cast<unsigned long>(this) *
-                                 (unsigned long) time(NULL);
-            rng.seed(seed);
         }
 
         ~AbundanceSamplerThread()
@@ -1784,6 +1781,8 @@ class AbundanceSamplerThread
             while (true) {
                 block = q.pop();
                 if (block.is_end_of_queue()) break;
+
+                this->rng = block.rng;
 
                 for (unsigned int c = block.u; c < block.v; ++c) {
                     sample_intra_component(c);
@@ -1831,7 +1830,7 @@ class AbundanceSamplerThread
 
         InterTgroupSampler inter_tgroup_sampler;
         InterTranscriptSampler inter_transcript_sampler;
-        rng_t rng;
+        rng_t* rng;
         boost::random::uniform_01<double> random_uniform_01;
         boost::random::uniform_int_distribution<unsigned int> random_uniform_int;
         Sampler& S;
@@ -1937,11 +1936,11 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
         for (unsigned int i = 0; i < S.component_tgroups[c].size(); ++i) {
             random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
                         0, S.component_tgroups[c].size() - 1));
-            unsigned int u = random_uniform_int(rng);
+            unsigned int u = random_uniform_int(*rng);
 
             random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
                         0, S.component_tgroups[c].size() - 2));
-            unsigned int v = random_uniform_int(rng);
+            unsigned int v = random_uniform_int(*rng);
             if (v >= u) ++ v;
 
             unsigned int tgroupu = 0, tgroupv = 0;
@@ -1966,7 +1965,7 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
 
 void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u, unsigned int v)
 {
-    double x = inter_tgroup_sampler.sample(c, u, v);
+    double x = inter_tgroup_sampler.sample(*rng, c, u, v);
 
     double tgroupmix_u = x * (S.tgroupmix[u] + S.tgroupmix[v]);
     double tgroupmix_v = (1 - x) * (S.tgroupmix[u] + S.tgroupmix[v]);
@@ -2020,11 +2019,11 @@ void AbundanceSamplerThread::sample_intra_tgroup(unsigned int tgroup)
         for (unsigned int i = 0; i < S.tgroup_tids[tgroup].size() - 1; ++i) {
             random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
                         0, S.tgroup_tids[tgroup].size() - 1));
-            unsigned int u = random_uniform_int(rng);
+            unsigned int u = random_uniform_int(*rng);
 
             unsigned int v = u;
             while (v == u) {
-                v = random_uniform_int(rng);
+                v = random_uniform_int(*rng);
             }
 
             sample_inter_transcript(S.tgroup_tids[tgroup][u],
@@ -2103,7 +2102,7 @@ void AbundanceSamplerThread::sample_component(unsigned int c)
     float x0 = S.cmix[c];
 
     float lp0 = compute_component_probability(c, x0);
-    float slice_height = lp0 + log(random_uniform_01(rng));
+    float slice_height = lp0 + log(random_uniform_01(*rng));
     float step = 1.0;
 
     float x_min = find_component_slice_edge(c, x0, slice_height, -step);
@@ -2111,7 +2110,7 @@ void AbundanceSamplerThread::sample_component(unsigned int c)
 
     float x;
     while (true) {
-         x = x_min + (x_max - x_min) * random_uniform_01(rng);
+         x = x_min + (x_max - x_min) * random_uniform_01(*rng);
          float lp = compute_component_probability(c, x);
 
          if (lp >= slice_height) break;
@@ -2219,7 +2218,8 @@ class MultireadSamplerThread
 };
 
 
-Sampler::Sampler(const char* bam_fn, const char* fa_fn,
+Sampler::Sampler(unsigned int rng_seed,
+                 const char* bam_fn, const char* fa_fn,
                  TranscriptSet& ts, FragmentModel& fm, bool run_gc_correction,
                  bool use_priors)
     : ts(ts)
@@ -2507,10 +2507,25 @@ Sampler::Sampler(const char* bam_fn, const char* fa_fn,
         gc_correct = new GCCorrection(ts, transcript_gc);
     }
 
-    // Allocate sample threads
+    // allocate sample threads
     for (size_t i = 0; i < constants::num_threads; ++i) {
         multiread_threads.push_back(new MultireadSamplerThread(*this, multiread_queue));
         abundance_threads.push_back(new AbundanceSamplerThread(*this, component_queue));
+    }
+
+    // allocate and seed rngs
+    size_t num_multiread_rngs =
+        num_multireads / constants::sampler_multiread_block_size + 1;
+    multiread_rng_pool.resize(num_multiread_rngs);
+    BOOST_FOREACH (rng_t& rng, multiread_rng_pool) {
+        rng.seed(rng_seed++);
+    }
+
+    size_t num_abundance_rngs =
+        num_components / constants::sampler_component_block_size + 1;
+    abundance_rng_pool.resize(num_abundance_rngs);
+    BOOST_FOREACH (rng_t& rng, abundance_rng_pool) {
+        rng.seed(rng_seed++);
     }
 }
 
@@ -2649,14 +2664,15 @@ void Sampler::sample_multireads()
         multiread_threads[i]->start();
     }
 
-    unsigned int r;
-    for (r = 0; r + constants::sampler_multiread_block_size < num_multireads;
-            r += constants::sampler_multiread_block_size) {
+    unsigned int r, i;
+    for (r = 0, i = 0; r + constants::sampler_multiread_block_size < num_multireads;
+            r += constants::sampler_multiread_block_size, ++i) {
         multiread_queue.push(MultireadBlock(
-                    r, r + constants::sampler_multiread_block_size));
+                    r, r + constants::sampler_multiread_block_size,
+                    multiread_rng_pool[i]));
     }
     if (r < num_multireads) {
-        multiread_queue.push(MultireadBlock(r, num_multireads));
+        multiread_queue.push(MultireadBlock(r, num_multireads, multiread_rng_pool[i]));
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -2692,15 +2708,16 @@ void Sampler::sample_abundance()
         abundance_threads[i]->start();
     }
 
-    unsigned int c;
-    for (c = 0; c + constants::sampler_component_block_size < num_components;
-            c += constants::sampler_component_block_size)
+    unsigned int c, i;
+    for (c = 0, i = 0; c + constants::sampler_component_block_size < num_components;
+            c += constants::sampler_component_block_size, ++i)
     {
         component_queue.push(ComponentBlock(
-            c, c + constants::sampler_component_block_size));
+            c, c + constants::sampler_component_block_size,
+            abundance_rng_pool[i]));
     }
     if (c < num_components) {
-        component_queue.push(ComponentBlock(c, num_components));
+        component_queue.push(ComponentBlock(c, num_components, abundance_rng_pool[i]));
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {

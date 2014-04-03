@@ -16,7 +16,7 @@ class Shredder
         virtual ~Shredder();
 
         // Generate a new sample given the current value x0.
-        double sample(double x0);
+        double sample(rng_t& rng, double x0);
 
         // These are kept as public fields to ease debugging and diagnostics.
         double x_min, x_max;
@@ -29,7 +29,6 @@ class Shredder
         // Bounds on the parameter being sampled over
         double lower_limit, upper_limit;
 
-        rng_t rng;
         boost::random::uniform_01<double> random_uniform_01;
 
     private:

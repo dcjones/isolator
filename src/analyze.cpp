@@ -37,7 +37,8 @@ class BetaDistributionSampler : public Shredder
         {}
 
         // What is x here? I should really be sampling over a/b, right?
-        double sample(double a0, double b0, double prec,
+        double sample(rng_t& rng,
+                      double a0, double b0, double prec,
                       double a_prior, double b_prior,
                       const double* data, size_t n)
         {
@@ -48,7 +49,7 @@ class BetaDistributionSampler : public Shredder
             this->b_prior = b_prior;
             this->data = data;
             this->n = n;
-            return Shredder::sample(a0 / (a0 + b0));
+            return Shredder::sample(rng, a0 / (a0 + b0));
         }
 
     private:
@@ -87,7 +88,7 @@ class NormalMuSampler
         {
         }
 
-        double sample(double sigma, const double* xs, size_t n,
+        double sample(rng_t& rng, double sigma, const double* xs, size_t n,
                       double prior_mu, double prior_sigma)
         {
             double prior_var = prior_sigma * prior_sigma;
@@ -102,7 +103,6 @@ class NormalMuSampler
         }
 
     private:
-        rng_t rng;
         boost::random::normal_distribution<double> random_normal;
 };
 
@@ -115,9 +115,9 @@ class NormalTMuSampler : public Shredder
         {
         }
 
-        double sample(double mu0, double sigma, const double* xs, size_t n,
-                      double prior_nu, double prior_mu, double prior_sigma,
-                      double* xmin, double* xmax,
+        double sample(rng_t& rng, double mu0, double sigma, const double* xs,
+                      size_t n, double prior_nu, double prior_mu,
+                      double prior_sigma, double* xmin, double* xmax,
                       double* xmin_lp, double* xmax_lp)
         {
             this->sigma = sigma;
@@ -127,7 +127,7 @@ class NormalTMuSampler : public Shredder
             this->xs = xs;
             this->n = n;
 
-            double ans = Shredder::sample(mu0);
+            double ans = Shredder::sample(rng, mu0);
 
             if (xmin) *xmin = this->x_min;
             if (xmax) *xmax = this->x_max;
@@ -166,7 +166,8 @@ class StudentTMuSampler : public Shredder
         {
         }
 
-        double sample(double mu0, double nu, double sigma, const double* xs, size_t n,
+        double sample(rng_t& rng,
+                      double mu0, double nu, double sigma, const double* xs, size_t n,
                       double prior_mu, double prior_sigma)
         {
             this->nu = nu;
@@ -176,7 +177,7 @@ class StudentTMuSampler : public Shredder
             this->xs = xs;
             this->n = n;
 
-            return Shredder::sample(mu0);
+            return Shredder::sample(rng, mu0);
         }
 
 
@@ -206,7 +207,8 @@ class NormalSigmaSampler
         {
         }
 
-        double sample(const double* xs, size_t n, double prior_alpha, double prior_beta)
+        double sample(rng_t& rng, const double* xs, size_t n,
+                      double prior_alpha, double prior_beta)
         {
             double posterior_alpha = prior_alpha + n / 2.0;
 
@@ -219,9 +221,6 @@ class NormalSigmaSampler
             boost::random::gamma_distribution<double> dist(posterior_alpha, 1/posterior_beta);
             return sqrt(1 / dist(rng));
         }
-
-    private:
-        rng_t rng;
 };
 
 
@@ -238,7 +237,8 @@ class TgroupMuSigmaSamplerThread
                                    const std::vector<int>& condition,
                                    const std::vector<std::vector<int> >& condition_samples,
                                    Queue<int>& tgroup_queue,
-                                   Queue<int>& notify_queue)
+                                   Queue<int>& notify_queue,
+                                   std::vector<rng_t>& rng_pool)
             : ts(ts)
             , mu(mu)
             , experiment_tgroup_mu(experiment_tgroup_mu)
@@ -250,6 +250,7 @@ class TgroupMuSigmaSamplerThread
             , condition_samples(condition_samples)
             , tgroup_queue(tgroup_queue)
             , notify_queue(notify_queue)
+            , rng_pool(rng_pool)
             , thread(NULL)
         {
             K = ts.size1();
@@ -264,6 +265,8 @@ class TgroupMuSigmaSamplerThread
             while (true) {
                 if ((tgroup = tgroup_queue.pop()) == -1) break;
 
+                rng_t& rng = rng_pool[tgroup];
+
                 // sample mu
                 for (size_t i = 0; i < C; ++i) {
                     size_t l = 0;
@@ -271,7 +274,8 @@ class TgroupMuSigmaSamplerThread
                         xs[l++] = ts(j, tgroup);
                     }
 
-                    mu(i, tgroup) = mu_sampler.sample(sigma[tgroup], &xs.at(0), l,
+                    mu(i, tgroup) = mu_sampler.sample(rng,
+                                                      sigma[tgroup], &xs.at(0), l,
                                                       experiment_tgroup_mu[tgroup],
                                                       experiment_tgroup_sigma[tgroup]);
                     assert_finite(mu(i, tgroup));
@@ -282,7 +286,7 @@ class TgroupMuSigmaSamplerThread
                     xs[i] = ts(i, tgroup) - mu(condition[i], tgroup);
                 }
 
-                sigma[tgroup] = sigma_sampler.sample(&xs.at(0), K, alpha, beta);
+                sigma[tgroup] = sigma_sampler.sample(rng, &xs.at(0), K, alpha, beta);
                 assert_finite(sigma[tgroup]);
 
                 notify_queue.push(1);
@@ -313,6 +317,7 @@ class TgroupMuSigmaSamplerThread
         const std::vector<std::vector<int> >& condition_samples;
         Queue<int>& tgroup_queue;
         Queue<int>& notify_queue;
+        std::vector<rng_t>& rng_pool;
         boost::thread* thread;
 
         // temporary data vector
@@ -351,7 +356,8 @@ class SpliceMuSigmaSamplerThread
                         const std::vector<int>& condition,
                         const std::vector<std::vector<int> >& condition_samples,
                         Queue<int>& spliced_tgroup_queue,
-                        Queue<int>& notify_queue)
+                        Queue<int>& notify_queue,
+                        std::vector<rng_t>& rng_pool)
             : mu(mu)
             , sigma(sigma)
             , experiment_nu(experiment_nu)
@@ -366,6 +372,7 @@ class SpliceMuSigmaSamplerThread
             , condition_samples(condition_samples)
             , spliced_tgroup_queue(spliced_tgroup_queue)
             , notify_queue(notify_queue)
+            , rng_pool(rng_pool)
             , burnin_state(true)
             , thread(NULL)
         {
@@ -398,6 +405,8 @@ class SpliceMuSigmaSamplerThread
                 if ((j = spliced_tgroup_queue.pop()) == -1) break;
                 size_t tgroup = spliced_tgroup_indexes[j];
 
+                rng_t& rng = rng_pool[j];
+
                 // transform quantification data for the selected tgroup
                 // so we can treat it as normal (i.e. invert the logistic normal
                 // transform)
@@ -426,7 +435,8 @@ class SpliceMuSigmaSamplerThread
                         double x_min, x_max, x_min_lp, x_max_lp;
 
                         mu[i][j][k] =
-                            mu_sampler.sample(mu[i][j][k],
+                            mu_sampler.sample(rng,
+                                              mu[i][j][k],
                                               sigma[j][k],
                                               &data.at(0),
                                               condition_samples[i].size(),
@@ -501,10 +511,11 @@ class SpliceMuSigmaSamplerThread
         Queue<int>& spliced_tgroup_queue;
         Queue<int>& notify_queue;
 
+        std::vector<rng_t>& rng_pool;
+
         size_t C, K;
         NormalTMuSampler mu_sampler;
         NormalSigmaSampler sigma_sampler;
-        rng_t rng;
         bool burnin_state;
 
         boost::thread* thread;
@@ -525,7 +536,8 @@ class ExperimentSpliceMuSigmaSamplerThread
                 double experiment_prior_mu,
                 double experiment_prior_sigma,
                 Queue<int>& spliced_tgroup_queue,
-                Queue<int>& notify_queue)
+                Queue<int>& notify_queue,
+                std::vector<rng_t>& rng_pool)
             : experiment_nu(experiment_nu)
             , experiment_mu(experiment_mu)
             , experiment_sigma(experiment_sigma)
@@ -536,6 +548,7 @@ class ExperimentSpliceMuSigmaSamplerThread
             , experiment_prior_sigma(experiment_prior_sigma)
             , spliced_tgroup_queue(spliced_tgroup_queue)
             , notify_queue(notify_queue)
+            , rng_pool(rng_pool)
             , burnin_state(true)
             , thread(NULL)
         {
@@ -569,6 +582,8 @@ class ExperimentSpliceMuSigmaSamplerThread
             while (true) {
                 if ((j = spliced_tgroup_queue.pop()) == -1) break;
 
+                rng_t& rng = rng_pool[j];
+
                 size_t tgroup = spliced_tgroup_indexes[j];
 
                 for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
@@ -577,7 +592,8 @@ class ExperimentSpliceMuSigmaSamplerThread
                     }
 
                     experiment_mu[j][k] =
-                        mu_sampler.sample(experiment_mu[j][k],
+                        mu_sampler.sample(rng,
+                                          experiment_mu[j][k],
                                           experiment_nu,
                                           experiment_sigma[j][k],
                                           &data.at(0), C,
@@ -625,11 +641,11 @@ class ExperimentSpliceMuSigmaSamplerThread
         double experiment_prior_sigma;
         Queue<int>& spliced_tgroup_queue;
         Queue<int>& notify_queue;
+        std::vector<rng_t>& rng_pool;
 
         size_t C;
         StudentTMuSampler mu_sampler;
         NormalSigmaSampler sigma_sampler;
-        rng_t rng;
         bool burnin_state;
 
         boost::thread* thread;
@@ -644,7 +660,8 @@ class AlphaSampler : public Shredder
         {
         }
 
-        double sample(double alpha0, double beta,
+        double sample(rng_t& rng,
+                      double alpha0, double beta,
                       double alpha_alpha, double beta_alpha,
                       const double* sigmas, size_t n)
         {
@@ -653,7 +670,7 @@ class AlphaSampler : public Shredder
             this->beta_alpha = beta_alpha;
             this->sigmas = sigmas;
             this->n = n;
-            return Shredder::sample(alpha0);
+            return Shredder::sample(rng, alpha0);
         }
 
     private:
@@ -693,7 +710,8 @@ class BetaSampler : public Shredder
             : Shredder(1e-16, 1e5)
         {}
 
-        double sample(double beta0, double alpha,
+        double sample(rng_t& rng,
+                      double beta0, double alpha,
                       double alpha_beta, double beta_beta,
                       const double* sigmas, size_t n)
         {
@@ -702,7 +720,7 @@ class BetaSampler : public Shredder
             this->beta_beta = beta_beta;
             this->sigmas = sigmas;
             this->n = n;
-            return Shredder::sample(beta0);
+            return Shredder::sample(rng, beta0);
         }
 
     private:
@@ -742,7 +760,8 @@ class ExperimentTgroupMuSigmaSamplerThread
                 std::vector<double>& experiment_tgroup_sigma,
                 matrix<double>& tgroup_mu,
                 Queue<int>& tgroup_queue,
-                Queue<int>& notify_queue)
+                Queue<int>& notify_queue,
+                std::vector<rng_t>& rng_pool)
             : experiment_tgroup_mu(experiment_tgroup_mu)
             , prior_mu(prior_mu)
             , prior_sigma(prior_sigma)
@@ -750,6 +769,7 @@ class ExperimentTgroupMuSigmaSamplerThread
             , tgroup_mu(tgroup_mu)
             , tgroup_queue(tgroup_queue)
             , notify_queue(notify_queue)
+            , rng_pool(rng_pool)
             , thread(NULL)
         {
         }
@@ -761,6 +781,8 @@ class ExperimentTgroupMuSigmaSamplerThread
 
             while (true) {
                 if ((tgroup = tgroup_queue.pop()) == -1) break;
+
+                rng_t& rng = rng_pool[tgroup];
 
                 double sigma = experiment_tgroup_sigma[tgroup];
 
@@ -802,14 +824,15 @@ class ExperimentTgroupMuSigmaSamplerThread
 
         Queue<int>& tgroup_queue;
         Queue<int>& notify_queue;
+        std::vector<rng_t>& rng_pool;
         boost::thread* thread;
-        rng_t rng;
         boost::random::normal_distribution<double> random_normal;
 };
 
 
 
-Analyze::Analyze(size_t burnin,
+Analyze::Analyze(unsigned int rng_seed,
+                 size_t burnin,
                  size_t num_samples,
                  TranscriptSet& transcripts,
                  const char* genome_filename,
@@ -823,6 +846,7 @@ Analyze::Analyze(size_t burnin,
     , C(0)
     , N(0)
     , T(0)
+    , rng_seed(rng_seed)
 {
 
     N = transcripts.size();
@@ -862,6 +886,22 @@ Analyze::Analyze(size_t burnin,
         }
     }
 
+    rng.seed(rng_seed);
+
+    splice_rng_pool.resize(spliced_tgroup_indexes.size());
+    BOOST_FOREACH (rng_t& rng, splice_rng_pool) {
+        rng.seed(rng_seed);
+        ++rng_seed; // seeding each differently to be cautious
+    }
+
+    tgroup_rng_pool.resize(T);
+    BOOST_FOREACH (rng_t& rng, tgroup_rng_pool) {
+        rng.seed(rng_seed);
+        ++rng_seed;
+    }
+
+    // TODO: should these all be seeded the same way? That seems a little goofy?
+
     Logger::debug("Number of transcription groups: %u", T);
     Logger::debug("Number of tgroups with multiple isoforms: %u",
                   spliced_tgroup_indexes.size());
@@ -897,7 +937,8 @@ void Analyze::add_sample(const char* condition_name, const char* filename)
 class SamplerInitThread
 {
     public:
-        SamplerInitThread(const std::vector<std::string>& filenames, const char* fa_fn,
+        SamplerInitThread(unsigned int rng_seed,
+                          const std::vector<std::string>& filenames, const char* fa_fn,
                           TranscriptSet& transcripts,
                           std::vector<FragmentModel*>& fms,
                           bool run_gc_correction,
@@ -910,6 +951,7 @@ class SamplerInitThread
             , run_gc_correction(run_gc_correction)
             , samplers(samplers)
             , indexes(indexes)
+            , rng_seed(rng_seed)
             , thread(NULL)
         {
         }
@@ -923,7 +965,8 @@ class SamplerInitThread
                 fms[index] = new FragmentModel();
                 fms[index]->estimate(transcripts, filenames[index].c_str(), fa_fn);
 
-                samplers[index] = new Sampler(filenames[index].c_str(), fa_fn,
+                samplers[index] = new Sampler(rng_seed,
+                                              filenames[index].c_str(), fa_fn,
                                               transcripts, *fms[index], run_gc_correction);
             }
         }
@@ -951,6 +994,7 @@ class SamplerInitThread
         std::vector<Sampler*>& samplers;
 
         Queue<int>& indexes;
+        unsigned int rng_seed;
 
         boost::thread* thread;
 };
@@ -1018,9 +1062,9 @@ void Analyze::setup_samplers()
     std::vector<SamplerInitThread*> threads(constants::num_threads);
     Queue<int> indexes;
     for (unsigned int i = 0; i < constants::num_threads; ++i) {
-        threads[i] = new SamplerInitThread(filenames, genome_filename, transcripts,
-                                           fms, run_gc_correction, qsamplers,
-                                           indexes);
+        threads[i] = new SamplerInitThread(rng_seed, filenames, genome_filename,
+                                           transcripts, fms, run_gc_correction,
+                                           qsamplers, indexes);
         threads[i]->start();
     }
 
@@ -1446,7 +1490,8 @@ void Analyze::run(hid_t output_file_id)
                                                 tgroup_alpha, tgroup_beta,
                                                 condition, condition_samples,
                                                 musigma_sampler_tick_queue,
-                                                musigma_sampler_notify_queue);
+                                                musigma_sampler_notify_queue,
+                                                tgroup_rng_pool);
         thread->start();
     }
 
@@ -1455,7 +1500,7 @@ void Analyze::run(hid_t output_file_id)
         thread = new ExperimentTgroupMuSigmaSamplerThread(
             experiment_tgroup_mu, experiment_tgroup_mu0, experiment_tgroup_sigma0,
             experiment_tgroup_sigma, tgroup_mu, experiment_musigma_sampler_tick_queue,
-            experiment_musigma_sampler_notify_queue);
+            experiment_musigma_sampler_notify_queue, tgroup_rng_pool);
 
         thread->start();
     }
@@ -1471,7 +1516,8 @@ void Analyze::run(hid_t output_file_id)
                 condition,
                 condition_samples,
                 splice_mu_sigma_sampler_tick_queue,
-                splice_mu_sigma_sampler_notify_queue);
+                splice_mu_sigma_sampler_notify_queue,
+                splice_rng_pool);
         thread->start();
     }
 
@@ -1488,7 +1534,8 @@ void Analyze::run(hid_t output_file_id)
                 experiment_splice_mu0,
                 experiment_splice_sigma0,
                 experiment_splice_mu_sigma_sampler_tick_queue,
-                experiment_splice_mu_sigma_sampler_notify_queue);
+                experiment_splice_mu_sigma_sampler_notify_queue,
+                splice_rng_pool);
         thread->start();
     }
 
@@ -1668,12 +1715,12 @@ void Analyze::sample()
         musigma_sampler_notify_queue.pop();
     }
 
-    tgroup_alpha = alpha_sampler->sample(tgroup_alpha, tgroup_beta,
+    tgroup_alpha = alpha_sampler->sample(rng, tgroup_alpha, tgroup_beta,
                                          tgroup_alpha_alpha, tgroup_beta_alpha,
                                          &tgroup_sigma.at(0), T);
     assert_finite(tgroup_alpha);
 
-    tgroup_beta = beta_sampler->sample(tgroup_beta, tgroup_alpha,
+    tgroup_beta = beta_sampler->sample(rng, tgroup_beta, tgroup_alpha,
                                        tgroup_alpha_beta, tgroup_beta_beta,
                                        &tgroup_sigma.at(0), T);
     assert_finite(tgroup_beta);
@@ -1705,7 +1752,7 @@ void Analyze::sample()
     }
 
     experiment_tgroup_alpha =
-        alpha_sampler->sample(experiment_tgroup_alpha,
+        alpha_sampler->sample(rng, experiment_tgroup_alpha,
                               experiment_tgroup_beta,
                               tgroup_alpha_alpha, tgroup_beta_alpha,
                               &experiment_tgroup_sigma.at(0), T);
@@ -1713,7 +1760,7 @@ void Analyze::sample()
     assert_finite(experiment_tgroup_alpha);
 
     experiment_tgroup_beta =
-        beta_sampler->sample(experiment_tgroup_beta,
+        beta_sampler->sample(rng, experiment_tgroup_beta,
                              experiment_tgroup_alpha,
                              tgroup_alpha_beta, tgroup_beta_beta,
                              &experiment_tgroup_sigma.at(0), T);
@@ -1728,7 +1775,7 @@ void Analyze::sample()
 
     //splice_alpha = 0.1;
     splice_alpha =
-        alpha_sampler->sample(splice_alpha, splice_beta,
+        alpha_sampler->sample(rng, splice_alpha, splice_beta,
                               splice_alpha_alpha, splice_beta_alpha,
                               &condition_splice_sigma_work.at(0),
                               condition_splice_sigma_work.size());
@@ -1740,7 +1787,7 @@ void Analyze::sample()
      * splice_alpha. It's maybe a bit over-parameterized otherwise. */
 #if 0
     splice_beta =
-        beta_sampler->sample(splice_beta, splice_alpha,
+        beta_sampler->sample(rng, splice_beta, splice_alpha,
                              splice_alpha_beta, splice_beta_beta,
                              &condition_splice_sigma_work.at(0),
                              condition_splice_sigma_work.size());

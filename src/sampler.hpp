@@ -20,11 +20,12 @@ struct ComponentBlock
     ComponentBlock()
         : u(INT_MAX)
         , v(INT_MAX)
+        , rng(NULL)
     {
     }
 
-    ComponentBlock(unsigned int u, unsigned int v)
-        : u(u) , v(v)
+    ComponentBlock(unsigned int u, unsigned int v, rng_t& rng)
+        : u(u) , v(v), rng(&rng)
     {
     }
 
@@ -34,6 +35,7 @@ struct ComponentBlock
     }
 
     unsigned int u, v;
+    rng_t* rng;
 };
 
 
@@ -43,11 +45,12 @@ struct MultireadBlock
     MultireadBlock()
         : u(INT_MAX)
         , v(INT_MAX)
+        , rng(NULL)
     {
     }
 
-    MultireadBlock(unsigned int u, unsigned int v)
-        : u(u), v(v)
+    MultireadBlock(unsigned int u, unsigned int v, rng_t& rng)
+        : u(u), v(v), rng(&rng)
     {
     }
 
@@ -57,6 +60,7 @@ struct MultireadBlock
     }
 
     unsigned int u, v;
+    rng_t* rng;
 };
 
 
@@ -65,7 +69,8 @@ struct MultireadBlock
 class Sampler
 {
     public:
-        Sampler(const char* bam_fn, const char* ref_fn,
+        Sampler(unsigned int rng_seed,
+                const char* bam_fn, const char* ref_fn,
                 TranscriptSet& ts, FragmentModel& fm,
                 bool run_gc_correction, bool use_priors=false);
         ~Sampler();
@@ -134,10 +139,12 @@ class Sampler
         // Multiread sampling
         std::vector<MultireadSamplerThread*> multiread_threads;
         Queue<MultireadBlock> multiread_queue;
+        std::vector<rng_t> multiread_rng_pool;
 
         // Abundance sampling
         std::vector<AbundanceSamplerThread*> abundance_threads;
         Queue<ComponentBlock> component_queue;
+        std::vector<rng_t> abundance_rng_pool;
 
         // True if priors on cmix and tmix are used. If false, hyperparameters
         // (values in the hp structure) are ignored.

@@ -174,14 +174,16 @@ static int isolator_describe(int argc, char* argv[])
         "\n"
         "Isolator version %s was run on %s taking %s seconds.\n"
         "\n"
-        "Command line:\n  %s\n\n",
+        "Command line:\n  %s\n"
+        "Random Number Generator Seed:\n  %x\n\n",
         (unsigned long) transcript_ids.size(),
         (unsigned long) unique_gene_ids.size(),
         (unsigned long) unique_tgroups.size(),
         metadata.version.c_str(),
         metadata.date.c_str(),
         metadata.elapsed_seconds.c_str(),
-        metadata.command_line.c_str());
+        metadata.command_line.c_str(),
+        metadata.rng_seed);
 
     return EXIT_SUCCESS;
 }
@@ -469,6 +471,12 @@ static void write_metadata(hid_t file_id, const IsolatorMetadata& metadata)
     }
     H5Awrite(attr, varstring_type, sample_attr_value);
     H5Aclose(attr);
+
+    attr = H5Acreate1(group, "rng_seed", H5T_NATIVE_UINT, dataspace,
+                      H5P_DEFAULT);
+    H5Awrite(attr, H5T_NATIVE_UINT, &metadata.rng_seed);
+    H5Aclose(attr);
+
 
     delete [] sample_attr_value;
     H5Sclose(sample_dataspace);
@@ -928,6 +936,7 @@ static int isolator_analyze(int argc, char* argv[])
     {
         {"help",                 no_argument,       NULL, 'h'},
         {"output",               required_argument, NULL, 'o'},
+        {"seed",                 required_argument, NULL, 's'},
         {"introns",              no_argument,       NULL, 0},
         {"exons",                no_argument,       NULL, 0},
         {"verbose",              no_argument,       NULL, 'v'},
@@ -950,6 +959,7 @@ static int isolator_analyze(int argc, char* argv[])
     const char* output_filename = "isolator-output.h5";
     bool use_introns = false;
     bool use_exons = false;
+    unsigned int rng_seed = 0xaca430b9;
 
     int opt;
     int optidx;
@@ -965,6 +975,10 @@ static int isolator_analyze(int argc, char* argv[])
 
             case 'o':
                 output_filename = optarg;
+                break;
+
+            case 's':
+                rng_seed = (unsigned int) strtoul(optarg, NULL, 10);
                 break;
 
             case 'v':
@@ -1048,6 +1062,7 @@ static int isolator_analyze(int argc, char* argv[])
     // write metadata
     write_gene_features(output_file_id, ts);
 
+    // TODO: write rng seed to metadata
     IsolatorMetadata metadata;
 
     bool has_experiment_description = false;
@@ -1071,11 +1086,13 @@ static int isolator_analyze(int argc, char* argv[])
                 metadata.sample_filenames);
     }
 
-    Analyze analyze(burnin, num_samples, ts, fa_fn, run_gc_correction);
+    Analyze analyze(rng_seed, burnin, num_samples, ts, fa_fn, run_gc_correction);
     for (size_t i = 0; i < metadata.sample_conditions.size(); ++i) {
         analyze.add_sample(metadata.sample_conditions[i].c_str(),
                            metadata.sample_filenames[i].c_str());
     }
+
+    metadata.rng_seed = rng_seed;
 
     boost::timer::cpu_timer timer;
     timer.start();

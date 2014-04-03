@@ -2023,6 +2023,10 @@ void Summarize::read_metadata(IsolatorMetadata& metadata)
     }
     H5Aclose(attr);
 
+    attr = H5Aopen_checked(group, "rng_seed", H5P_DEFAULT);
+    H5Aread(attr, H5T_NATIVE_UINT, &metadata.rng_seed);
+    H5Aclose(attr);
+
     H5Tclose(varstring_type);
     H5Gclose(group);
 }

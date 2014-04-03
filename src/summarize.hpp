@@ -26,6 +26,7 @@ struct IsolatorMetadata
     std::vector<std::string> sample_filenames;
     std::vector<std::string> sample_conditions;
     std::vector<std::string> sample_names;
+    unsigned int rng_seed;
 };
 
 

@@ -27,7 +27,7 @@ Shredder::~Shredder()
 }
 
 
-double Shredder::sample(double x0)
+double Shredder::sample(rng_t& rng, double x0)
 {
     double d0;
     double lp0 = f(x0, d0);

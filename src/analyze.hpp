@@ -28,7 +28,8 @@ class ExperimentSpliceMuSigmaSamplerThread;
 class Analyze
 {
     public:
-        Analyze(size_t burnin,
+        Analyze(unsigned int rng_seed,
+                size_t burnin,
                 size_t num_samples,
                 TranscriptSet& ts,
                 const char* genome_filename,
@@ -105,6 +106,11 @@ class Analyze
                    splice_mu_sigma_sampler_notify_queue,
                    experiment_splice_mu_sigma_sampler_tick_queue,
                    experiment_splice_mu_sigma_sampler_notify_queue;
+
+        // We maintain a different rng for every unit of work for threads.
+        // That way we can actually make isolator run reproducible.
+        std::vector<rng_t> splice_rng_pool;
+        std::vector<rng_t> tgroup_rng_pool;
 
         // matrix containing relative transcript abundance samples, indexed by:
         //   sample -> transcript (tid)
@@ -205,6 +211,11 @@ class Analyze
         // Hyperparams for inverse gamma prior on tgroup_alpha/tgroup_beta
         double tgroup_alpha_alpha, tgroup_beta_alpha;
         double tgroup_alpha_beta, tgroup_beta_beta;
+
+
+        // RNG used for alpha/beta samplers
+        unsigned int rng_seed;
+        rng_t rng;
 
         // HDF5 dataspace ids, for output purposes
 
