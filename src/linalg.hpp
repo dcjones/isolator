@@ -75,6 +75,7 @@ extern float (*asxtydsz)(const float* xs, const float* ys, const float* zs,
 
 /* Fast log2 approximation. */
 float fastlog2(float x);
+float fastlog(float x);
 
 #endif
 

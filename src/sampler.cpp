@@ -1347,6 +1347,9 @@ class InterTgroupSampler : public Shredder
             }
 
             // gradient
+            // Until we can actually compute this gradient efficiently,
+            // it likely does more harm than good.
+#if 0
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
                 const unsigned int rowlen = S.weight_matrix->rowlens[tid];
                 const double z =
@@ -1384,6 +1387,7 @@ class InterTgroupSampler : public Shredder
                     d -= d_i;
                 }
             }
+#endif
 
             // prior probability
             double prior_lp_delta = 0.0;
@@ -1897,8 +1901,8 @@ float AbundanceSamplerThread::compute_component_probability(unsigned int c, floa
 
         // prior
         BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-            double x = log(S.tgroupmix[tgroup] * cmixc);
-            double mu = S.hp.tgroup_mu[tgroup] + log(S.tgroup_scaling[tgroup]);
+            double x = fastlog(S.tgroupmix[tgroup] * cmixc);
+            double mu = S.hp.tgroup_mu[tgroup] + fastlog(S.tgroup_scaling[tgroup]);
             double sigma = S.hp.tgroup_sigma[tgroup];
 
             lp += cmix_prior.f(mu, sigma, &x, 1);

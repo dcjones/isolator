@@ -3,6 +3,7 @@
 #include <boost/math/special_functions/digamma.hpp>
 #include <boost/math/special_functions/fpclassify.hpp>
 
+#include "linalg.hpp"
 #include "logger.hpp"
 #include "shredder.hpp"
 
@@ -31,7 +32,6 @@ double Shredder::sample(rng_t& rng, double x0)
 {
     double d0;
     double lp0 = f(x0, d0);
-    double d;
     assert_finite(lp0);
 
     double slice_height = log(random_uniform_01(rng)) + lp0;
@@ -157,9 +157,11 @@ static double lbeta(double x, double y)
 }
 
 
+static const double NEG_LOG_2_PI_DIV_2 = -log(2 * M_PI)/2;
+
 double NormalLogPdf::f(double mu, double sigma, const double* xs, size_t n)
 {
-    double part1 = n * (-log(2 * M_PI)/2 - log(sigma));
+    double part1 = n * (NEG_LOG_2_PI_DIV_2 - fastlog(sigma));
     double part2 = 0.0;
     for (size_t i = 0; i < n; ++i) {
         part2 += sq(xs[i] - mu) / (2 * sq(sigma));
@@ -345,10 +347,10 @@ double SqInvGammaLogPdf::f(double alpha, double beta, const double* xs, size_t n
     double part = 0.0;
     for (size_t i = 0; i < n; ++i) {
         double x = xs[i] * xs[i];
-        part += (alpha + 1) * log(x) + beta / x;
+        part += (alpha + 1) * fastlog(x) + beta / x;
     }
 
-    return n * (alpha * log(beta) - lgamma(alpha)) - part;
+    return n * (alpha * fastlog(beta) - lgamma(alpha)) - part;
 }
 
 

@@ -82,6 +82,12 @@ float fastlog2(float x_)
 }
 
 
+float fastlog(float x)
+{
+    return fastlog2(x) / M_LOG2E;
+}
+
+
 /* AVX versions */
 
 PS32_CONST(1, 1.0f);
