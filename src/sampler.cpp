@@ -1121,15 +1121,15 @@ float FragWeightEstimationThread::transcript_weight(const Transcript& t)
          * presumably exist somewhere. */
 
         ws[frag_len] = 0.0;
-        for (pos_t pos = 0; pos <= trans_len - frag_len; ++pos) {
-            // Sense fragment weight
-            ws[frag_len] +=
-                fm.strand_specificity * seqbias[0][pos] * seqbias[1][pos + frag_len - 1];
 
-            // Anti-sense fragment weight
-            ws[frag_len] +=
-                (1.0 - fm.strand_specificity) * seqbias[1][pos] * seqbias[0][pos + frag_len - 1];
-        }
+        ws[frag_len] +=
+            fm.strand_specificity *
+            dot(&seqbias[0].at(0), &seqbias[1].at(frag_len - 1), trans_len - frag_len);
+
+        ws[frag_len] +=
+            (1.0 - fm.strand_specificity) *
+            dot(&seqbias[1].at(0), &seqbias[0].at(frag_len - 1), trans_len - frag_len);
+
     }
 
     tw = 0.0;

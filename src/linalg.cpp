@@ -21,6 +21,7 @@ void (*asxpy)(float* xs, const float* ys, const float c,
 float (*asxtydsz)(const float* xs, const float* ys, const float* zs,
                   const unsigned int* idx, const unsigned int off,
                   const size_t n) = NULL;
+float (*dot)(const float* xs, const float* ys, size_t n);
 static __m128 (*log2_sse)(__m128 x) = NULL;
 const char* LINALG_INSTR_SET = "";
 
@@ -48,8 +49,6 @@ const char* LINALG_INSTR_SET = "";
 
 #define PI16_CONST(name, c) \
     static const ALIGN16_START int pi16_##name[8] ALIGN16_END = {c, c, c, c}
-
-
 
 
 float fastlog2(float x_)
@@ -395,6 +394,42 @@ float asxtydsz_avx(const float* xs, const float* ys, const float* zs,
 }
 
 
+float dot_avx(const float* xs, const float* ys, size_t n)
+{
+    union ans_t
+    {
+        __m256  v;
+        float   f[8];
+    } ans;
+    ans.v = _mm256_setzero_ps();
+
+    size_t i;
+    __m256 x, y;
+    for (i = 0; i < 8 * (n / 8); i += 8) {
+        x = _mm256_load_ps(xs + i);
+        y = _mm256_load_ps(ys + i);
+        ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(x, y));
+    }
+
+    float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3] +
+                 ans.f[4] + ans.f[5] + ans.f[6] + ans.f[7];
+
+    /* handle overhang */
+    i = 8 * (n / 8);
+    switch (n % 8) {
+        case 7: fans += xs[i] * ys[i]; ++i;
+        case 6: fans += xs[i] * ys[i]; ++i;
+        case 5: fans += xs[i] * ys[i]; ++i;
+        case 4: fans += xs[i] * ys[i]; ++i;
+        case 3: fans += xs[i] * ys[i]; ++i;
+        case 2: fans += xs[i] * ys[i]; ++i;
+        case 1: fans += xs[i] * ys[i];
+    }
+
+    return fans;
+}
+
+
 void* aalloc_sse(size_t n)
 {
     void* xs = _mm_malloc(n, 16);
@@ -634,13 +669,43 @@ float asxtydsz_sse(const float* xs, const float* ys, const float* zs,
     // TODO: write this
     UNUSED(xs);
     UNUSED(ys);
-    UNUSED(zs);
     UNUSED(idx);
     UNUSED(off);
     UNUSED(n);
     fprintf(stderr, "asxtydsz_sse is not implemented!\n");
     abort();
     return 0.0;
+}
+
+
+float dot_sse(const float* xs, const float* ys, size_t n)
+{
+    union ans_t
+    {
+        __m128  v;
+        float   f[4];
+    } ans;
+    ans.v = _mm_setzero_ps();
+
+    size_t i;
+    __m128 x, y;
+    for (i = 0; i < 4 * (n / 4); i += 4) {
+        x = _mm_load_ps(xs + i);
+        y = _mm_load_ps(ys + i);
+        ans.v = _mm_add_ps(ans.v, _mm_mul_ps(x, y));
+    }
+
+    float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3];
+
+    // handle overhang
+    i = 4 * (n / 4);
+    switch (n % 4) {
+        case 3: fans += xs[i] * ys[i]; ++i;
+        case 2: fans += xs[i] * ys[i]; ++i;
+        case 1: fans += xs[i] * ys[i];
+    }
+
+    return fans;
 }
 
 
@@ -714,6 +779,16 @@ float asxtydsz_vanilla(const float* xs, const float* ys, const float* zs,
 }
 
 
+float dot_vanilla(const float* xs, const float* ys, const size_t n)
+{
+    float accum = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        accum += xs[i] * ys[i];
+    }
+    return accum;
+}
+
+
 void linalg_init()
 {
     if (cpu_has_avx()) {
@@ -724,6 +799,7 @@ void linalg_init()
         dotlogc  = dotlogc_avx;
         asxpy    = asxpy_avx;
         asxtydsz = asxtydsz_avx;
+        dot      = dot_avx;
         LINALG_INSTR_SET = "AVX";
     }
     else if (cpu_has_sse2()) {
@@ -734,6 +810,7 @@ void linalg_init()
         dotlogc  = dotlogc_sse;
         asxpy    = asxpy_sse;
         asxtydsz = asxtydsz_sse;
+        dot      = dot_sse;
         if (cpu_has_sse4()) {
             log2_sse = log2_sse4;
             LINALG_INSTR_SET = "SSE4";
@@ -751,6 +828,7 @@ void linalg_init()
         dotlogc  = dotlogc_vanilla;
         asxpy    = asxpy_vanilla;
         asxtydsz = asxtydsz_vanilla;
+        dot      = dot_vanilla;
         LINALG_INSTR_SET = "Vanilla";
     }
 }

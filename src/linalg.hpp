@@ -73,6 +73,11 @@ extern float (*asxtydsz)(const float* xs, const float* ys, const float* zs,
                          const size_t n);
 
 
+/* Dot product
+ */
+ extern float (*dot)(const float* xs, const float* ys, const size_t n);
+
+
 /* Fast log2 approximation. */
 float fastlog2(float x);
 float fastlog(float x);
