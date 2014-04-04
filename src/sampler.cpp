@@ -1369,7 +1369,7 @@ class InterTgroupSampler : public Shredder
                 const unsigned int frag_offset = S.component_frag[c];
                 const unsigned int* idxs = S.weight_matrix->idxs[tid];
 
-                d += z * asxtydsz(S.frag_counts[c], S.weight_matrix->rows[tid],
+                d -= z * asxtydsz(S.frag_counts[c], S.weight_matrix->rows[tid],
                                   S.frag_probs_prop[c], idxs, frag_offset, rowlen);
             }
 
