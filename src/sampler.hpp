@@ -78,6 +78,9 @@ class Sampler
         // Called prior to any calls to iterate
         void start();
 
+        // Called when sampling should finish.
+        void stop();
+
         // Generate a new sample. start() must be called prior to running an
         // iterations.
         void sample();
@@ -139,11 +142,13 @@ class Sampler
         // Multiread sampling
         std::vector<MultireadSamplerThread*> multiread_threads;
         Queue<MultireadBlock> multiread_queue;
+        Queue<int> multiread_notify_queue;
         std::vector<rng_t> multiread_rng_pool;
 
         // Abundance sampling
         std::vector<AbundanceSamplerThread*> abundance_threads;
         Queue<ComponentBlock> component_queue;
+        Queue<int> component_notify_queue;
         std::vector<rng_t> abundance_rng_pool;
 
         // True if priors on cmix and tmix are used. If false, hyperparameters

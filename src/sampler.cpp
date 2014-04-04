@@ -1744,11 +1744,13 @@ class AbundanceSamplerThread
 {
     public:
         AbundanceSamplerThread(Sampler& S,
-                        Queue<ComponentBlock>& q)
+                        Queue<ComponentBlock>& q,
+                        Queue<int>& notify_queue)
             : inter_tgroup_sampler(S)
             , inter_transcript_sampler(S)
             , S(S)
             , q(q)
+            , notify_queue(notify_queue)
             , hillclimb(false)
             , thread(NULL)
         {
@@ -1788,6 +1790,8 @@ class AbundanceSamplerThread
                     sample_intra_component(c);
                     sample_component(c);
                 }
+
+                notify_queue.push(1);
             }
         }
 
@@ -1835,6 +1839,7 @@ class AbundanceSamplerThread
         boost::random::uniform_int_distribution<unsigned int> random_uniform_int;
         Sampler& S;
         Queue<ComponentBlock>& q;
+        Queue<int>& notify_queue;
         bool hillclimb;
         boost::thread* thread;
 };
@@ -2126,10 +2131,12 @@ class MultireadSamplerThread
 {
     public:
         MultireadSamplerThread(Sampler& S,
-                Queue<MultireadBlock>& q)
+                Queue<MultireadBlock>& q,
+                Queue<int>& notify_queue)
             : hillclimb(false)
               , S(S)
               , q(q)
+              , notify_queue(notify_queue)
               , thread(NULL)
     {
         unsigned long seed = reinterpret_cast<unsigned long>(this) *
@@ -2190,6 +2197,8 @@ class MultireadSamplerThread
                         S.frag_counts[c][f - S.component_frag[c]] = 1;
                     }
                 }
+
+                notify_queue.push(1);
             }
         }
 
@@ -2212,6 +2221,7 @@ class MultireadSamplerThread
     private:
         Sampler& S;
         Queue<MultireadBlock>& q;
+        Queue<int>& notify_queue;
         boost::thread* thread;
         rng_t rng;
         boost::random::uniform_01<double> random_uniform_01;
@@ -2509,8 +2519,10 @@ Sampler::Sampler(unsigned int rng_seed,
 
     // allocate sample threads
     for (size_t i = 0; i < constants::num_threads; ++i) {
-        multiread_threads.push_back(new MultireadSamplerThread(*this, multiread_queue));
-        abundance_threads.push_back(new AbundanceSamplerThread(*this, component_queue));
+        multiread_threads.push_back(
+            new MultireadSamplerThread(*this, multiread_queue, multiread_notify_queue));
+        abundance_threads.push_back(
+            new AbundanceSamplerThread(*this, component_queue, component_notify_queue));
     }
 
     // allocate and seed rngs
@@ -2611,6 +2623,36 @@ void Sampler::start()
             constants::tmix_prior_prec +
             frag_count_sums[c];
     }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        multiread_threads[i]->start();
+    }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        abundance_threads[i]->start();
+    }
+
+
+}
+
+
+void Sampler::stop()
+{
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        multiread_queue.push(MultireadBlock());
+    }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        multiread_threads[i]->join();
+    }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        component_queue.push(ComponentBlock());
+    }
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        abundance_threads[i]->join();
+    }
 }
 
 
@@ -2660,10 +2702,6 @@ const std::vector<double>& Sampler::state() const
 
 void Sampler::sample_multireads()
 {
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        multiread_threads[i]->start();
-    }
-
     unsigned int r, i;
     for (r = 0, i = 0; r + constants::sampler_multiread_block_size < num_multireads;
             r += constants::sampler_multiread_block_size, ++i) {
@@ -2675,13 +2713,7 @@ void Sampler::sample_multireads()
         multiread_queue.push(MultireadBlock(r, num_multireads, multiread_rng_pool[i]));
     }
 
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        multiread_queue.push(MultireadBlock());
-    }
-
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        multiread_threads[i]->join();
-    }
+    // TODO: pop from notify queue
 
     update_frag_count_sums();
 }
@@ -2704,10 +2736,6 @@ void Sampler::update_frag_count_sums()
 
 void Sampler::sample_abundance()
 {
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        abundance_threads[i]->start();
-    }
-
     unsigned int c, i;
     for (c = 0, i = 0; c + constants::sampler_component_block_size < num_components;
             c += constants::sampler_component_block_size, ++i)
@@ -2720,13 +2748,12 @@ void Sampler::sample_abundance()
         component_queue.push(ComponentBlock(c, num_components, abundance_rng_pool[i]));
     }
 
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        component_queue.push(ComponentBlock());
-    }
+    // TODO: popd from notify queue
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         abundance_threads[i]->join();
     }
+
 
     // check for numerical errors
     for (unsigned int i = 0; i < num_components; ++i) {

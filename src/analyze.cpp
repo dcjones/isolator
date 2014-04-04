@@ -1580,6 +1580,10 @@ void Analyze::run(hid_t output_file_id)
         experiment_splice_mu_sigma_sampler_threads[i]->join();
     }
 
+    BOOST_FOREACH (Sampler* qsampler, qsamplers) {
+        qsampler->stop();
+    }
+
     for (size_t i = 0; i < constants::num_threads; ++i) {
         delete qsampler_threads[i];
         delete musigma_sampler_threads[i];
