@@ -775,7 +775,9 @@ class FragWeightEstimationThread
             , read_indexer(read_indexer)
             , q(q)
             , thread(NULL)
+            , seqbias_size(0)
         {
+            seqbias[0] = seqbias[1] = NULL;
             if (fm.frag_len_dist) {
                 frag_len_dist = new EmpDist(*fm.frag_len_dist);
             }
@@ -787,6 +789,8 @@ class FragWeightEstimationThread
         ~FragWeightEstimationThread()
         {
             delete frag_len_dist;
+            afree(seqbias[0]);
+            afree(seqbias[1]);
             /* Note: we are not free weight_matrix_entries and
              * multiread_entries. This get's done in Sampler::Sampler.
              * It's all part of the delicate dance involved it minimizing
@@ -867,7 +871,8 @@ class FragWeightEstimationThread
 
         /* Temprorary space for computing sequence bias, indexed by
            sense (0) / antisense (1) */
-        std::vector<float> seqbias[2];
+        float* seqbias[2];
+        size_t seqbias_size;
 
         /* Exonic length of the transcript whos bias is stored in seqbias. */
         pos_t tlen;
@@ -1058,13 +1063,15 @@ void FragWeightEstimationThread::transcript_sequence_bias(
                 const Transcript& t)
 {
     tlen = t.exonic_length();
-    if ((size_t) tlen > seqbias[0].size()) {
-        seqbias[0].resize(tlen);
-        seqbias[1].resize(tlen);
+    if ((size_t) tlen > seqbias_size) {
+        afree(seqbias[0]);
+        afree(seqbias[1]);
+        seqbias[0] = reinterpret_cast<float*>(aalloc(tlen * sizeof(float)));
+        seqbias[1] = reinterpret_cast<float*>(aalloc(tlen * sizeof(float)));
     }
 
-    std::fill(seqbias[0].begin(), seqbias[0].begin() + tlen, 1.0);
-    std::fill(seqbias[1].begin(), seqbias[1].begin() + tlen, 1.0);
+    std::fill(seqbias[0], seqbias[0] + tlen, 1.0);
+    std::fill(seqbias[1], seqbias[1] + tlen, 1.0);
 
     if (fm.sb[1] == NULL || locus.seq == NULL){
         transcript_gc[t.id] = 0.5;
@@ -1085,14 +1092,14 @@ void FragWeightEstimationThread::transcript_sequence_bias(
             seqbias[0][pos] = fm.sb[0]->get_bias(tseq0, pos + L);
             seqbias[1][pos] = fm.sb[1]->get_bias(tseq1, pos + L);
         }
-        std::reverse(seqbias[1].begin(), seqbias[1].begin() + tlen);
+        std::reverse(seqbias[1], seqbias[1] + tlen);
     }
     else {
         for (pos_t pos = 0; pos < tlen; ++pos) {
             seqbias[0][pos] = fm.sb[0]->get_bias(tseq1, pos + L);
             seqbias[1][pos] = fm.sb[1]->get_bias(tseq0, pos + L);
         }
-        std::reverse(seqbias[0].begin(), seqbias[0].begin() + tlen);
+        std::reverse(seqbias[0], seqbias[0] + tlen);
     }
 }
 
@@ -1124,11 +1131,11 @@ float FragWeightEstimationThread::transcript_weight(const Transcript& t)
 
         ws[frag_len] +=
             fm.strand_specificity *
-            dot(&seqbias[0].at(0), &seqbias[1].at(frag_len - 1), trans_len - frag_len);
+            dot(&seqbias[0][0], &seqbias[1][frag_len - 1], trans_len - frag_len);
 
         ws[frag_len] +=
             (1.0 - fm.strand_specificity) *
-            dot(&seqbias[1].at(0), &seqbias[0].at(frag_len - 1), trans_len - frag_len);
+            dot(&seqbias[1][0], &seqbias[0][frag_len - 1], trans_len - frag_len);
 
     }
 
