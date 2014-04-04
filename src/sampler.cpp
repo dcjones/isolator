@@ -1349,7 +1349,6 @@ class InterTgroupSampler : public Shredder
             // gradient
             // Until we can actually compute this gradient efficiently,
             // it likely does more harm than good.
-#if 0
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
                 const unsigned int rowlen = S.weight_matrix->rowlens[tid];
                 const double z =
@@ -1358,15 +1357,8 @@ class InterTgroupSampler : public Shredder
                 const unsigned int frag_offset = S.component_frag[c];
                 const unsigned int* idxs = S.weight_matrix->idxs[tid];
 
-                for (unsigned int i = 0; i < rowlen; ++i) {
-                    unsigned int idx = idxs[i] - frag_offset;
-                    double d_i =
-                        z *
-                        S.frag_counts[c][idx] *
-                        S.weight_matrix->rows[tid][i];
-                    d_i /= S.frag_probs_prop[c][idx];
-                    d += d_i;
-                }
+                d += z * asxtydsz(S.frag_counts[c], S.weight_matrix->rows[tid],
+                                  S.frag_probs_prop[c], idxs, frag_offset, rowlen);
             }
 
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
@@ -1377,17 +1369,9 @@ class InterTgroupSampler : public Shredder
                 const unsigned int frag_offset = S.component_frag[c];
                 const unsigned int* idxs = S.weight_matrix->idxs[tid];
 
-                for (unsigned int i = 0; i < rowlen; ++i ) {
-                    unsigned int idx = idxs[i] - frag_offset;
-                    double d_i =
-                        z *
-                        S.frag_counts[c][idx] *
-                        S.weight_matrix->rows[tid][i];
-                    d_i /= S.frag_probs_prop[c][idx];
-                    d -= d_i;
-                }
+                d += z * asxtydsz(S.frag_counts[c], S.weight_matrix->rows[tid],
+                                  S.frag_probs_prop[c], idxs, frag_offset, rowlen);
             }
-#endif
 
             // prior probability
             double prior_lp_delta = 0.0;
@@ -1638,7 +1622,7 @@ class InterTranscriptSampler
                 (c * wu * wv * (a * wv + c)) /
                 sq(-a * wu * wv + c * wu * x - c * wu - c * wv * x);
 
-            double log_su = log(su);
+            double log_su = fastlog(su);
             assert_finite(su);
 
             // derivative of: ((1-x)*c/v) / (x*c/u + (1-x)*c/v + a))
@@ -1646,7 +1630,7 @@ class InterTranscriptSampler
                 - (c * wu * wv * (a * wu + c)) /
                 sq(-a * wu * wv + c * wu * x - c * wu - c * wv * x);
 
-            double log_sv = log(-sv);
+            double log_sv = fastlog(-sv);
             assert_finite(sv);
 
             return log_su + log_sv;
