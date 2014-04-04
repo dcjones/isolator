@@ -33,9 +33,9 @@ static double sq(double x)
 
 static double gamma_lnpdf(double alpha, double beta, double x)
 {
-    return alpha * log(beta) -
+    return alpha * fastlog(beta) -
            lgamma(alpha) +
-           (alpha - 1) * log(x) -
+           (alpha - 1) * fastlog(x) -
            beta * x;
 }
 
@@ -1309,11 +1309,11 @@ class InterTgroupSampler : public Shredder
 
             prior_lp0 = 0.0;
             if (S.use_priors) {
-                double tgroup_xu = log(S.tgroupmix[u] * S.cmix[c]);
-                prior_lp0 += tgroup_prior.f(S.hp.tgroup_mu[u] + log(S.tgroup_scaling[u]),
+                double tgroup_xu = fastlog(S.tgroupmix[u] * S.cmix[c]);
+                prior_lp0 += tgroup_prior.f(S.hp.tgroup_mu[u] + fastlog(S.tgroup_scaling[u]),
                                             S.hp.tgroup_sigma[u], &tgroup_xu, 1);
-                double tgroup_xv = log(S.tgroupmix[v] * S.cmix[c]);
-                prior_lp0 += tgroup_prior.f(S.hp.tgroup_mu[v] + log(S.tgroup_scaling[v]),
+                double tgroup_xv = fastlog(S.tgroupmix[v] * S.cmix[c]);
+                prior_lp0 += tgroup_prior.f(S.hp.tgroup_mu[v] + fastlog(S.tgroup_scaling[v]),
                                             S.hp.tgroup_sigma[v], &tgroup_xv, 1);
                 this->lp0 += prior_lp0;
             }
@@ -1385,13 +1385,13 @@ class InterTgroupSampler : public Shredder
             if (S.use_priors) {
                 prior_lp_delta -= prior_lp0;
                 double xu = S.cmix[c] * tgroupmix_u;
-                double logxu = log(xu);
-                double mu_u = S.hp.tgroup_mu[u] + log(S.tgroup_scaling[u]);
+                double logxu = fastlog(xu);
+                double mu_u = S.hp.tgroup_mu[u] + fastlog(S.tgroup_scaling[u]);
                 prior_lp_delta += tgroup_prior.f(mu_u, S.hp.tgroup_sigma[u], &logxu, 1);
 
                 double xv = S.cmix[c] * tgroupmix_v;
-                double logxv = log(xv);
-                double mu_v = S.hp.tgroup_mu[v] + log(S.tgroup_scaling[v]);
+                double logxv = fastlog(xv);
+                double mu_v = S.hp.tgroup_mu[v] + fastlog(S.tgroup_scaling[v]);
                 prior_lp_delta += tgroup_prior.f(mu_v, S.hp.tgroup_sigma[v], &logxv, 1);
 
                 d += (mu_u - logxu) / (sq(S.hp.tgroup_sigma[u]) * x);
@@ -1505,7 +1505,7 @@ class InterTranscriptSampler
             double lp0 = f(x0, d0);
             assert_finite(lp0);
 
-            double slice_height = log(random_uniform_01(rng)) + lp0;
+            double slice_height = fastlog(random_uniform_01(rng)) + lp0;
 
             double x_min_lp, x_max_lp;
             double x_min = find_slice_edge(x0, slice_height, lp0, d0, -1, &x_min_lp);
@@ -2102,7 +2102,7 @@ void AbundanceSamplerThread::sample_component(unsigned int c)
     float x0 = S.cmix[c];
 
     float lp0 = compute_component_probability(c, x0);
-    float slice_height = lp0 + log(random_uniform_01(*rng));
+    float slice_height = lp0 + fastlog(random_uniform_01(*rng));
     float step = 1.0;
 
     float x_min = find_component_slice_edge(c, x0, slice_height, -step);

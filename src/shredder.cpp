@@ -34,7 +34,7 @@ double Shredder::sample(rng_t& rng, double x0)
     double lp0 = f(x0, d0);
     assert_finite(lp0);
 
-    double slice_height = log(random_uniform_01(rng)) + lp0;
+    double slice_height = fastlog(random_uniform_01(rng)) + lp0;
 
     x_min = find_slice_edge(x0, slice_height, lp0, d0, -1);
     x_max = find_slice_edge(x0, slice_height, lp0, d0,  1);
@@ -205,7 +205,7 @@ double NormalLogPdf::df_dsigma(double mu, double sigma, const double* xs, size_t
 double StudentsTLogPdf::f(double nu, double mu, double sigma, const double* xs, size_t n)
 {
     double part1 =
-        n * (lgamma((nu + 1) / 2) - lgamma(nu / 2) - log(sqrt(nu * M_PI) * sigma));
+        n * (lgamma((nu + 1) / 2) - lgamma(nu / 2) - fastlog(sqrt(nu * M_PI) * sigma));
 
     double part2 = 0.0;
     for (size_t i = 0; i < n; ++i) {
@@ -254,12 +254,12 @@ double GammaLogPdf::f(double alpha, double beta, const double* xs, size_t n)
 {
     double part1 = 0.0, part2 = 0.0;
     for (size_t i = 0; i < n; ++i) {
-        part1 += log(xs[i]);
+        part1 += fastlog(xs[i]);
         part2 += xs[i];
     }
 
     return
-        n * (alpha * log(beta) - lgamma(alpha)) +
+        n * (alpha * fastlog(beta) - lgamma(alpha)) +
         (alpha - 1) * part1 -
         beta * part2;
 }
@@ -280,10 +280,10 @@ double GammaLogPdf::df_dalpha(double alpha, double beta, const double* xs, size_
 {
     double part = 0.0;
     for (size_t i = 0; i < n; ++i) {
-        part += log(xs[i]);
+        part += fastlog(xs[i]);
     }
 
-    return n * (log(beta) - boost::math::digamma(alpha)) + part;
+    return n * (fastlog(beta) - boost::math::digamma(alpha)) + part;
 }
 
 
@@ -302,10 +302,10 @@ double InvGammaLogPdf::f(double alpha, double beta, const double* xs, size_t n)
 {
     double part = 0.0;
     for (size_t i = 0; i < n; ++i) {
-        part += (alpha + 1) * log(xs[i]) + beta / xs[i];
+        part += (alpha + 1) * fastlog(xs[i]) + beta / xs[i];
     }
 
-    return n * (alpha * log(beta) - lgamma(alpha)) - part;
+    return n * (alpha * fastlog(beta) - lgamma(alpha)) - part;
 }
 
 
@@ -324,10 +324,10 @@ double InvGammaLogPdf::df_dalpha(double alpha, double beta, const double* xs, si
 {
     double part = 0.0;
     for (size_t i = 0; i < n; ++i) {
-        part += log(xs[i]);
+        part += fastlog(xs[i]);
     }
 
-    return n * (log(beta) - boost::math::digamma(alpha)) - part;
+    return n * (fastlog(beta) - boost::math::digamma(alpha)) - part;
 }
 
 
@@ -370,10 +370,10 @@ double SqInvGammaLogPdf::df_dalpha(double alpha, double beta, const double* xs, 
     double part = 0.0;
     for (size_t i = 0; i < n; ++i) {
         double x = xs[i] * xs[i];
-        part += log(x);
+        part += fastlog(x);
     }
 
-    return n * (log(beta) - boost::math::digamma(alpha)) - part;
+    return n * (fastlog(beta) - boost::math::digamma(alpha)) - part;
 }
 
 
@@ -391,7 +391,7 @@ double SqInvGammaLogPdf::df_dbeta(double alpha, double beta, const double* xs, s
 
 double BetaLogPdf::f(double alpha, double beta, double x)
 {
-    return (alpha - 1) * log(x) + (beta - 1) * log(1 - x) - lbeta(alpha, beta);
+    return (alpha - 1) * fastlog(x) + (beta - 1) * fastlog(1 - x) - lbeta(alpha, beta);
 }
 
 
@@ -403,7 +403,7 @@ double BetaLogPdf::df_dx(double alpha, double beta, double x)
 
 double BetaLogPdf::df_dgamma(double gamma, double c, double x)
 {
-    return c * (log(x / (1 - x)) -
+    return c * (fastlog(x / (1 - x)) -
                 boost::math::digamma(gamma * c) +
                 boost::math::digamma((1 - gamma) * c));
 }
@@ -418,7 +418,7 @@ double DirichletLogPdf::f(double alpha,
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j < m; ++j) {
             double am = alpha * (*mean)(i, j);
-            part += (am - 1) * log((*data)(i, j)) - lgamma(am);
+            part += (am - 1) * fastlog((*data)(i, j)) - lgamma(am);
         }
     }
 
@@ -434,7 +434,7 @@ double DirichletLogPdf::df_dalpha(double alpha,
     double part = 0.0;
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j < m; ++j) {
-            part += (*mean)(i, j) * (log((*data)(i, j)) -
+            part += (*mean)(i, j) * (fastlog((*data)(i, j)) -
                                      boost::math::digamma(alpha * (*mean)(i, j)));
         }
     }
@@ -445,15 +445,15 @@ double DirichletLogPdf::df_dalpha(double alpha,
 
 double LogisticNormalLogPdf::f(double mu, double sigma, double x)
 {
-    return -log(sigma) - log(sqrt(2*M_PI)) -
-           sq(log(x / (1 - x)) - mu) / (2 * sq(sigma)) -
-           log(x) - log(1-x);
+    return -fastlog(sigma) - fastlog(sqrt(2*M_PI)) -
+           sq(fastlog(x / (1 - x)) - mu) / (2 * sq(sigma)) -
+           fastlog(x) - fastlog(1-x);
 }
 
 
 double LogisticNormalLogPdf::df_dx(double mu, double sigma, double x)
 {
-    double y = log(x / (1 - x));
+    double y = fastlog(x / (1 - x));
     return (1/(1-x)) - (1/x) - (mu - y) / (sq(sigma) * (x - 1) * x);
 }
 
