@@ -2134,14 +2134,11 @@ class MultireadSamplerThread
                 Queue<MultireadBlock>& q,
                 Queue<int>& notify_queue)
             : hillclimb(false)
-              , S(S)
-              , q(q)
-              , notify_queue(notify_queue)
-              , thread(NULL)
+            , S(S)
+            , q(q)
+            , notify_queue(notify_queue)
+            , thread(NULL)
     {
-        unsigned long seed = reinterpret_cast<unsigned long>(this) *
-            (unsigned long) time(NULL);
-        rng.seed(seed);
     }
 
         ~MultireadSamplerThread()
@@ -2155,6 +2152,7 @@ class MultireadSamplerThread
             while (true) {
                 block = q.pop();
                 if (block.is_end_of_queue()) break;
+                rng = block.rng;
                 for (; block.u < block.v; ++block.u) {
                     float sumprob = 0.0;
                     unsigned int k = S.multiread_num_alignments[block.u];
@@ -2176,7 +2174,7 @@ class MultireadSamplerThread
                         }
                     }
                     else {
-                        float r = sumprob * random_uniform_01(rng);
+                        float r = sumprob * random_uniform_01(*rng);
                         unsigned int i;
                         for (i = 0; i < k; ++i) {
                             unsigned int c = S.multiread_alignments[block.u][i].component;
@@ -2223,7 +2221,7 @@ class MultireadSamplerThread
         Queue<MultireadBlock>& q;
         Queue<int>& notify_queue;
         boost::thread* thread;
-        rng_t rng;
+        rng_t* rng;
         boost::random::uniform_01<double> random_uniform_01;
 };
 
@@ -2713,7 +2711,13 @@ void Sampler::sample_multireads()
         multiread_queue.push(MultireadBlock(r, num_multireads, multiread_rng_pool[i]));
     }
 
-    // TODO: pop from notify queue
+    for (r = 0, i = 0; r + constants::sampler_multiread_block_size < num_multireads;
+            r += constants::sampler_multiread_block_size, ++i) {
+        multiread_notify_queue.pop();
+    }
+    if (r < num_multireads) {
+        multiread_notify_queue.pop();
+    }
 
     update_frag_count_sums();
 }
@@ -2748,12 +2752,14 @@ void Sampler::sample_abundance()
         component_queue.push(ComponentBlock(c, num_components, abundance_rng_pool[i]));
     }
 
-    // TODO: popd from notify queue
-
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        abundance_threads[i]->join();
+    for (c = 0, i = 0; c + constants::sampler_component_block_size < num_components;
+            c += constants::sampler_component_block_size, ++i)
+    {
+        component_notify_queue.pop();
     }
-
+    if (c < num_components) {
+        component_notify_queue.pop();
+    }
 
     // check for numerical errors
     for (unsigned int i = 0; i < num_components; ++i) {
