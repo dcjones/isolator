@@ -666,15 +666,45 @@ float asxtydsz_sse(const float* xs, const float* ys, const float* zs,
                    const unsigned int* idx, const unsigned int off,
                    const size_t n)
 {
-    // TODO: write this
-    UNUSED(xs);
-    UNUSED(ys);
-    UNUSED(idx);
-    UNUSED(off);
-    UNUSED(n);
-    fprintf(stderr, "asxtydsz_sse is not implemented!\n");
-    abort();
-    return 0.0;
+    union {
+        __m128 v;
+        float f[4];
+    } ans, x, z;
+    ans.v = _mm_setzero_ps();
+
+    union {
+        __m128i a;
+        unsigned int b[4];
+    } i0;
+
+    __m128i voff = _mm_set1_epi32((int) off);
+
+    size_t i;
+    for (i = 0; i < 4 * (n / 4); i += 4) {
+        __m128 y  = _mm_load_ps(ys + i);
+
+        i0.a = _mm_load_si128((__m128i*)(idx + i));
+        i0.a = _mm_sub_epi32(i0.a, voff);
+
+        x.f[0] = xs[i0.b[0]];
+        x.f[1] = xs[i0.b[1]];
+        x.f[2] = xs[i0.b[2]];
+        x.f[3] = xs[i0.b[3]];
+
+        ans.v = _mm_add_ps(ans.v, _mm_div_ps(_mm_mul_ps(x.v, y), z.v));
+    }
+
+    float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3];
+
+    /* handle overhang */
+    i = 4 * (n / 4);
+    switch (n % 4) {
+        case 3: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
+        case 2: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
+        case 1: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off];
+    }
+
+    return fans;
 }
 
 
