@@ -407,7 +407,7 @@ float dot_avx(const float* xs, const float* ys, size_t n)
     __m256 x, y;
     for (i = 0; i < 8 * (n / 8); i += 8) {
         x = _mm256_load_ps(xs + i);
-        y = _mm256_load_ps(ys + i);
+        y = _mm256_loadu_ps(ys + i);
         ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(x, y));
     }
 
@@ -721,7 +721,7 @@ float dot_sse(const float* xs, const float* ys, size_t n)
     __m128 x, y;
     for (i = 0; i < 4 * (n / 4); i += 4) {
         x = _mm_load_ps(xs + i);
-        y = _mm_load_ps(ys + i);
+        y = _mm_loadu_ps(ys + i);
         ans.v = _mm_add_ps(ans.v, _mm_mul_ps(x, y));
     }
 

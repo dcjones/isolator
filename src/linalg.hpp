@@ -73,7 +73,7 @@ extern float (*asxtydsz)(const float* xs, const float* ys, const float* zs,
                          const size_t n);
 
 
-/* Dot product
+/* Dot product, where xs is aligned and ys may not be.
  */
  extern float (*dot)(const float* xs, const float* ys, const size_t n);
 
