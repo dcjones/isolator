@@ -1085,7 +1085,7 @@ void FragWeightEstimationThread::transcript_sequence_bias(
     t.get_sequence(tseq1, *locus.seq, R, L);
     tseq1.revcomp();
 
-    transcript_gc[t.id] = tseq0.gc_count() / (double) tlen;
+    transcript_gc[t.id] = tseq0.gc_count(L, L + tlen - 1) / (double) tlen;
 
     if (t.strand == strand_pos) {
         for (pos_t pos = 0; pos < tlen; ++pos) {
@@ -2669,6 +2669,23 @@ void Sampler::sample()
     if (fm.sb[0] && gc_correct) {
         gc_correct->correct(&expr.at(0));
     }
+
+#if 0
+    // super-useful diagnostics
+    {
+        FILE* out = fopen("gc-length-expr.tsv", "w");
+        fprintf(out, "gc\tlength\tweight\tcount\texpr\n");
+        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+            fprintf(out, "%0.4f\t%lu\t%e\t%lu\t%e\n",
+                    transcript_gc[t->id],
+                    (unsigned long) t->exonic_length(),
+                    transcript_weights[t->id],
+                    (unsigned long) weight_matrix->rowlens[t->id],
+                    expr[t->id]);
+        }
+        fclose(out);
+    }
+#endif
 
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         expr[i] *= hp.scale;

@@ -301,7 +301,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
         if (k == kh_end(tbl)) (*i)->tid = -1;
         else (*i)->tid = kh_value(tbl, k);
     }
-    std::sort(intervals.begin(), intervals.end(), FragmentModelIntervalPtrCmp());
+    std::sort(seqbias_intervals.begin(), seqbias_intervals.end(), FragmentModelIntervalPtrCmp());
 
 
 
