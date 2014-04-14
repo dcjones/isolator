@@ -9,7 +9,7 @@
 
 #include "constants.hpp"
 #include "hat-trie/hat-trie.h"
-#include "linalg.hpp"
+#include "fastmath.hpp"
 #include "logger.hpp"
 #include "queue.hpp"
 #include "read_set.hpp"

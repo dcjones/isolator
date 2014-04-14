@@ -4,7 +4,7 @@
 #include <boost/unordered_map.hpp>
 
 #include "tpbias.hpp"
-#include "linalg.hpp"
+#include "fastmath.hpp"
 
 
 typedef std::pair<pos_t, pos_t> TPDistPair;

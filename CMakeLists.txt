@@ -20,11 +20,10 @@ find_package(Threads)
 # Check for SSE or AVX intrinsics
 check_include_file(immintrin.h HAVE_IMMINTRIN_H)
 
-set(ARCH_FLAGS "-msse2 -msse4.1 -msse4.2 -mavx")
-set(CMAKE_C_FLAGS "-std=gnu99 -g -O3 -Wall -Wextra -DNDEBUG ${ARCH_FLAGS}")
-set(CMAKE_CXX_FLAGS "-std=gnu++98 -g -O3 -Wall -Wextra -DNDEBUG ${ARCH_FLAGS}")
-set(CMAKE_C_FLAGS_DEBUG "-std=gnu99 -g -O0 -Wall -Wextra ${ARCH_FLAGS}")
-set(CMAKE_CXX_FLAGS_DEBUG "-std=gnu++98 -g -O0 -Wall -Wextra ${ARCH_FLAGS}")
+set(CMAKE_C_FLAGS "-std=gnu99 -g -O3 -Wall -Wextra -DNDEBUG")
+set(CMAKE_CXX_FLAGS "-std=gnu++98 -g -O3 -Wall -Wextra -DNDEBUG")
+set(CMAKE_C_FLAGS_DEBUG "-std=gnu99 -g -O0 -Wall -Wextra")
+set(CMAKE_CXX_FLAGS_DEBUG "-std=gnu++98 -g -O0 -Wall -Wextra")
 
 
 configure_file("${CMAKE_SOURCE_DIR}/src/config.h.in"

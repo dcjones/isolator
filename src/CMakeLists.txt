@@ -17,12 +17,16 @@ add_executable(isolator
                constants.cpp
                cpuid.cpp
                emp_dist.cpp
+               fastmath.cpp
+               fastmath-vanilla.cpp
+               fastmath-sse2.cpp
+               fastmath-sse4.cpp
+               fastmath-avx.cpp
                fragment_model.cpp
                gcbias.cpp
                hdf5.cpp
                intervals.cpp
                isolator.cpp
-               linalg.cpp
                logger.cpp
                pos_table.cpp
                read_set.cpp
@@ -31,6 +35,10 @@ add_executable(isolator
                tpbias.cpp
                summarize.cpp
                transcripts.cpp)
+
+SET_SOURCE_FILES_PROPERTIES(fastmath-avx.cpp PROPERTIES COMPILE_FLAGS "-msse2 -msse4.1 -msse4.2 -mavx")
+SET_SOURCE_FILES_PROPERTIES(fastmath-sse4.cpp PROPERTIES COMPILE_FLAGS "-msse2 -msse4.1 -msse4.2")
+SET_SOURCE_FILES_PROPERTIES(fastmath-sse2.cpp PROPERTIES COMPILE_FLAGS "-msse2")
 
 target_link_libraries(isolator
                       gtf

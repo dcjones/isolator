@@ -23,7 +23,7 @@
 #include "config.h"
 #include "constants.hpp"
 #include "fragment_model.hpp"
-#include "linalg.hpp"
+#include "fastmath.hpp"
 #include "logger.hpp"
 #include "sampler.hpp"
 #include "summarize.hpp"
@@ -44,7 +44,7 @@ const char* isolator_logo =
 static void print_logo()
 {
     printf("%s\n     Version: %s\n     Instruction set: %s\n\n",
-           isolator_logo, GITVERSION, LINALG_INSTR_SET);
+           isolator_logo, GITVERSION, FASTMATH_INSTR_SET);
 }
 
 
@@ -1260,7 +1260,7 @@ static void print_usage(FILE* fout)
             "    summarize         Summarize a sampler run.\n"
             "    describe          Briefly describe contents of an output file.\n"
             "    help              Become enlightened.\n",
-            GITVERSION, LINALG_INSTR_SET);
+            GITVERSION, FASTMATH_INSTR_SET);
 }
 
 
@@ -1285,7 +1285,7 @@ static int isolator_help(int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {
-    linalg_init();
+    fastmath_init();
 
     if (argc <= 1) {
         print_usage(stdout);

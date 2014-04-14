@@ -3,7 +3,7 @@
 #include <boost/math/special_functions/digamma.hpp>
 #include <boost/math/special_functions/fpclassify.hpp>
 
-#include "linalg.hpp"
+#include "fastmath.hpp"
 #include "logger.hpp"
 #include "shredder.hpp"
 
