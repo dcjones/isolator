@@ -10,7 +10,6 @@
 #include "constants.hpp"
 #include "hat-trie/hat-trie.h"
 #include "linalg.hpp"
-#include "loess/loess.h"
 #include "logger.hpp"
 #include "queue.hpp"
 #include "read_set.hpp"
@@ -22,6 +21,15 @@
 extern "C" {
 #include "samtools/khash.h"
 KHASH_MAP_INIT_STR(s, int)
+static void supress_khash_unused_function_warnings() __attribute__ ((unused));
+static void supress_khash_unused_function_warnings()
+{
+    UNUSED(kh_init_s);
+    UNUSED(kh_destroy_s);
+    UNUSED(kh_put_s);
+    UNUSED(kh_clear_s);
+    UNUSED(kh_del_s);
+}
 }
 
 
@@ -38,6 +46,7 @@ static double gamma_lnpdf(double alpha, double beta, double x)
            (alpha - 1) * fastlog(x) -
            beta * x;
 }
+
 
 /* Safe c-style allocation. */
 
@@ -776,8 +785,10 @@ class FragWeightEstimationThread
             , q(q)
             , thread(NULL)
             , seqbias_size(0)
+            , posbias_size(0)
         {
             seqbias[0] = seqbias[1] = NULL;
+            posbias = NULL;
             if (fm.frag_len_dist) {
                 frag_len_dist = new EmpDist(*fm.frag_len_dist);
             }
@@ -791,6 +802,7 @@ class FragWeightEstimationThread
             delete frag_len_dist;
             afree(seqbias[0]);
             afree(seqbias[1]);
+            afree(posbias);
             /* Note: we are not free weight_matrix_entries and
              * multiread_entries. This get's done in Sampler::Sampler.
              * It's all part of the delicate dance involved it minimizing
@@ -841,11 +853,22 @@ class FragWeightEstimationThread
         void transcript_sequence_bias(const SamplerInitInterval& locus,
                                       const Transcript& t);
 
+        /* Compute GC bias for a fixed fragment length.
+         *
+         * Results are stored in gcbias. */
+        void transcript_gc_bias(
+            const SamplerInitInterval& locus,
+            const Transcript& t, pos_t frag_len);
+
+        void transcript_tp_bias(
+            const Transcript& t, pos_t frag_len);
+
         /* Compute the sum of the weights of all fragmens in the transcript.
          *
          * This assumes that transcript_sequence_bias has already been called,
          * and the seqbias arrays set for t. */
-        float transcript_weight(const Transcript& t);
+        float transcript_weight(const SamplerInitInterval& locus,
+                                const Transcript& t);
 
         /* Compute (a number proportional to) the probability of observing the
          * given fragment from the given transcript, assuming every transcript
@@ -873,6 +896,10 @@ class FragWeightEstimationThread
            sense (0) / antisense (1) */
         float* seqbias[2];
         size_t seqbias_size;
+
+        // fragment gc bias and 3' bias
+        float* posbias;
+        size_t posbias_size;
 
         /* Exonic length of the transcript whos bias is stored in seqbias. */
         pos_t tlen;
@@ -965,8 +992,16 @@ void FragWeightEstimationThread::process_locus(SamplerInitInterval* locus)
     std::vector<MultireadEntry> multiread_entries;
     for (TranscriptSetLocus::iterator t = locus->ts.begin();
             t != locus->ts.end(); ++t) {
+
+        pos_t L = constants::seqbias_left_pos, R = constants::seqbias_right_pos;
+        if (locus->seq) {
+            t->get_sequence(tseq0, *locus->seq, L, R);
+            t->get_sequence(tseq1, *locus->seq, R, L);
+            tseq1.revcomp();
+        }
+
         transcript_sequence_bias(*locus, *t);
-        transcript_weights[t->id] = transcript_weight(*t);
+        transcript_weights[t->id] = transcript_weight(*locus, *t);
 
         /* If a transcript is very unlikely to have been sequenced at all,
          * ignore it. Otherwise quite a few outliers will be generated in which
@@ -1068,6 +1103,7 @@ void FragWeightEstimationThread::transcript_sequence_bias(
         afree(seqbias[1]);
         seqbias[0] = reinterpret_cast<float*>(aalloc(tlen * sizeof(float)));
         seqbias[1] = reinterpret_cast<float*>(aalloc(tlen * sizeof(float)));
+        seqbias_size = tlen;
     }
 
     std::fill(seqbias[0], seqbias[0] + tlen, 1.0);
@@ -1078,13 +1114,7 @@ void FragWeightEstimationThread::transcript_sequence_bias(
         return;
     }
 
-    // convencience
-    pos_t L = constants::seqbias_left_pos, R = constants::seqbias_right_pos;
-
-    t.get_sequence(tseq0, *locus.seq, L, R);
-    t.get_sequence(tseq1, *locus.seq, R, L);
-    tseq1.revcomp();
-
+    pos_t L = constants::seqbias_left_pos;
     transcript_gc[t.id] = tseq0.gc_count(L, L + tlen - 1) / (double) tlen;
 
     if (t.strand == strand_pos) {
@@ -1101,14 +1131,68 @@ void FragWeightEstimationThread::transcript_sequence_bias(
         }
         std::reverse(seqbias[0], seqbias[0] + tlen);
     }
+
 }
 
 
+void FragWeightEstimationThread::transcript_gc_bias(
+    const SamplerInitInterval& locus, const Transcript& t, pos_t frag_len)
+{
+    if (!fm.gcbias || !locus.seq) {
+        return;
+    }
 
-float FragWeightEstimationThread::transcript_weight(const Transcript& t)
+    tlen = t.exonic_length();
+    pos_t L = constants::seqbias_left_pos;
+    unsigned int gc_count = 0;
+    for (pos_t pos = 0; pos <= tlen; ++pos) {
+        if (tseq0.isgc(pos + L)) ++gc_count;
+        if (pos >= frag_len) {
+            if (tseq0.isgc(pos - frag_len + L)) --gc_count;
+        }
+        if (pos >= frag_len - 1) {
+            double gc = (double) gc_count / (double) frag_len;
+            posbias[pos - frag_len + 1] *= fm.gcbias->get_bias(gc);
+        }
+    }
+}
+
+
+void FragWeightEstimationThread::transcript_tp_bias(const Transcript& t, pos_t frag_len)
+{
+    if (!fm.tpbias || fm.tpbias->p == 0.0) return;
+
+    tlen = t.exonic_length();
+    double p = fm.tpbias->p;
+    double bias = fm.tpbias->get_bias(frag_len - 1);
+    if (t.strand == strand_pos) {
+        for (pos_t pos = tlen - frag_len; pos >= 0; --pos) {
+            posbias[pos] *= bias;
+            bias *= 1 - p;
+        }
+    }
+    else {
+        for (pos_t pos = frag_len - 1; pos < tlen; ++pos) {
+            posbias[pos - frag_len + 1] *= bias;
+            bias *= 1 - p;
+        }
+    }
+}
+
+
+float FragWeightEstimationThread::transcript_weight(
+    const SamplerInitInterval& locus, const Transcript& t)
 {
     pos_t trans_len = t.exonic_length();
     if ((size_t) trans_len + 1 > ws.size()) ws.resize(trans_len + 1);
+
+    if ((size_t) tlen > posbias_size) {
+        afree(posbias);
+        posbias = reinterpret_cast<float*>(aalloc(tlen * sizeof(float)));
+        posbias_size = tlen;
+    }
+
+    pos_t tlen = t.exonic_length();
 
     /* Set ws[k] to be the the number of fragmens of length k, weighted by
      * sequence bias. */
@@ -1123,6 +1207,10 @@ float FragWeightEstimationThread::transcript_weight(const Transcript& t)
             continue;
         }
 
+        std::fill(posbias, posbias + tlen, 1.0);
+        transcript_gc_bias(locus, t, frag_len);
+        transcript_tp_bias(t, frag_len);
+
         /* TODO: The following logic assumes the library type is FR. We need
          * seperate cases to properly handle other library types, that
          * presumably exist somewhere. */
@@ -1131,12 +1219,52 @@ float FragWeightEstimationThread::transcript_weight(const Transcript& t)
 
         ws[frag_len] +=
             fm.strand_specificity *
-            dot(&seqbias[0][0], &seqbias[1][frag_len - 1], trans_len - frag_len + 1);
+            dot(&seqbias[0][0],
+                &seqbias[1][frag_len - 1],
+                posbias,
+                trans_len - frag_len + 1);
 
         ws[frag_len] +=
             (1.0 - fm.strand_specificity) *
-            dot(&seqbias[1][0], &seqbias[0][frag_len - 1], trans_len - frag_len + 1);
+            dot(&seqbias[1][0],
+                &seqbias[0][frag_len - 1],
+                posbias,
+                trans_len - frag_len + 1);
 
+        if (ws[frag_len] == 0.0) {
+            Logger::abort("Numerical error in transcript weight computation.");
+        }
+#if 0
+        // Adjust the transcript weight be taking into account the difficulty
+        // of correctly aligning a fragment that crosses a splice junction
+        // by only a few bases.
+        pos_t junction_pos = 0;
+        const pos_t min_overlap = 2;
+        BOOST_FOREACH (const Exon& exon, t) {
+            if (exon.end == t.max_end) break;
+            junction_pos += exon.end - exon.start + 1;
+
+            for (pos_t pos = std::max<pos_t>(0, junction_pos - frag_len + 1);
+                    pos + frag_len - min_overlap <= junction_pos &&
+                    pos + frag_len - 1 < trans_len; ++pos) {
+                ws[frag_len] -=
+                    fm.strand_specificity *
+                    seqbias[0][pos] * seqbias[1][pos + frag_len - 1] * gcbias[pos] +
+                    (1.0 - fm.strand_specificity) *
+                    seqbias[1][pos] * seqbias[0][pos + frag_len - 1] * gcbias[pos];
+            }
+
+            for (pos_t pos = std::max<pos_t>(0, junction_pos - min_overlap);
+                    pos <= junction_pos &&
+                    pos + frag_len - 1 < trans_len; ++pos) {
+                ws[frag_len] -=
+                    fm.strand_specificity *
+                    seqbias[0][pos] * seqbias[1][pos + frag_len - 1] * gcbias[pos] +
+                    (1.0 - fm.strand_specificity) *
+                    seqbias[1][pos] * seqbias[0][pos + frag_len - 1] * gcbias[pos];
+            }
+        }
+#endif
     }
 
     tw = 0.0;
@@ -1157,9 +1285,10 @@ float FragWeightEstimationThread::transcript_weight(const Transcript& t)
 
 
 float FragWeightEstimationThread::fragment_weight(const Transcript& t,
-                                         const AlignmentPair& a)
+                                                  const AlignmentPair& a)
 {
     pos_t frag_len = a.frag_len(t);
+    pos_t L = constants::seqbias_left_pos;
 
     if (frag_len < 0) return 0.0;
     else if (frag_len == 0) {
@@ -1177,6 +1306,7 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
     }
     else if (frag_len > tlen) return 0.0;
 
+
     float w = 1.0;
     if (a.mate1 && a.mate2) {
         pos_t offset1 = t.get_offset(a.mate1->strand == strand_pos ?
@@ -1188,6 +1318,13 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
                                      a.mate2->start : a.mate2->end);
         if (offset2 < 0 || offset2 >= tlen) return 0.0;
         w *= seqbias[a.mate2->strand == t.strand ? 0 : 1][offset2];
+
+        pos_t pos = std::min<pos_t>(a.mate1->start, a.mate2->start);
+        if (fm.gcbias) {
+            float gc = tseq0.gc_count(L + pos, L + pos + frag_len - 1) / (float) frag_len;
+            w *= fm.gcbias->get_bias(gc);
+        }
+
     }
     else {
         if (a.mate1) {
@@ -1195,6 +1332,18 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
                                         a.mate1->start : a.mate1->end);
             if (offset < 0 || offset >= tlen) return 0.0;
             w *= seqbias[a.mate1->strand == t.strand ? 0 : 1][offset];
+
+            if (fm.gcbias) {
+                pos_t pos;
+                if (a.mate1->strand == strand_pos) {
+                    pos = a.mate1->start;
+                }
+                else {
+                    pos = a.mate1->end - frag_len + 1;
+                }
+                float gc = tseq0.gc_count(L + pos, L + pos + frag_len - 1);
+                w *= fm.gcbias->get_bias(gc);
+            }
         }
 
         if (a.mate2) {
@@ -1202,7 +1351,53 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
                                         a.mate2->start : a.mate2->end);
             if (offset < 0 || offset >= tlen) return 0.0;
             w *= seqbias[a.mate2->strand == t.strand ? 0 : 1][offset];
+
+            if (fm.gcbias) {
+                pos_t pos;
+                if (a.mate2->strand == strand_pos) {
+                    pos = a.mate2->start;
+                }
+                else {
+                    pos = a.mate2->end - frag_len + 1;
+                }
+                float gc = tseq0.gc_count(L + pos, L + pos + frag_len - 1);
+                w *= fm.gcbias->get_bias(gc);
+            }
         }
+    }
+
+    // 3' bias
+    if (t.strand == strand_pos && fm.tpbias && fm.tpbias->p != 0.0) {
+        pos_t pos;
+        if (a.mate1 && a.mate1->strand == 0) {
+            pos = a.mate1->start;
+        }
+        else if (a.mate2 && a.mate2->strand == 0) {
+            pos = a.mate2->start;
+        }
+        else {
+            const Alignment* mate = a.mate1 ? a.mate1 : a.mate2;
+            pos = mate->end - frag_len + 1;
+        }
+        pos_t tpos = t.get_offset(pos);
+        assert(0 <= tpos && tpos < tlen);
+        w *= fm.tpbias->get_bias(tlen - tpos - 1);
+    }
+    else if (t.strand == strand_neg && fm.tpbias && fm.tpbias->p != 0.0) {
+        pos_t pos;
+        if (a.mate1 && a.mate1->strand == 1) {
+            pos = a.mate1->end;
+        }
+        else if (a.mate2 && a.mate2->strand == 1) {
+            pos = a.mate2->end;
+        }
+        else {
+            const Alignment* mate = a.mate1 ? a.mate1 : a.mate2;
+            pos = mate->start + frag_len - 1;
+        }
+        pos_t tpos = t.get_offset(pos);
+        assert(0 <= tpos && tpos < tlen);
+        w *= fm.tpbias->get_bias(tpos);
     }
 
     // strand-specificity
@@ -1219,9 +1414,18 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
     if (frag_len_pr < constants::min_frag_len_pr) {
         return 0.0;
     }
-    if (frag_len_pr * w < constants::min_frag_weight) return 0.0;
 
-    return frag_len_pr * w / ws[frag_len];
+    if (frag_len_pr * w < constants::min_frag_weight) {
+        return 0.0;
+    }
+
+    w = frag_len_pr * w / ws[frag_len];
+
+    if (!boost::math::isfinite(w)) {
+        Logger::abort("Non-finite fragment weight computed.");
+    }
+
+    return w;
 }
 
 
@@ -1316,6 +1520,10 @@ class InterTgroupSampler : public Shredder
                 prior_lp0 += tgroup_prior.f(S.hp.tgroup_mu[v] + fastlog(S.tgroup_scaling[v]),
                                             S.hp.tgroup_sigma[v], &tgroup_xv, 1);
                 this->lp0 += prior_lp0;
+
+                // jacobian
+                prior_lp0 -= fastlog(x0);
+                prior_lp0 -= fastlog(1 - x0);
             }
 
 
@@ -1354,8 +1562,6 @@ class InterTgroupSampler : public Shredder
             }
 
             // gradient
-            // Until we can actually compute this gradient efficiently,
-            // it likely does more harm than good.
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
                 const unsigned int rowlen = S.weight_matrix->rowlens[tid];
                 const double z =
@@ -1388,14 +1594,16 @@ class InterTgroupSampler : public Shredder
                 double logxu = fastlog(xu);
                 double mu_u = S.hp.tgroup_mu[u] + fastlog(S.tgroup_scaling[u]);
                 prior_lp_delta += tgroup_prior.f(mu_u, S.hp.tgroup_sigma[u], &logxu, 1);
+                prior_lp_delta -= fastlog(x); // jacobian
 
                 double xv = S.cmix[c] * tgroupmix_v;
                 double logxv = fastlog(xv);
                 double mu_v = S.hp.tgroup_mu[v] + fastlog(S.tgroup_scaling[v]);
                 prior_lp_delta += tgroup_prior.f(mu_v, S.hp.tgroup_sigma[v], &logxv, 1);
+                prior_lp_delta -= fastlog(1 - x); // jacobian
 
-                d += (mu_u - logxu) / (sq(S.hp.tgroup_sigma[u]) * x);
-                d += (mu_v - logxv) / (sq(S.hp.tgroup_sigma[v]) * (x - 1));
+                d += (mu_u - logxu) / (sq(S.hp.tgroup_sigma[u]) * x) - 1/x;
+                d += (mu_v - logxv) / (sq(S.hp.tgroup_sigma[v]) * (x - 1)) - 1/(1-x);
             }
 
             return lp0 - lpf01 +
@@ -1840,11 +2048,11 @@ class AbundanceSamplerThread
 };
 
 
-float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
-                                                         float x0, float slice_height,
-                                                         float step)
+float AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
+                                                        float x0, float slice_height,
+                                                        float step)
 {
-    const float eps = 1e-8;
+    const float eps = 1e-3;
     float x, y;
     do {
         x = std::max<float>(constants::zero_eps, x0 + step);
@@ -1864,7 +2072,7 @@ float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
         b = std::max<float>(constants::zero_eps, x0 + step);
     }
 
-    while (fabs(b - a) > eps) {
+    while (fabs(b - a) / ((b+a)/2) > eps) {
         double mid = (a + b) / 2;
         double w = compute_component_probability(c, mid);
 
@@ -1885,18 +2093,19 @@ float  AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 
 float AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
 {
-    float lp = gamma_lnpdf(S.frag_count_sums[c] +
-                           constants::tmix_prior_prec, 1.0, cmixc);
+    float lp = gamma_lnpdf(S.frag_count_sums[c] + constants::tmix_prior_prec, 1.0, cmixc);
 
     if (S.use_priors) {
 
         // prior
         BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-            double x = fastlog(S.tgroupmix[tgroup] * cmixc);
+            double x = S.tgroupmix[tgroup] * cmixc;
+            double logx = fastlog(x);
             double mu = S.hp.tgroup_mu[tgroup] + fastlog(S.tgroup_scaling[tgroup]);
             double sigma = S.hp.tgroup_sigma[tgroup];
 
-            lp += cmix_prior.f(mu, sigma, &x, 1);
+            lp += cmix_prior.f(mu, sigma, &logx, 1);
+            lp -= fastlog(x); // jacobian
 
             if (!boost::math::isfinite(lp)) {
                 Logger::abort("non-finite log-likelihood encountered");
@@ -2116,6 +2325,8 @@ void AbundanceSamplerThread::sample_component(unsigned int c)
          if (lp >= slice_height) break;
          else if (x > x0) x_max = x;
          else             x_min = x;
+
+         if (fabs(x_max - x_min) < 1e-8) break;
     }
 
     S.cmix[c] = x;
@@ -2223,11 +2434,10 @@ class MultireadSamplerThread
 
 Sampler::Sampler(unsigned int rng_seed,
                  const char* bam_fn, const char* fa_fn,
-                 TranscriptSet& ts, FragmentModel& fm, bool run_gc_correction,
+                 TranscriptSet& ts, FragmentModel& fm,
                  bool use_priors)
     : ts(ts)
     , fm(fm)
-    , gc_correct(NULL)
     , use_priors(use_priors)
 {
     /* Producer/consumer queue of intervals containing indexed reads to be
@@ -2277,6 +2487,7 @@ Sampler::Sampler(unsigned int rng_seed,
 
     /* Free a little space. */
     fm.multireads.clear();
+    for (size_t i = 0; i < constants::num_threads; ++i) delete threads[i];
 
     size_t oldncol;
     unsigned int* idxmap = weight_matrix->compact(&oldncol);
@@ -2506,10 +2717,6 @@ Sampler::Sampler(unsigned int rng_seed,
     std::fill(hp.splice_mu.begin(), hp.splice_mu.end(), 0.5);
     std::fill(hp.splice_sigma.begin(), hp.splice_sigma.end(), 0.5);
 
-    if (fm.sb[0] && run_gc_correction) {
-        gc_correct = new GCCorrection(ts, transcript_gc);
-    }
-
     // allocate sample threads
     for (size_t i = 0; i < constants::num_threads; ++i) {
         multiread_threads.push_back(
@@ -2572,7 +2779,6 @@ Sampler::~Sampler()
     delete weight_matrix;
     delete [] transcript_weights;
     delete [] transcript_gc;
-    delete gc_correct;
 
     for (std::vector<MultireadSamplerThread*>::iterator i = multiread_threads.begin();
          i != multiread_threads.end(); ++i) {
@@ -2665,10 +2871,24 @@ void Sampler::sample()
         expr[i] /= expr_total;
     }
 
-    // adjust for gc content
-    if (fm.sb[0] && gc_correct) {
-        gc_correct->correct(&expr.at(0));
+    // super-useful diagnostics
+#if 0
+    {
+        FILE* out = fopen("gc-length-expr.tsv", "w");
+        fprintf(out, "transcript_id\texons\tgc\tlength\tweight\tcount\texpr\n");
+        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+            fprintf(out, "%s\t%lu\t%0.4f\t%lu\t%e\t%lu\t%e\n",
+                    t->transcript_id.get().c_str(),
+                    (unsigned long) t->size(),
+                    transcript_gc[t->id],
+                    (unsigned long) t->exonic_length(),
+                    transcript_weights[t->id],
+                    (unsigned long) weight_matrix->rowlens[t->id],
+                    expr[t->id]);
+        }
+        fclose(out);
     }
+#endif
 
 #if 0
     // super-useful diagnostics

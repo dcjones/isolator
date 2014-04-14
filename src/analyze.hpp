@@ -23,6 +23,7 @@ class AlphaSampler;
 class BetaSampler;
 class SpliceMuSigmaSamplerThread;
 class ExperimentSpliceMuSigmaSamplerThread;
+typedef std::pair<int, int> IdxRange;
 
 
 class Analyze
@@ -33,7 +34,8 @@ class Analyze
                 size_t num_samples,
                 TranscriptSet& ts,
                 const char* genome_filename,
-                bool run_gc_correction);
+                bool run_gc_correction,
+                bool run_3p_correction);
         ~Analyze();
 
         // Add a replicate under a particular condition
@@ -71,8 +73,11 @@ class Analyze
         // against which the reads are aligned.
         const char* genome_filename;
 
-        // True if post-hoc GC content correction should be used.
+        // True if GC content correction should be used.
         bool run_gc_correction;
+
+        // True if 3' bias should be corrected
+        bool run_3p_correction;
 
         // file names for the BAM/SAM file corresponding to each
         std::vector<std::string> filenames;
@@ -98,13 +103,18 @@ class Analyze
 
         // queues to send work to sampler threads, and be notified on completion
         // of ticks.
-        Queue<int> qsampler_tick_queue, qsampler_notify_queue,
-                   musigma_sampler_tick_queue, musigma_sampler_notify_queue,
-                   experiment_musigma_sampler_tick_queue,
+        Queue<int> qsampler_tick_queue, qsampler_notify_queue;
+
+        // work is doled out in block for these. Otherwise threads can starve
+        // when there are few sample in the experiment
+        Queue<IdxRange> musigma_sampler_tick_queue,
+                        experiment_musigma_sampler_tick_queue,
+                        splice_mu_sigma_sampler_tick_queue,
+                        experiment_splice_mu_sigma_sampler_tick_queue;
+
+        Queue<int> musigma_sampler_notify_queue,
                    experiment_musigma_sampler_notify_queue,
-                   splice_mu_sigma_sampler_tick_queue,
                    splice_mu_sigma_sampler_notify_queue,
-                   experiment_splice_mu_sigma_sampler_tick_queue,
                    experiment_splice_mu_sigma_sampler_notify_queue;
 
         // We maintain a different rng for every unit of work for threads.

@@ -271,6 +271,10 @@ int twobitseq::make_kmer(kmer& K, size_t pos, bool* mask, size_t mask_len) const
 
 void twobitseq::copy(const twobitseq& src, pos_t src_start, pos_t dest_start, pos_t n)
 {
+    if (this->n < (size_t) n) {
+        resize(n);
+    }
+
     // This would be faster if we copied more than one nucleotide at a time, but I'm not
     // too worried about it right now.
     while (n-- > 0) {
@@ -303,6 +307,13 @@ size_t twobitseq::gc_count() const
         if (c == 1 || c == 2) ++cnt;
     }
     return cnt;
+}
+
+
+bool twobitseq::isgc(pos_t i) const
+{
+    kmer c = getnuc(i);
+    return c == 1 || c == 2;
 }
 
 

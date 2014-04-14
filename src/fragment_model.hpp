@@ -9,6 +9,8 @@
 #include "seqbias/sequencing_bias.hpp"
 #include "transcripts.hpp"
 #include "emp_dist.hpp"
+#include "gcbias.hpp"
+#include "tpbias.hpp"
 
 typedef std::pair<unsigned int, unsigned int> MateCount;
 
@@ -98,8 +100,8 @@ class FragmentModel
     public:
         FragmentModel();
         ~FragmentModel();
-        void estimate(TranscriptSet& ts, const char* bam_fn, const char* fa_fn);
-        void train_seqbias(TranscriptSet& ts, const char* bam_fn, const char* fa_fn);
+        void estimate(TranscriptSet& ts, const char* bam_fn, const char* fa_fn,
+                      bool use_gc_correction, bool use_3p_correction);
 
         /* Fragment length probability ,cdf, and median using a fallback when no
          * emperical distribution is available. */
@@ -121,6 +123,12 @@ class FragmentModel
 
         /* A model of sequence bias. */
         sequencing_bias* sb[2];
+
+        /* A model of fragment GC bias. */
+        GCBias* gcbias;
+
+        /* A model of 3'-5' positional bias */
+        TPBias* tpbias;
 
         /* Distribution over fragment lengths. */
         EmpDist* frag_len_dist;

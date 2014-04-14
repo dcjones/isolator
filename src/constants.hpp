@@ -55,6 +55,18 @@ namespace constants
     extern pos_t seqbias_tp_end;
     extern pos_t seqbias_fp_end;
 
+    /* Don't use sequences shorter than this to train gc bias */
+    extern pos_t gcbias_min_seq_len;
+
+    /* Number of bins to use to model GC bias. */
+    extern size_t gcbias_num_bins;
+
+    /* Minimum transcript length used to train 3' bias. */
+    extern pos_t tpbias_min_tlen;
+
+    /* Maximum number of transcripts to use to train 3' bias. */
+    extern size_t tpbias_max_transcripts;
+
     /* Loess smoothing for GC correction. */
     extern double gc_loess_smoothing;
 

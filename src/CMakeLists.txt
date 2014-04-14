@@ -5,11 +5,8 @@ include_directories(${isolator_SOURCE_DIR}/src
                     ${ZLIB_INCLUDE_DIRS}
                     ${CMAKE_CURRENT_BINARY_DIR})
 
-add_subdirectory(cblas)
-add_subdirectory(f2c)
 add_subdirectory(gtf)
 add_subdirectory(hat-trie)
-add_subdirectory(loess)
 add_subdirectory(samtools)
 add_subdirectory(seqbias)
 add_subdirectory(yaml)
@@ -21,7 +18,7 @@ add_executable(isolator
                cpuid.cpp
                emp_dist.cpp
                fragment_model.cpp
-               gc.cpp
+               gcbias.cpp
                hdf5.cpp
                intervals.cpp
                isolator.cpp
@@ -31,13 +28,11 @@ add_executable(isolator
                read_set.cpp
                sampler.cpp
                shredder.cpp
+               tpbias.cpp
                summarize.cpp
                transcripts.cpp)
 
 target_link_libraries(isolator
-                      loess
-                      cblas
-                      f2c
                       gtf
                       hat-trie
                       samtools

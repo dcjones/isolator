@@ -35,7 +35,10 @@ GCCorrection::~GCCorrection()
 {
 }
 
-
+// I really hat this code. It's so goofy.
+// If I really want to correct for gc-content I also have to try take into account
+// 5'-3' effects. Also, I should really be correcting for GC content at the fragment
+// level.
 void GCCorrection::correct(double* expr)
 {
     boost::lock_guard<boost::mutex> lock(mut);

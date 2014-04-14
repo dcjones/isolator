@@ -117,8 +117,7 @@ class NormalTMuSampler : public Shredder
 
         double sample(rng_t& rng, double mu0, double sigma, const double* xs,
                       size_t n, double prior_nu, double prior_mu,
-                      double prior_sigma, double* xmin, double* xmax,
-                      double* xmin_lp, double* xmax_lp)
+                      double prior_sigma)
         {
             this->sigma = sigma;
             this->prior_nu = prior_nu;
@@ -128,9 +127,6 @@ class NormalTMuSampler : public Shredder
             this->n = n;
 
             double ans = Shredder::sample(rng, mu0);
-
-            if (xmin) *xmin = this->x_min;
-            if (xmax) *xmax = this->x_max;
 
             return ans;
         }
@@ -236,7 +232,7 @@ class TgroupMuSigmaSamplerThread
                                    double& beta,
                                    const std::vector<int>& condition,
                                    const std::vector<std::vector<int> >& condition_samples,
-                                   Queue<int>& tgroup_queue,
+                                   Queue<IdxRange>& tgroup_queue,
                                    Queue<int>& notify_queue,
                                    std::vector<rng_t>& rng_pool)
             : ts(ts)
@@ -261,33 +257,35 @@ class TgroupMuSigmaSamplerThread
 
         void run()
         {
-            int tgroup;
             while (true) {
-                if ((tgroup = tgroup_queue.pop()) == -1) break;
+                IdxRange tgroups = tgroup_queue.pop();
+                if (tgroups.first == -1) break;
 
-                rng_t& rng = rng_pool[tgroup];
+                for (int tgroup = tgroups.first; tgroup < tgroups.second; ++tgroup) {
+                    rng_t& rng = rng_pool[tgroup];
 
-                // sample mu
-                for (size_t i = 0; i < C; ++i) {
-                    size_t l = 0;
-                    BOOST_FOREACH (int j, condition_samples[i]) {
-                        xs[l++] = ts(j, tgroup);
+                    // sample mu
+                    for (size_t i = 0; i < C; ++i) {
+                        size_t l = 0;
+                        BOOST_FOREACH (int j, condition_samples[i]) {
+                            xs[l++] = ts(j, tgroup);
+                        }
+
+                        mu(i, tgroup) = mu_sampler.sample(rng,
+                                                          sigma[tgroup], &xs.at(0), l,
+                                                          experiment_tgroup_mu[tgroup],
+                                                          experiment_tgroup_sigma[tgroup]);
+                        assert_finite(mu(i, tgroup));
                     }
 
-                    mu(i, tgroup) = mu_sampler.sample(rng,
-                                                      sigma[tgroup], &xs.at(0), l,
-                                                      experiment_tgroup_mu[tgroup],
-                                                      experiment_tgroup_sigma[tgroup]);
-                    assert_finite(mu(i, tgroup));
-                }
+                    // sample sigma
+                    for (size_t i = 0; i < K; ++i) {
+                        xs[i] = ts(i, tgroup) - mu(condition[i], tgroup);
+                    }
 
-                // sample sigma
-                for (size_t i = 0; i < K; ++i) {
-                    xs[i] = ts(i, tgroup) - mu(condition[i], tgroup);
+                    sigma[tgroup] = sigma_sampler.sample(rng, &xs.at(0), K, alpha, beta);
+                    assert_finite(sigma[tgroup]);
                 }
-
-                sigma[tgroup] = sigma_sampler.sample(rng, &xs.at(0), K, alpha, beta);
-                assert_finite(sigma[tgroup]);
 
                 notify_queue.push(1);
             }
@@ -315,7 +313,7 @@ class TgroupMuSigmaSamplerThread
         double& beta;
         const std::vector<int>& condition;
         const std::vector<std::vector<int> >& condition_samples;
-        Queue<int>& tgroup_queue;
+        Queue<IdxRange>& tgroup_queue;
         Queue<int>& notify_queue;
         std::vector<rng_t>& rng_pool;
         boost::thread* thread;
@@ -355,7 +353,7 @@ class SpliceMuSigmaSamplerThread
                         const std::vector<std::vector<unsigned int> >& tgroup_tids,
                         const std::vector<int>& condition,
                         const std::vector<std::vector<int> >& condition_samples,
-                        Queue<int>& spliced_tgroup_queue,
+                        Queue<IdxRange>& spliced_tgroup_queue,
                         Queue<int>& notify_queue,
                         std::vector<rng_t>& rng_pool)
             : mu(mu)
@@ -400,74 +398,77 @@ class SpliceMuSigmaSamplerThread
             matrix<double> dataj(K, max_size2);
             matrix<double> _data_raw(K, max_size2);
 
-            int j;
+            // We are fixing sigma for now
+            UNUSED(splice_alpha);
+            UNUSED(splice_beta);
+
             while (true) {
-                if ((j = spliced_tgroup_queue.pop()) == -1) break;
-                size_t tgroup = spliced_tgroup_indexes[j];
+                IdxRange js = spliced_tgroup_queue.pop();
+                if (js.first == -1) break;
 
-                rng_t& rng = rng_pool[j];
+                for (int j = js.first; j < js.second; ++j) {
+                    size_t tgroup = spliced_tgroup_indexes[j];
 
-                // transform quantification data for the selected tgroup
-                // so we can treat it as normal (i.e. invert the logistic normal
-                // transform)
-                for (size_t i = 0; i < K; ++i) {
-                    double datasum = 0.0;
-                    for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
-                        unsigned int tid = tgroup_tids[tgroup][k];
-                        dataj(i, k) = Q(i, tid);
-                        datasum += dataj(i, k);
-                    }
+                    rng_t& rng = rng_pool[j];
 
-                    for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
-                        dataj(i, k) /= datasum;
-                        _data_raw(i, k) = dataj(i, k);
-                    }
-                }
-
-                // sample parameters for each condition
-                for (size_t i = 0; i < C; ++i) {
-                    for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
-                        for (size_t l = 0; l < condition_samples[i].size(); ++l) {
-                            size_t sample_idx = condition_samples[i][l];
-                            data[l] = dataj(sample_idx, k);
+                    // transform quantification data for the selected tgroup
+                    // so we can treat it as normal (i.e. invert the logistic normal
+                    // transform)
+                    for (size_t i = 0; i < K; ++i) {
+                        double datasum = 0.0;
+                        for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
+                            unsigned int tid = tgroup_tids[tgroup][k];
+                            dataj(i, k) = Q(i, tid);
+                            datasum += dataj(i, k);
                         }
 
-                        double x_min, x_max, x_min_lp, x_max_lp;
-
-                        mu[i][j][k] =
-                            mu_sampler.sample(rng,
-                                              mu[i][j][k],
-                                              sigma[j][k],
-                                              &data.at(0),
-                                              condition_samples[i].size(),
-                                              experiment_nu,
-                                              experiment_mu[j][k],
-                                              experiment_sigma[j][k],
-                                              &x_min, &x_max,
-                                              &x_min_lp, &x_max_lp);
-                    }
-                }
-
-                for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
-                    matrix_column<matrix<double> > col(dataj, k);
-                    std::copy(col.begin(), col.end(), data.begin());
-
-                    for (size_t i = 0; i < K; ++i) {
-                        data[i] = data[i] - mu[condition[i]][j][k];
+                        for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
+                            dataj(i, k) /= datasum;
+                            _data_raw(i, k) = dataj(i, k);
+                        }
                     }
 
-                    // During burn-in we force the condition variance
-                    // to be quite high. Otherwise, if a gene is initalized
-                    // in a very low probability state it can be slow to make
-                    // progress towards reasonable values.
-                    if (burnin_state) {
-                        sigma[j][k] = 0.1;
+                    // sample parameters for each condition
+                    for (size_t i = 0; i < C; ++i) {
+                        for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
+                            for (size_t l = 0; l < condition_samples[i].size(); ++l) {
+                                size_t sample_idx = condition_samples[i][l];
+                                data[l] = dataj(sample_idx, k);
+                            }
+
+                            mu[i][j][k] =
+                                mu_sampler.sample(rng,
+                                                  mu[i][j][k],
+                                                  sigma[j][k],
+                                                  &data.at(0),
+                                                  condition_samples[i].size(),
+                                                  experiment_nu,
+                                                  experiment_mu[j][k],
+                                                  experiment_sigma[j][k]);
+                        }
                     }
-                    else {
-                        sigma[j][k] = 0.03;
-                        //sigma[j][k] =
-                            //sigma_sampler.sample(&data.at(0), K,
-                                                 //splice_alpha, splice_beta);
+
+                    for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
+                        matrix_column<matrix<double> > col(dataj, k);
+                        std::copy(col.begin(), col.end(), data.begin());
+
+                        for (size_t i = 0; i < K; ++i) {
+                            data[i] = data[i] - mu[condition[i]][j][k];
+                        }
+
+                        // During burn-in we force the condition variance
+                        // to be quite high. Otherwise, if a gene is initalized
+                        // in a very low probability state it can be slow to make
+                        // progress towards reasonable values.
+                        if (burnin_state) {
+                            sigma[j][k] = 0.1;
+                        }
+                        else {
+                            sigma[j][k] = 0.03;
+                            //sigma[j][k] =
+                                //sigma_sampler.sample(&data.at(0), K,
+                                                     //splice_alpha, splice_beta);
+                        }
                     }
                 }
 
@@ -508,7 +509,7 @@ class SpliceMuSigmaSamplerThread
         const std::vector<int>& condition;
         const std::vector<std::vector<int> >& condition_samples;
 
-        Queue<int>& spliced_tgroup_queue;
+        Queue<IdxRange>& spliced_tgroup_queue;
         Queue<int>& notify_queue;
 
         std::vector<rng_t>& rng_pool;
@@ -535,7 +536,7 @@ class ExperimentSpliceMuSigmaSamplerThread
                 const std::vector<std::vector<unsigned int> >& tgroup_tids,
                 double experiment_prior_mu,
                 double experiment_prior_sigma,
-                Queue<int>& spliced_tgroup_queue,
+                Queue<IdxRange>& spliced_tgroup_queue,
                 Queue<int>& notify_queue,
                 std::vector<rng_t>& rng_pool)
             : experiment_nu(experiment_nu)
@@ -578,38 +579,40 @@ class ExperimentSpliceMuSigmaSamplerThread
             matrix<double> meanj(C, max_size2);
             matrix<double> dataj(C, max_size2);
 
-            int j;
             while (true) {
-                if ((j = spliced_tgroup_queue.pop()) == -1) break;
+                IdxRange js = spliced_tgroup_queue.pop();
+                if (js.first == -1) break;
 
-                rng_t& rng = rng_pool[j];
+                for (int j = js.first; j < js.second; ++j) {
+                    rng_t& rng = rng_pool[j];
 
-                size_t tgroup = spliced_tgroup_indexes[j];
+                    size_t tgroup = spliced_tgroup_indexes[j];
 
-                for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
-                    for (size_t i = 0; i < C; ++i) {
-                        data[i] = condition_mu[i][j][k];
+                    for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
+                        for (size_t i = 0; i < C; ++i) {
+                            data[i] = condition_mu[i][j][k];
+                        }
+
+                        experiment_mu[j][k] =
+                            mu_sampler.sample(rng,
+                                              experiment_mu[j][k],
+                                              experiment_nu,
+                                              experiment_sigma[j][k],
+                                              &data.at(0), C,
+                                              experiment_prior_mu,
+                                              experiment_prior_sigma);
+
+                        for (size_t i = 0; i < C; ++i) {
+                            mu_k[i] = experiment_mu[j][k];
+                        }
+
+                        //experiment_sigma[j][k] =
+                            //sigma_sampler.sample(experiment_sigma[j][k], &data.at(0), &mu_k.at(0), C,
+                                                 //experiment_splice_alpha, experiment_splice_beta);
+
+                        // TODO: constants
+                        experiment_sigma[j][k] = 0.15;
                     }
-
-                    experiment_mu[j][k] =
-                        mu_sampler.sample(rng,
-                                          experiment_mu[j][k],
-                                          experiment_nu,
-                                          experiment_sigma[j][k],
-                                          &data.at(0), C,
-                                          experiment_prior_mu,
-                                          experiment_prior_sigma);
-
-                    for (size_t i = 0; i < C; ++i) {
-                        mu_k[i] = experiment_mu[j][k];
-                    }
-
-                    //experiment_sigma[j][k] =
-                        //sigma_sampler.sample(experiment_sigma[j][k], &data.at(0), &mu_k.at(0), C,
-                                             //experiment_splice_alpha, experiment_splice_beta);
-
-                    // TODO: constants
-                    experiment_sigma[j][k] = 0.15;
                 }
 
                 notify_queue.push(1);
@@ -639,7 +642,7 @@ class ExperimentSpliceMuSigmaSamplerThread
         const std::vector<std::vector<unsigned int> >& tgroup_tids;
         double experiment_prior_mu;
         double experiment_prior_sigma;
-        Queue<int>& spliced_tgroup_queue;
+        Queue<IdxRange>& spliced_tgroup_queue;
         Queue<int>& notify_queue;
         std::vector<rng_t>& rng_pool;
 
@@ -759,7 +762,7 @@ class ExperimentTgroupMuSigmaSamplerThread
                 double prior_sigma,
                 std::vector<double>& experiment_tgroup_sigma,
                 matrix<double>& tgroup_mu,
-                Queue<int>& tgroup_queue,
+                Queue<IdxRange>& tgroup_queue,
                 Queue<int>& notify_queue,
                 std::vector<rng_t>& rng_pool)
             : experiment_tgroup_mu(experiment_tgroup_mu)
@@ -776,29 +779,31 @@ class ExperimentTgroupMuSigmaSamplerThread
 
         void run()
         {
-            int tgroup;
             size_t C = tgroup_mu.size1();
 
             while (true) {
-                if ((tgroup = tgroup_queue.pop()) == -1) break;
+                IdxRange tgroups = tgroup_queue.pop();
+                if (tgroups.first == -1) break;
 
-                rng_t& rng = rng_pool[tgroup];
+                for (int tgroup = tgroups.first; tgroup < tgroups.second; ++tgroup) {
+                    rng_t& rng = rng_pool[tgroup];
 
-                double sigma = experiment_tgroup_sigma[tgroup];
+                    double sigma = experiment_tgroup_sigma[tgroup];
 
-                // sample experiment_tgroup_mu[tgroup]
+                    // sample experiment_tgroup_mu[tgroup]
 
-                double prior_var = prior_sigma * prior_sigma;
-                double var = sigma * sigma;
+                    double prior_var = prior_sigma * prior_sigma;
+                    double var = sigma * sigma;
 
-                matrix_column<matrix<double> > col(tgroup_mu, tgroup);
+                    matrix_column<matrix<double> > col(tgroup_mu, tgroup);
 
-                double part = 1/prior_var + C/var;
-                double posterior_mu =
-                    (prior_mu / prior_var + std::accumulate(col.begin(), col.end(), 0.0) / var) / part;
-                double posterior_sigma = sqrt(1 / part);
+                    double part = 1/prior_var + C/var;
+                    double posterior_mu =
+                        (prior_mu / prior_var + std::accumulate(col.begin(), col.end(), 0.0) / var) / part;
+                    double posterior_sigma = sqrt(1 / part);
 
-                experiment_tgroup_mu[tgroup] = posterior_mu + random_normal(rng) * posterior_sigma;
+                    experiment_tgroup_mu[tgroup] = posterior_mu + random_normal(rng) * posterior_sigma;
+                }
 
                 notify_queue.push(1);
             }
@@ -822,7 +827,7 @@ class ExperimentTgroupMuSigmaSamplerThread
         std::vector<double>& experiment_tgroup_sigma;
         matrix<double>& tgroup_mu;
 
-        Queue<int>& tgroup_queue;
+        Queue<IdxRange>& tgroup_queue;
         Queue<int>& notify_queue;
         std::vector<rng_t>& rng_pool;
         boost::thread* thread;
@@ -836,12 +841,14 @@ Analyze::Analyze(unsigned int rng_seed,
                  size_t num_samples,
                  TranscriptSet& transcripts,
                  const char* genome_filename,
-                 bool run_gc_correction)
+                 bool run_gc_correction,
+                 bool run_3p_correction)
     : burnin(burnin)
     , num_samples(num_samples)
     , transcripts(transcripts)
     , genome_filename(genome_filename)
     , run_gc_correction(run_gc_correction)
+    , run_3p_correction(run_3p_correction)
     , K(0)
     , C(0)
     , N(0)
@@ -864,7 +871,7 @@ Analyze::Analyze(unsigned int rng_seed,
     splice_alpha_beta  = 50.0;
     splice_beta_beta   = 15.0;
 
-    experiment_tgroup_mu0 = -10;
+    experiment_tgroup_mu0 = -20;
     experiment_tgroup_sigma0 = 5.0;
 
     experiment_splice_nu = 5.0;
@@ -942,6 +949,7 @@ class SamplerInitThread
                           TranscriptSet& transcripts,
                           std::vector<FragmentModel*>& fms,
                           bool run_gc_correction,
+                          bool run_3p_correction,
                           std::vector<Sampler*>& samplers,
                           Queue<int>& indexes)
             : filenames(filenames)
@@ -949,6 +957,7 @@ class SamplerInitThread
             , transcripts(transcripts)
             , fms(fms)
             , run_gc_correction(run_gc_correction)
+            , run_3p_correction(run_3p_correction)
             , samplers(samplers)
             , indexes(indexes)
             , rng_seed(rng_seed)
@@ -963,11 +972,12 @@ class SamplerInitThread
                 if ((index = indexes.pop()) == -1) break;
 
                 fms[index] = new FragmentModel();
-                fms[index]->estimate(transcripts, filenames[index].c_str(), fa_fn);
+                fms[index]->estimate(transcripts, filenames[index].c_str(), fa_fn,
+                                     run_gc_correction, run_3p_correction);
 
                 samplers[index] = new Sampler(rng_seed,
                                               filenames[index].c_str(), fa_fn,
-                                              transcripts, *fms[index], run_gc_correction);
+                                              transcripts, *fms[index]);
             }
         }
 
@@ -990,6 +1000,7 @@ class SamplerInitThread
         TranscriptSet& transcripts;
         std::vector<FragmentModel*>& fms;
         bool run_gc_correction;
+        bool run_3p_correction;
 
         std::vector<Sampler*>& samplers;
 
@@ -1064,7 +1075,7 @@ void Analyze::setup_samplers()
     for (unsigned int i = 0; i < constants::num_threads; ++i) {
         threads[i] = new SamplerInitThread(rng_seed, filenames, genome_filename,
                                            transcripts, fms, run_gc_correction,
-                                           qsamplers, indexes);
+                                           run_3p_correction, qsamplers, indexes);
         threads[i]->start();
     }
 
@@ -1566,10 +1577,10 @@ void Analyze::run(hid_t output_file_id)
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         qsampler_tick_queue.push(-1);
-        musigma_sampler_tick_queue.push(-1);
-        experiment_musigma_sampler_tick_queue.push(-1);
-        splice_mu_sigma_sampler_tick_queue.push(-1);
-        experiment_splice_mu_sigma_sampler_tick_queue.push(-1);
+        musigma_sampler_tick_queue.push(IdxRange(-1, -1));
+        experiment_musigma_sampler_tick_queue.push(IdxRange(-1, -1));
+        splice_mu_sigma_sampler_tick_queue.push(IdxRange(-1, -1));
+        experiment_splice_mu_sigma_sampler_tick_queue.push(IdxRange(-1, -1));
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -1709,14 +1720,19 @@ void Analyze::sample()
     compute_ts();
     compute_xs();
 
+    // size of units of work queued for threads
+    const size_t block_size = 250;
+
     // sample condition-level parameters
 
-    for (size_t i = 0; i < T; ++i) {
-        musigma_sampler_tick_queue.push(i);
+    for (size_t i = 0; i < T; i += block_size) {
+        musigma_sampler_tick_queue.push(
+                IdxRange(i, std::min<int>(T, i + block_size)));
     }
 
-    for (size_t i = 0; i < T; ++i) {
+    for (size_t i = 0; i < T; i += block_size) {
         musigma_sampler_notify_queue.pop();
+        i += block_size;
     }
 
     tgroup_alpha = alpha_sampler->sample(rng, tgroup_alpha, tgroup_beta,
@@ -1729,29 +1745,32 @@ void Analyze::sample()
                                        &tgroup_sigma.at(0), T);
     assert_finite(tgroup_beta);
 
-    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
-        splice_mu_sigma_sampler_tick_queue.push(i);
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); i += block_size) {
+        splice_mu_sigma_sampler_tick_queue.push(
+                IdxRange(i, std::min<int>(spliced_tgroup_indexes.size(), i + block_size)));
     }
 
-    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); i += block_size) {
         splice_mu_sigma_sampler_notify_queue.pop();
     }
 
     // sample experiment-level parameters
 
-    for (size_t i = 0; i < T; ++i) {
-        experiment_musigma_sampler_tick_queue.push(i);
+    for (size_t i = 0; i < T; i += block_size) {
+        experiment_musigma_sampler_tick_queue.push(
+                IdxRange(i, std::min<int>(T, i + block_size)));
     }
 
-    for (size_t i = 0; i < T; ++i) {
+    for (size_t i = 0; i < T; i += block_size) {
         experiment_musigma_sampler_notify_queue.pop();
     }
 
-    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
-        experiment_splice_mu_sigma_sampler_tick_queue.push(i);
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); i += block_size) {
+        experiment_splice_mu_sigma_sampler_tick_queue.push(
+                IdxRange(i, std::min<int>(spliced_tgroup_indexes.size(), i + block_size)));
     }
 
-    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); i += block_size) {
         experiment_splice_mu_sigma_sampler_notify_queue.pop();
     }
 
@@ -1973,7 +1992,7 @@ void Analyze::choose_initial_values()
     std::fill(tgroup_mu.data().begin(), tgroup_mu.data().end(), tgroup_mu_0);
 
     // tgroup_sigma
-    const double tgroup_sigma_0 = 0.1;
+    const double tgroup_sigma_0 = 1.0;
     std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);
     std::fill(experiment_tgroup_sigma.begin(), experiment_tgroup_sigma.end(), tgroup_sigma_0);
 

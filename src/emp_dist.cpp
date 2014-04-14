@@ -1,4 +1,6 @@
 
+#include <boost/math/special_functions/fpclassify.hpp>
+
 #include "common.hpp"
 #include "emp_dist.hpp"
 
@@ -57,7 +59,7 @@ EmpDist::~EmpDist()
 float EmpDist::median() const
 {
     if (n == 0) return NAN;
-    if (finite(med)) return med;
+    if (boost::math::isfinite(med)) return med;
 
     /* Dumb O(n) median computation. */
     size_t i = 0, j = n - 1;
@@ -136,7 +138,7 @@ float EmpDist::eval(unsigned int x) const
 
     ans /= (float) m;
 
-    if (!finite(ans)) ans = 0.0;
+    if (!boost::math::isfinite(ans)) ans = 0.0;
 
     pdf_memo.insert(std::pair<unsigned int, double>(x, ans));
     return ans;

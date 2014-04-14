@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "fragment_model.hpp"
-#include "gc.hpp"
 #include "queue.hpp"
 #include "transcripts.hpp"
 
@@ -72,7 +71,7 @@ class Sampler
         Sampler(unsigned int rng_seed,
                 const char* bam_fn, const char* ref_fn,
                 TranscriptSet& ts, FragmentModel& fm,
-                bool run_gc_correction, bool use_priors=false);
+                bool use_priors=false);
         ~Sampler();
 
         // Called prior to any calls to iterate
@@ -137,7 +136,6 @@ class Sampler
 
         TranscriptSet& ts;
         FragmentModel& fm;
-        GCCorrection* gc_correct;
 
         // Multiread sampling
         std::vector<MultireadSamplerThread*> multiread_threads;

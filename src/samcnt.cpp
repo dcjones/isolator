@@ -16,6 +16,15 @@
 extern "C" {
 #include "samtools/khash.h"
 KHASH_MAP_INIT_STR(s, int)
+static void supress_khash_unused_function_warnings() __attribute__ ((unused));
+static void supress_khash_unused_function_warnings()
+{
+    UNUSED(kh_init_s);
+    UNUSED(kh_destroy_s);
+    UNUSED(kh_put_s);
+    UNUSED(kh_clear_s);
+    UNUSED(kh_del_s);
+}
 }
 
 enum Stranded {

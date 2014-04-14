@@ -23,6 +23,8 @@ struct Exon
 
     /* Order by (start, then end) position. */
     bool operator < (const Exon&) const;
+
+    pos_t length() const;
 };
 
 
@@ -57,6 +59,9 @@ class Transcript : public std::set<Exon>
 
         /* Position of the transcript's start site */
         pos_t tss_position() const;
+
+        /* Three prime UTR */
+        Interval three_prime_utr() const;
 
         /* Extract the sequence of the spliced transcript from the full
          * reference sequence.
@@ -193,6 +198,10 @@ class TranscriptSet
         void get_distinct_5p_3p_exons(const std::vector<Interval>& consensus_exons,
                                       std::vector<Interval>& consensus_5p_exons,
                                       std::vector<Interval>& consensus_3p_exons);
+
+        /* Get 3' UTRs, at lest as long as the given length, and truncated if
+         * longer. */
+        void get_three_prime_utrs(std::vector<Interval>& intervals, pos_t len);
 
         /* Find all cassette exons, along with transcripts that exclude or
          * include them. */

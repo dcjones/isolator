@@ -21,7 +21,7 @@ void (*asxpy)(float* xs, const float* ys, const float c,
 float (*asxtydsz)(const float* xs, const float* ys, const float* zs,
                   const unsigned int* idx, const unsigned int off,
                   const size_t n) = NULL;
-float (*dot)(const float* xs, const float* ys, size_t n);
+float (*dot)(const float* xs, const float* ys, const float* zs, size_t n);
 static __m128 (*log2_sse)(__m128 x) = NULL;
 const char* LINALG_INSTR_SET = "";
 
@@ -394,7 +394,7 @@ float asxtydsz_avx(const float* xs, const float* ys, const float* zs,
 }
 
 
-float dot_avx(const float* xs, const float* ys, size_t n)
+float dot_avx(const float* xs, const float* ys, const float* zs, size_t n)
 {
     union ans_t
     {
@@ -404,11 +404,12 @@ float dot_avx(const float* xs, const float* ys, size_t n)
     ans.v = _mm256_setzero_ps();
 
     size_t i;
-    __m256 x, y;
+    __m256 x, y, z;
     for (i = 0; i < 8 * (n / 8); i += 8) {
         x = _mm256_load_ps(xs + i);
         y = _mm256_loadu_ps(ys + i);
-        ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(x, y));
+        z = _mm256_load_ps(zs + i);
+        ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(_mm256_mul_ps(x, y), z));
     }
 
     float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3] +
@@ -417,13 +418,13 @@ float dot_avx(const float* xs, const float* ys, size_t n)
     /* handle overhang */
     i = 8 * (n / 8);
     switch (n % 8) {
-        case 7: fans += xs[i] * ys[i]; ++i;
-        case 6: fans += xs[i] * ys[i]; ++i;
-        case 5: fans += xs[i] * ys[i]; ++i;
-        case 4: fans += xs[i] * ys[i]; ++i;
-        case 3: fans += xs[i] * ys[i]; ++i;
-        case 2: fans += xs[i] * ys[i]; ++i;
-        case 1: fans += xs[i] * ys[i];
+        case 7: fans += xs[i] * ys[i] * zs[i]; ++i;
+        case 6: fans += xs[i] * ys[i] * zs[i]; ++i;
+        case 5: fans += xs[i] * ys[i] * zs[i]; ++i;
+        case 4: fans += xs[i] * ys[i] * zs[i]; ++i;
+        case 3: fans += xs[i] * ys[i] * zs[i]; ++i;
+        case 2: fans += xs[i] * ys[i] * zs[i]; ++i;
+        case 1: fans += xs[i] * ys[i] * zs[i];
     }
 
     return fans;
@@ -527,9 +528,8 @@ static __m128 log2_sse4(__m128 x)
                    _mm_set1_epi32(127)));
 
     /* extract mantissa */
-    const __m128i mant_mask = _mm_set1_epi32(0x007FFFFF);
-    const __m128 one = _mm_set1_ps(1.0f);
-    __m128 m = _mm_or_ps(_mm_castsi128_ps(_mm_and_si128(i, mant_mask)), one);
+    __m128 m = _mm_and_ps(x, *(__m128*) pi16_inv_mant_mask);
+    m = _mm_or_ps(m, *(__m128*) ps16_1);
 
     /* polynomial approximation on the mantissa */
     __m128 p = *(__m128*) ps16_log2_c5;
@@ -708,7 +708,7 @@ float asxtydsz_sse(const float* xs, const float* ys, const float* zs,
 }
 
 
-float dot_sse(const float* xs, const float* ys, size_t n)
+float dot_sse(const float* xs, const float* ys, const float* zs, size_t n)
 {
     union ans_t
     {
@@ -718,11 +718,12 @@ float dot_sse(const float* xs, const float* ys, size_t n)
     ans.v = _mm_setzero_ps();
 
     size_t i;
-    __m128 x, y;
+    __m128 x, y, z;
     for (i = 0; i < 4 * (n / 4); i += 4) {
         x = _mm_load_ps(xs + i);
         y = _mm_loadu_ps(ys + i);
-        ans.v = _mm_add_ps(ans.v, _mm_mul_ps(x, y));
+        z = _mm_load_ps(zs + i);
+        ans.v = _mm_add_ps(ans.v, _mm_mul_ps(_mm_mul_ps(x, y), z));
     }
 
     float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3];
@@ -730,9 +731,9 @@ float dot_sse(const float* xs, const float* ys, size_t n)
     // handle overhang
     i = 4 * (n / 4);
     switch (n % 4) {
-        case 3: fans += xs[i] * ys[i]; ++i;
-        case 2: fans += xs[i] * ys[i]; ++i;
-        case 1: fans += xs[i] * ys[i];
+        case 3: fans += xs[i] * ys[i] * zs[i]; ++i;
+        case 2: fans += xs[i] * ys[i] * zs[i]; ++i;
+        case 1: fans += xs[i] * ys[i] * zs[i];
     }
 
     return fans;
@@ -809,11 +810,11 @@ float asxtydsz_vanilla(const float* xs, const float* ys, const float* zs,
 }
 
 
-float dot_vanilla(const float* xs, const float* ys, const size_t n)
+float dot_vanilla(const float* xs, const float* ys, const float* zs, const size_t n)
 {
     float accum = 0.0;
     for (size_t i = 0; i < n; ++i) {
-        accum += xs[i] * ys[i];
+        accum += xs[i] * ys[i] * zs[i];
     }
     return accum;
 }

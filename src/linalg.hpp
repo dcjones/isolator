@@ -73,9 +73,9 @@ extern float (*asxtydsz)(const float* xs, const float* ys, const float* zs,
                          const size_t n);
 
 
-/* Dot product, where xs is aligned and ys may not be.
+/* Triple product, where xs and zs are aligned and ys may not be.
  */
- extern float (*dot)(const float* xs, const float* ys, const size_t n);
+ extern float (*dot)(const float* xs, const float* ys, const float* zs, const size_t n);
 
 
 /* Fast log2 approximation. */

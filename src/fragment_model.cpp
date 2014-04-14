@@ -1,5 +1,6 @@
-#include <boost/unordered_map.hpp>
+#include <boost/foreach.hpp>
 #include <boost/math/distributions/normal.hpp>
+#include <boost/unordered_map.hpp>
 #include <cstdio>
 
 #include "constants.hpp"
@@ -13,6 +14,15 @@
 extern "C" {
 #include "samtools/khash.h"
 KHASH_MAP_INIT_STR(s, int)
+static void supress_khash_unused_function_warnings() __attribute__ ((unused));
+static void supress_khash_unused_function_warnings()
+{
+    UNUSED(kh_init_s);
+    UNUSED(kh_destroy_s);
+    UNUSED(kh_put_s);
+    UNUSED(kh_clear_s);
+    UNUSED(kh_del_s);
+}
 }
 
 
@@ -182,6 +192,7 @@ class FragmentModelInterval
             INTERGENIC,
             CONSENSUS_EXONIC,
             EXONIC,
+            THREE_PRIME
         } type;
 
         FragmentModelInterval(const Interval& interval,
@@ -191,6 +202,8 @@ class FragmentModelInterval
             , start(interval.start)
             , end(interval.end)
             , strand(interval.strand)
+            , tpdist(-1)
+            , tlen(-1)
             , tid(-1)
         {
         }
@@ -205,6 +218,8 @@ class FragmentModelInterval
             , start(start)
             , end(end)
             , strand(strand)
+            , tpdist(-1)
+            , tlen(-1)
             , tid(-1)
         {
         }
@@ -232,9 +247,12 @@ class FragmentModelInterval
         pos_t start, end;
         strand_t strand;
 
-        // Sequence associated with the intervals seqname.
-        boost::shared_ptr<twobitseq> seq0;
-        boost::shared_ptr<twobitseq> seq1;
+        // distance this interval is from the 3' end of the transcript,
+        // if applicable.
+        pos_t tpdist;
+
+        // transcript lengt,h if applicable
+        pos_t tlen;
 
         /* A the sequence ID assigned by the BAM file, so we can arrange
          * intervals in the same order. */
@@ -258,6 +276,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
               std::vector<FragmentModelInterval*>& seqbias_intervals,
               PosTable& seqbias_sense_pos,
               PosTable& seqbias_antisense_pos,
+              PosTable& gcbias_pos,
               const char* bam_fn,
               const char* task_name)
 {
@@ -302,8 +321,6 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
         else (*i)->tid = kh_value(tbl, k);
     }
     std::sort(seqbias_intervals.begin(), seqbias_intervals.end(), FragmentModelIntervalPtrCmp());
-
-
 
     /* First interval which the current read may be contained in. */
     size_t j, j0 = 0;
@@ -350,10 +367,6 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
             T.inc_mate1(bam1_qname(b));
         }
 
-        // TODO: Here's the plan. It's not pretty. We are going to have a
-        // special interval list for seqbias that is seperately processed.
-        // First we need to be able to build a list of union exons.
-
         // Process seqbias intervals
         while (sbi != seqbias_intervals.end() && (*sbi)->tid < b->core.tid) ++sbi;
         while (sbi != seqbias_intervals.end() && (*sbi)->tid == b->core.tid &&
@@ -363,11 +376,12 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
         // both strands.
         for (std::vector<FragmentModelInterval*>::iterator sbj = sbi;
              sbj != seqbias_intervals.end() && sbj != sbi + 2; ++sbj) {
+            pos_t start = b->core.pos,
+                  end = (pos_t) bam_calend(&b->core, bam1_cigar(b)) - 1;
             if ((*sbj)->tid == b->core.tid &&
-                (*sbj)->start <= b->core.pos && b->core.pos <= (*sbj)->end) {
+                (*sbj)->start <= start && end <= (*sbj)->end) {
                 strand_t b_strand = bam1_strand(b) ? strand_neg : strand_pos;
-                pos_t pos = b_strand ?
-                    (pos_t) bam_calend(&b->core, bam1_cigar(b)) - 1 : b->core.pos;
+                pos_t pos = b_strand ? end : start;
                 if ((*sbj)->strand == b_strand) {
                     seqbias_sense_pos.add(b->core.tid, pos, bam1_strand(b),
                                           (*sbj)->start, (*sbj)->end, bam_f);
@@ -375,6 +389,11 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
                 else {
                     seqbias_antisense_pos.add(b->core.tid, pos, bam1_strand(b),
                                               (*sbj)->start, (*sbj)->end, bam_f);
+                }
+
+                if ((*sbj)->end - (*sbj)->start + 1 >= constants::gcbias_min_seq_len) {
+                    gcbias_pos.add(b->core.tid, pos, bam1_strand(b),
+                                   (*sbj)->start, (*sbj)->end, bam_f);
                 }
             }
         }
@@ -448,6 +467,13 @@ class FragmentModelThread
                     measure_strand_bias(interval->strand, read_counts);
                     read_counts.clear();
                 }
+                else if (interval->type == FragmentModelInterval::EXONIC) {
+                    interval->rs.make_unique_read_counts(read_counts);
+                    measure_tpbias(interval->start, interval->end,
+                                   interval->strand, interval->tpdist,
+                                   interval->tlen, read_counts);
+                    read_counts.clear();
+                }
 
                 delete interval;
             }
@@ -478,13 +504,11 @@ class FragmentModelThread
          * positions with k read starts. */
         boost::unordered_map<unsigned int, unsigned int> noise_counts;
 
-        /* Counts of fragment starts at the given distance from the annotated
-         * tss/tts. Of length: constants::transcript_3p_num_bins */
-        std::vector<double> binned_three_prime_dist_counts_0[9];
-        std::vector<double> binned_three_prime_dist_counts_1[9];
-
         /* Mate1 sequence bias across the current interval. */
         std::vector<double> mate1_seqbias[2];
+
+        /* (tpdist, tlen) pairs used to fit three prime bias model. */
+        std::vector<std::pair<pos_t, pos_t> > tpbias_pairs;
 
     private:
         void measure_fragment_lengths(const ReadSet::UniqueReadCounts& counts)
@@ -525,6 +549,42 @@ class FragmentModelThread
             }
         }
 
+        void measure_tpbias(pos_t start, pos_t end, strand_t strand,
+                            pos_t tpdist, pos_t tlen,
+                            const ReadSet::UniqueReadCounts& counts)
+        {
+            ReadSet::UniqueReadCounts::const_iterator i;
+            for (i = counts.begin(); i != counts.end(); ++i) {
+                AlignedReadIterator j(*i->first);
+                for (; j != AlignedReadIterator(); ++j) {
+                    if (strand == strand_pos) {
+                        if (j->mate1 && j->mate1->strand == 0 &&
+                                start <= j->mate1->start && j->mate1->start <= end) {
+                            tpbias_pairs.push_back(
+                                    std::make_pair(end - j->mate1->start + tpdist, tlen));
+                        }
+                        else if (j->mate2 && j->mate2->strand == 0 &&
+                                    start <= j->mate2->start && j->mate2->start <= end) {
+                            tpbias_pairs.push_back(
+                                    std::make_pair(end - j->mate2->start + tpdist, tlen));
+                        }
+                    }
+                    else {
+                        if (j->mate1 && j->mate1->strand == 1 &&
+                                start <= j->mate1->end && j->mate1->end <= end) {
+                            tpbias_pairs.push_back(
+                                std::make_pair(j->mate1->end - start + tpdist, tlen));
+                        }
+                        else if (j->mate2 && j->mate2->strand == 1 &&
+                                    start <= j->mate2->end && j->mate2->end <= end) {
+                            tpbias_pairs.push_back(
+                                std::make_pair(j->mate2->end - start + tpdist, tlen));
+                        }
+                    }
+                }
+            }
+        }
+
         Queue<FragmentModelInterval*>& q;
         boost::thread* t;
 };
@@ -541,13 +601,16 @@ FragmentModel::~FragmentModel()
 {
     delete sb[0];
     delete sb[1];
+    delete gcbias;
     delete frag_len_dist;
 }
 
 
 void FragmentModel::estimate(TranscriptSet& ts,
         const char* bam_fn,
-        const char* fa_fn)
+        const char* fa_fn,
+        bool use_gc_correction,
+        bool use_3p_correction)
 {
     Queue<FragmentModelInterval*> q(constants::max_estimate_queue_size);
 
@@ -563,11 +626,32 @@ void FragmentModel::estimate(TranscriptSet& ts,
                     FragmentModelInterval::CONSENSUS_EXONIC));
     }
 
+    // exonic intervals for training tpbias
+    if (use_3p_correction) {
+        size_t num_tpbias_transcripts = 0;
+        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+            pos_t offset = 0;
+            pos_t tlen = t->exonic_length();
+
+            if (tlen < constants::tpbias_min_tlen) continue;
+            if (num_tpbias_transcripts++ > constants::tpbias_max_transcripts) break;
+
+            BOOST_FOREACH (const Exon& exon, *t) {
+                intervals.push_back(
+                        new FragmentModelInterval(t->seqname, exon.start, exon.end,
+                                                  t->strand, FragmentModelInterval::EXONIC));
+                intervals.back()->tlen = t->exonic_length();
+                intervals.back()->tpdist =
+                    t->strand == strand_pos ?
+                        tlen - offset - (exon.end - exon.start + 1): offset;
+                offset += exon.end - exon.start + 1;
+            }
+        }
+    }
+
     // exonic intervals for training seqbias
     std::vector<FragmentModelInterval*> seqbias_intervals;
     if (fa_fn) {
-        exonic.clear();
-        ts.get_exonic(exonic);
         for (interval = exonic.begin(); interval != exonic.end(); ++interval) {
             seqbias_intervals.push_back(new FragmentModelInterval(
                 *interval,
@@ -584,6 +668,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     AlnCountTrie* alncnt = new AlnCountTrie();
     PosTable* seqbias_sense_pos = new PosTable();
     PosTable* seqbias_antisense_pos = new PosTable();
+    PosTable* gcbias_pos = new PosTable();
 
     std::string task_name = std::string("Indexing reads (") +
                             std::string(bam_fn) +
@@ -591,7 +676,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
     sam_scan(intervals, *alncnt, q,
              seqbias_intervals, *seqbias_sense_pos, *seqbias_antisense_pos,
-             bam_fn, task_name.c_str());
+             *gcbias_pos, bam_fn, task_name.c_str());
 
     // delete seqbias intervals
     for (std::vector<FragmentModelInterval*>::iterator i = seqbias_intervals.begin();
@@ -713,6 +798,28 @@ void FragmentModel::estimate(TranscriptSet& ts,
     else {
         Logger::info("Too few paired-end reads to estimate fragment length distribution.");
     }
+
+    // train GC bias
+    if (use_gc_correction && fa_fn) {
+        gcbias = new GCBias(fa_fn, *gcbias_pos, frag_len_med(), sb);
+    }
+    else gcbias = NULL;
+
+    delete gcbias_pos;
+
+    // train 3' bias
+    if (use_3p_correction) {
+        std::vector<std::pair<pos_t, pos_t> > tpdists;
+        for (size_t i = 0; i < constants::num_threads; ++i) {
+            tpdists.insert(tpdists.end(),
+                           threads[i]->tpbias_pairs.begin(),
+                           threads[i]->tpbias_pairs.end());
+        }
+
+        tpbias = new TPBias(tpdists);
+        Logger::info("3' bias: %0.3e", tpbias->p);
+    }
+    else tpbias = NULL;
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         delete threads[i];

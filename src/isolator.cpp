@@ -394,7 +394,8 @@ static void print_analyze_help(FILE* fout)
         "-g, --genomic-seq=FILE    Correct for sequence bias, given the a the sequence\n"
         "                          against which the reads are aligned, in FAST format.\n"
         "-p, --threads=N           number of threads to use.\n"
-        "    --no-gc-correction    disable post-hoc GC-content adjustments.\n"
+        "    --no-gc-correction    disable fragment GC-content correction.\n"
+        "    --no-3p-bias          disable trancript 3' bias correction.\n"
         "-N, --num-samples         generate this many samples (default: 250)\n"
         "-B, --burnin              warmup for this many samples before collecting data (default: 100)\n\n"
         "See 'isolator help teste' for more.\n");
@@ -943,6 +944,7 @@ static int isolator_analyze(int argc, char* argv[])
         {"genomic-seq",          required_argument, NULL, 'g'},
         {"threads",              required_argument, NULL, 'p'},
         {"no-gc-correction",     no_argument,       NULL, 0},
+        {"no-3p-correction",     no_argument,       NULL, 0},
         {"num-samples",          required_argument, NULL, 'N'},
         {"burnin",               required_argument, NULL, 'B'},
         {"tss-cluster-distance", required_argument, NULL, 0},
@@ -954,6 +956,7 @@ static int isolator_analyze(int argc, char* argv[])
     unsigned int num_samples = 250;
     pos_t tss_cluster_dist = 150;
     bool run_gc_correction = true;
+    bool run_3p_correction = true;
     constants::num_threads = boost::thread::hardware_concurrency();
     const char* fa_fn  = NULL;
     const char* output_filename = "isolator-output.h5";
@@ -1004,6 +1007,9 @@ static int isolator_analyze(int argc, char* argv[])
             case 0:
                 if (strcmp(long_options[optidx].name, "no-gc-correction") == 0) {
                     run_gc_correction = false;
+                }
+                else if (strcmp(long_options[optidx].name, "no-3p-correction") == 0) {
+                    run_3p_correction = false;
                 }
                 else if (strcmp(long_options[optidx].name, "tss-cluster-distance") == 0) {
                     tss_cluster_dist = strtod(optarg, NULL);
@@ -1086,7 +1092,8 @@ static int isolator_analyze(int argc, char* argv[])
                 metadata.sample_filenames);
     }
 
-    Analyze analyze(rng_seed, burnin, num_samples, ts, fa_fn, run_gc_correction);
+    Analyze analyze(rng_seed, burnin, num_samples, ts, fa_fn,
+                    run_gc_correction, run_3p_correction);
     for (size_t i = 0; i < metadata.sample_conditions.size(); ++i) {
         analyze.add_sample(metadata.sample_conditions[i].c_str(),
                            metadata.sample_filenames[i].c_str());

@@ -66,6 +66,9 @@ class twobitseq
         /** Count number of Gs and Cs between i and j inclusively. */
         size_t gc_count(pos_t i, pos_t j) const;
 
+        /* Is a specific base a G or C */
+        bool isgc(pos_t i) const;
+
         /* Count number of Gs and Cs in the entire sequence. */
         size_t gc_count() const;
 

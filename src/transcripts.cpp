@@ -32,6 +32,12 @@ bool Exon::operator < (const Exon& other) const
 }
 
 
+pos_t Exon::length() const
+{
+    return end - start + 1;
+}
+
+
 Transcript::Transcript()
     : strand(strand_na)
     , min_start(-1)
@@ -90,6 +96,18 @@ pos_t Transcript::exonic_length() const
 pos_t Transcript::tss_position() const
 {
     return strand == strand_pos ? min_start : max_end;
+}
+
+
+Interval Transcript::three_prime_utr() const
+{
+    if (strand == strand_pos) {
+        Transcript::reverse_iterator utr = this->rbegin();
+        return Interval(seqname, utr->start, utr->end, strand);
+    } else {
+        Transcript::iterator utr = this->begin();
+        return Interval(seqname, utr->start, utr->end, strand);
+    }
 }
 
 
@@ -414,6 +432,8 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
         if (i > 0 &&
             sorted_transcripts[i].seqname == sorted_transcripts[i-1].seqname &&
             sorted_transcripts[i].strand  == sorted_transcripts[i-1].strand &&
+            sorted_transcripts[i].exonic_length() > tss_cluster_distance &&
+            sorted_transcripts[i-1].exonic_length() > tss_cluster_distance &&
             labs(sorted_transcripts[i].tss_position() -
                  sorted_transcripts[i-1].tss_position()) <= tss_cluster_distance) {
             sorted_transcripts[i].tgroup = sorted_transcripts[i-1].tgroup;
@@ -879,6 +899,37 @@ void TranscriptSet::get_distinct_5p_3p_exons(const std::vector<Interval>& consen
             consensus_3p_exons.push_back(*j);
         }
         ++j;
+    }
+}
+
+
+void TranscriptSet::get_three_prime_utrs(std::vector<Interval>& intervals, pos_t len)
+{
+    // TODO: end trimming should be a constant and be done in fragment_model
+    std::set<Interval> utrs;
+    for (std::set<Transcript>::iterator t = transcripts.begin();
+         t != transcripts.end(); ++t) {
+
+        if (t->strand == strand_pos) {
+            Transcript::reverse_iterator e = t->rbegin();
+            if (e->length() >= len) {
+                utrs.insert(
+                    Interval(t->seqname, e->end - len - 1,
+                             e->end - 100, t->strand));
+            }
+        } else {
+            Transcript::iterator e = t->begin();
+            if (e->length() >= len) {
+                utrs.insert(
+                    Interval(t->seqname, e->start + 100,
+                             e->start + len - 1,
+                             t->strand));
+            }
+        }
+    }
+
+    BOOST_FOREACH (const Interval& interval, utrs) {
+        intervals.push_back(interval);
     }
 }
 

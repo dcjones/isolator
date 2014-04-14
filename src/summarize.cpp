@@ -919,7 +919,6 @@ void Summarize::experiment_splicing(FILE* output, double credible_interval)
 
     hsize_t dataspace_start[3] = {0, 0};
     hsize_t dataspace_count[3] = {1, dims[1]};
-    herr_t status;
 
     std::vector<boost::multi_array<float, 2> > mu(spliced_tgroup_indexes.size());
     for (size_t i = 0; i < dims[1]; ++i) {
@@ -1060,7 +1059,6 @@ void Summarize::experiment_splicing_sigma(FILE* output, double credible_interval
 
     hsize_t dataspace_start[3] = {0, 0};
     hsize_t dataspace_count[3] = {1, dims[1]};
-    herr_t status;
 
     std::vector<boost::multi_array<float, 2> > sigma(spliced_tgroup_indexes.size());
     for (size_t i = 0; i < dims[1]; ++i) {
@@ -1177,7 +1175,9 @@ void Summarize::experiment_splicing_sigma(FILE* output, double credible_interval
 
 void Summarize::condition_splicing_sigma(FILE* output, double credible_interval)
 {
-
+    // TODO: implement this function
+    UNUSED(output);
+    UNUSED(credible_interval);
 }
 
 
