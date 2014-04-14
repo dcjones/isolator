@@ -30,7 +30,8 @@ struct ReadPosSeqnameCmp
 
 GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
 	           pos_t median_frag_len,
-               sequencing_bias* seqbias[2])
+               sequencing_bias* seqbias[2],
+               const char* task_name)
 {
 	faidx_t* ref_file = fai_load(ref_filename);
 	if (!ref_file) {
@@ -42,7 +43,6 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
 	foreground_position_table.dump(foreground_positions, max_dump);
 	std::sort(foreground_positions.begin(), foreground_positions.end(), ReadPosSeqnameCmp());
 
-	const char* task_name = "Training fragment GC bias";
 	Logger::push_task(task_name, foreground_positions.size());
 	LoggerTask& task = Logger::get_task(task_name);
 

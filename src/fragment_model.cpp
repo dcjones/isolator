@@ -801,7 +801,12 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
     // train GC bias
     if (use_gc_correction && fa_fn) {
-        gcbias = new GCBias(fa_fn, *gcbias_pos, frag_len_med(), sb);
+        std::string task_name = std::string("Training GC bias (") +
+                                std::string(bam_fn) +
+                                std::string(")");
+
+        gcbias = new GCBias(fa_fn, *gcbias_pos, frag_len_med(), sb,
+                            task_name.c_str());
     }
     else gcbias = NULL;
 

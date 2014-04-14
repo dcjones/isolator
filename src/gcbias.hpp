@@ -16,7 +16,8 @@ class GCBias
 public:
 	GCBias(const char* ref_fn, PosTable& T,
 		   pos_t median_frag_len,
-           sequencing_bias* seqbias[2]);
+           sequencing_bias* seqbias[2],
+           const char* task_name);
 	~GCBias();
 	double get_bias(double gc);
 
