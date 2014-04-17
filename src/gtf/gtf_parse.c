@@ -281,6 +281,13 @@ bool gtf_next(gtf_file_t* f, gtf_row_t* r)
         /* handle the next character */
         switch (f->state) {
             case STATE_FIELD:
+                if (f->col == 1 && *f->c == '#') {
+                    while (*(f->c++) != '\n');
+                    f->col = 1;
+                    f->line++;
+                    continue;
+                }
+
                 if (*f->c == '\t') {
                     field->s[field->n] = '\0';
 
