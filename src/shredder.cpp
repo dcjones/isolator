@@ -47,7 +47,7 @@ Shredder::Shredder(double lower_limit, double upper_limit)
 
     nlopt_set_ftol_abs(opt, 1e-2);
 
-    double xtol_abs = 1e-9;
+    double xtol_abs = 1e-8;
     nlopt_set_xtol_abs(opt, &xtol_abs);
 }
 

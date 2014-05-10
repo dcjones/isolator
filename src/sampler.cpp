@@ -2321,23 +2321,25 @@ void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u,
     S.tgroupmix[v] = tgroupmix_v;
 
     BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
+        double tmix_tid = std::max<float>(constants::zero_eps, S.tmix[tid] * u_delta);
         asxpy(S.frag_probs[c],
               S.weight_matrix->rows[tid],
-              S.tmix[tid] * u_delta - S.tmix[tid],
+              tmix_tid - S.tmix[tid],
               S.weight_matrix->idxs[tid],
               S.component_frag[c],
               S.weight_matrix->rowlens[tid]);
-        S.tmix[tid] *= u_delta;
+        S.tmix[tid] = tmix_tid;
     }
 
     BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
+        double tmix_tid = std::max<float>(constants::zero_eps, S.tmix[tid] * v_delta);
         asxpy(S.frag_probs[c],
               S.weight_matrix->rows[tid],
-              S.tmix[tid] * v_delta - S.tmix[tid],
+              tmix_tid - S.tmix[tid],
               S.weight_matrix->idxs[tid],
               S.component_frag[c],
               S.weight_matrix->rowlens[tid]);
-        S.tmix[tid] *= v_delta;
+        S.tmix[tid] = tmix_tid;
     }
 
     size_t component_size = S.component_frag[c+1] - S.component_frag[c];
