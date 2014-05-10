@@ -1,3 +1,5 @@
+#cmakedefine HAVE_ISNAN
+#cmakedefine HAVE_STDINT_H
 #cmakedefine HAVE_IMMINTRIN_H
 #cmakedefine USE_SSE2
 #cmakedefine USE_SSE3

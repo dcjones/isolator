@@ -61,6 +61,10 @@ namespace constants
     /* Number of bins to use to model GC bias. */
     extern size_t gcbias_num_bins;
 
+    /* Don't let the gcbias correction get out of hand to the point of
+     * risking over/underflow. */
+    extern double gcbias_max_bias;
+
     /* Minimum transcript length used to train 3' bias. */
     extern pos_t tpbias_min_tlen;
 
@@ -186,6 +190,14 @@ namespace constants
      * sets containing many transcripts with very low expression, which could
      * bias things. */
     extern size_t sample_scaling_truncation;
+
+    /* Avoid NaNs by rounding zero fragment probabilities up to this tiny
+     * positive number.  */
+    extern float frag_prob_epsilon;
+
+    /* Round miniscule expression values up to this value, since at that
+     * scale changes are meaningless. */
+    extern float min_expr;
 }
 
 #endif

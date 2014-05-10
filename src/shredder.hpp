@@ -4,6 +4,7 @@
 
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/random/uniform_01.hpp>
+#include <nlopt.h>
 
 #include "common.hpp"
 
@@ -17,6 +18,9 @@ class Shredder
 
         // Generate a new sample given the current value x0.
         double sample(rng_t& rng, double x0);
+
+        // Generate a maximum likelihood estimate
+        double optimize(double x0);
 
         // These are kept as public fields to ease debugging and diagnostics.
         double x_min, x_max;
@@ -34,6 +38,11 @@ class Shredder
     private:
         double find_slice_edge(double x0, double slice_height, double lp0,
                                double d0, int direction);
+
+        nlopt_opt opt;
+
+        friend double shredder_opt_objective(unsigned int _n, const double* _x,
+                                             double* _grad, void* data);
 };
 
 

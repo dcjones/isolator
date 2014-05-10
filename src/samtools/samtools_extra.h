@@ -29,8 +29,14 @@ void bam_init_header_hash(bam_header_t *header);
 char* faidx_fetch_seq_forced_lower(const faidx_t* fai, const char *c_name, int p_beg_i, int p_end_i);
 
 
+/* Calculate the true read-start. The start position stored in SAM/BAM files
+ * doesn't include leading non-match cigar ops, which is fucking stupid, so we
+ * work around it here. */
+uint32_t bam_truepos(const bam1_core_t *c, const uint32_t* cigar);
+
+
 /* Calculate read end-point include soft-clipping. */
-uint32_t bam_calend2(const bam1_core_t *c, const uint32_t* cigar);
+uint32_t bam_trueend(const bam1_core_t *c, const uint32_t* cigar);
 
 #ifdef __cplusplus
 }

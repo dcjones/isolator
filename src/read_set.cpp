@@ -10,6 +10,7 @@ Alignment::Alignment()
     , cigar(NULL)
     , strand(strand_na)
     , mapq(255)
+    , mismatch_count(0)
 {
 }
 
@@ -20,6 +21,7 @@ Alignment::Alignment(const Alignment& a)
     end       = a.end;
     strand    = a.strand;
     mapq      = a.mapq;
+    mismatch_count = a.mismatch_count;
     cigar_len = a.cigar_len;
     cigar = new uint32_t[cigar_len];
     memcpy(cigar, a.cigar, cigar_len * sizeof(uint32_t));
@@ -28,10 +30,18 @@ Alignment::Alignment(const Alignment& a)
 
 Alignment::Alignment(const bam1_t* b)
 {
-    start     = (pos_t)b->core.pos;
-    end       = bam_calend2(&b->core, bam1_cigar(b)) - 1;
+    start     = bam_truepos(&b->core, bam1_cigar(b));
+    end       = bam_trueend(&b->core, bam1_cigar(b)) - 1;
     strand    = bam1_strand(b);
     mapq      = b->core.qual;
+
+    unsigned char* s = bam_aux_get(b, "NM");
+    if (!s) s = bam_aux_get(b, "nM");
+    if (s) {
+        mismatch_count = std::min<unsigned int>(255, bam_aux2i(s));
+    }
+    else mismatch_count = 0;
+
     cigar_len = b->core.n_cigar;
     cigar     = new uint32_t [b->core.n_cigar];
     memcpy(cigar, bam1_cigar(b), cigar_len * sizeof(uint32_t));
@@ -46,11 +56,21 @@ Alignment::~Alignment()
 
 bool Alignment::operator == (const bam1_t* b) const
 {
-    if (this->start != (pos_t) b->core.pos) return false;
+    if (this->start != (pos_t) bam_truepos(&b->core, bam1_cigar(b))) return false;
     if (this->strand != bam1_strand(b)) return false;
     if (this->mapq != b->core.qual) return false;
+
+    uint8_t mismatch_count = 0;
+    unsigned char* s = bam_aux_get(b, "NM");
+    if (!s) s = bam_aux_get(b, "nM");
+    if (s) {
+        mismatch_count = std::min<unsigned int>(255, bam_aux2i(s));
+    }
+
+    if (this->mismatch_count != mismatch_count) return false;
+
     if (this->cigar_len != b->core.n_cigar) return false;
-    if (this->end != (pos_t) (bam_calend2(&b->core, bam1_cigar(b)) - 1)) return false;
+    if (this->end != (pos_t) (bam_trueend(&b->core, bam1_cigar(b)) - 1)) return false;
     return memcmp(cigar, bam1_cigar(b), cigar_len * sizeof(uint32_t)) == 0;
 }
 
@@ -67,6 +87,7 @@ bool Alignment::operator < (const Alignment& other) const
     else if (end    != other.end)    return end < other.end;
     else if (strand != other.strand) return strand < other.strand;
     else if (mapq   != other.mapq)   return mapq < other.mapq;
+    else if (mismatch_count != other.mismatch_count) return mismatch_count < other.mismatch_count;
     else if (cigar_len != other.cigar_len) return cigar_len < other.cigar_len;
     else {
         return memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t)) < 0;
@@ -272,7 +293,7 @@ static bool exon_compatible_cigar_op(uint8_t op)
 
 static bool intron_compatible_cigar_op(uint8_t op)
 {
-    return op == BAM_CREF_SKIP;
+    return op == BAM_CREF_SKIP || op == BAM_CSOFT_CLIP;
 }
 
 
@@ -290,11 +311,15 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
             a2 = mate1;
         }
 
+#if 0
         /* NOTE: we currently don't allow one mate to be contained within the
          * other. This might occur if the mates are if different lengths, but
          * isn't likely to be a problem. This function will need some
          * modifications if it does prove to be an issue. */
-        if (a1->end > a2->end) return -1;
+        if (a1->end > a2->end) {
+            return -1;
+        }
+#endif
     }
     else if (mate1 != NULL) {
         a1 = mate1;
@@ -305,8 +330,12 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
         a2 = NULL;
     }
 
-    if (a1 && a1->start < t.min_start) return -1;
-    if (a2 && a2->end > t.max_end) return -1;
+    if (a1 && a1->start < t.min_start) {
+        return -1;
+    }
+    if (a2 && a2->end > t.max_end) {
+        return -1;
+    }
 
     TranscriptIntronExonIterator e1(t);
     CigarIterator c1(*a1);
@@ -327,19 +356,27 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
               && c1->start >= e1->first.start)
         {
             if (e1->second == EXONIC_INTERVAL_TYPE) {
-                if (!exon_compatible_cigar_op(c1->op)) return -1;
+                if (!exon_compatible_cigar_op(c1->op)) {
+                    return -1;
+                }
             }
             else {
-                if (!intron_compatible_cigar_op(c1->op)) return -1;
-                if (c1->op != BAM_CSOFT_CLIP) {
-                    intron_len += c1->end - c1->start + 1;
+                if (!intron_compatible_cigar_op(c1->op)) {
+                    return -1;
                 }
+                intron_len += e1->first.end - e1->first.start + 1;
+                ++e1;
             }
 
             ++c1;
         }
 
-        // case 3: c precedes partially overlaps e
+        // case 3: soft clipping partially overlapping an exon or intron
+        else if (c1->op == BAM_CSOFT_CLIP) {
+            ++c1;
+        }
+
+        // case 4: c precedes partially overlaps e
         else {
             return -1;
         }
@@ -376,16 +413,25 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
               && c2->start >= e2->first.start)
         {
             if (e2->second == EXONIC_INTERVAL_TYPE) {
-                if (!exon_compatible_cigar_op(c2->op)) return -1;
+                if (!exon_compatible_cigar_op(c2->op)) {
+                    return -1;
+                }
             }
             else {
-                if (!intron_compatible_cigar_op(c2->op)) return -1;
+                if (!intron_compatible_cigar_op(c2->op)) {
+                    return -1;
+                }
             }
 
             ++c2;
         }
 
-        // case 3: c precedes or partially overlaps e
+        // case 3: soft clipping partially overlapping an exon or intron
+        else if (c2->op == BAM_CSOFT_CLIP) {
+            ++c2;
+        }
+
+        // case 4: c precedes or partially overlaps e
         else {
             return -1;
         }
@@ -394,7 +440,9 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     // skip any trailing soft clip
     if (c2 != CigarIterator() && c2->op == BAM_CSOFT_CLIP) ++c2;
 
-    if (c2 != CigarIterator()) return -1;
+    if (c2 != CigarIterator()) {
+        return -1;
+    }
 
     pos_t fraglen = a2->end - a1->start + 1 - intron_len;
     assert(fraglen > 0);

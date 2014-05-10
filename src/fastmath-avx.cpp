@@ -4,6 +4,7 @@
 #include <cmath>
 #include <immintrin.h>
 
+#include "constants.hpp"
 #include "fastmath.hpp"
 #include "logger.hpp"
 
@@ -51,6 +52,10 @@ PS32_CONST(log2_c3, -1.2315303f);
 PS32_CONST(log2_c4, 3.1821337e-1f);
 PS32_CONST(log2_c5, -3.4436006e-2f);
 PS32_CONST(neginf, (float) -INFINITY);
+
+// prevent probabilities from getting below this epsilon
+static const float prob_epsilon = constants::frag_prob_epsilon;
+PS32_CONST(prob_epsilon, prob_epsilon);
 
 
 void* aalloc_avx(size_t n)

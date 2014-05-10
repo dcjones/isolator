@@ -31,6 +31,7 @@ struct Alignment
     uint32_t* cigar;
     uint8_t   strand;
     uint8_t   mapq;
+    uint8_t   mismatch_count;
 };
 
 

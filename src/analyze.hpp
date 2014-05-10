@@ -49,7 +49,7 @@ class Analyze
         void setup_output(hid_t output_file_id);
         void cleanup();
         void warmup();
-        void sample();
+        void sample(bool optimize_state);
         void write_output(size_t sample_num);
 
         void qsampler_update_hyperparameters();

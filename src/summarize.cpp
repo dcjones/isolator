@@ -6,6 +6,7 @@
 #include <intervals.hpp>
 #include <set>
 
+#include "constants.hpp"
 #include "summarize.hpp"
 #include "logger.hpp"
 
@@ -320,8 +321,8 @@ void Summarize::median_experiment_tgroup_sd(FILE* output)
 }
 
 
-void Summarize::median_ci_transcript_expression(
-        matrix<float>* med, matrix<float>* lower, matrix<float>* upper,
+void Summarize::point_ci_transcript_expression(
+        matrix<float>* point, matrix<float>* lower, matrix<float>* upper,
         double interval, bool unnormalized, bool splicing_rate)
 {
     double lower_quantile = 0.5 - interval/2;
@@ -364,6 +365,13 @@ void Summarize::median_ci_transcript_expression(
             }
         }
 
+        // truncate miniscule values
+        for (size_t j = 0; j < num_samples; ++j) {
+            for (size_t k = 0; k < N; ++k) {
+                Qi(j, k) = std::max<float>(constants::min_expr, Qi(j, k));
+            }
+        }
+
         if (splicing_rate) {
             for (size_t tg = 0; tg < T; ++tg) {
                 for (size_t j = 0; j < num_samples; ++j) {
@@ -387,13 +395,16 @@ void Summarize::median_ci_transcript_expression(
 
         for (size_t j = 0; j < N; ++j) {
             matrix_column<matrix<float> > col(Qi, j);
+            (*point)(i, j) = col[0];
             std::sort(col.begin(), col.end());
-            (*med)(i, j) = col[col.size() / 2];
+
             if (lower) {
                 (*lower)(i, j) = col[lround((col.size() - 1) * lower_quantile)];
+                if ((*point)(i, j) < (*lower)(i, j)) (*lower)(i, j) = (*point)(i, j);
             }
             if (upper) {
                 (*upper)(i, j) = col[lround((col.size() - 1) * upper_quantile)];
+                if ((*point)(i, j) > (*upper)(i, j)) (*upper)(i, j) = (*point)(i, j);
             }
         }
     }
@@ -404,8 +415,8 @@ void Summarize::median_ci_transcript_expression(
 }
 
 
-void Summarize::median_ci_gene_expression(
-        matrix<float>* med, matrix<float>* lower, matrix<float>* upper,
+void Summarize::point_ci_gene_expression(
+        matrix<float>* point, matrix<float>* lower, matrix<float>* upper,
         double interval, bool unnormalized)
 {
     double lower_quantile = 0.5 - interval/2;
@@ -464,13 +475,22 @@ void Summarize::median_ci_gene_expression(
                 }
             }
 
+            // truncate miniscule values
+            for (size_t k = 0; k < num_samples; ++k) {
+                work[k] = std::max<float>(constants::min_expr, work[k]);
+            }
+
+            // maximum posterior is stored as the first sample
+            (*point)(i, j) = work[0];
+
             std::sort(work.begin(), work.end());
-            (*med)(i, j) = work[num_samples/2];
             if (lower) {
                 (*lower)(i, j) = work[lround((num_samples - 1) * lower_quantile)];
+                if ((*point)(i, j) < (*lower)(i, j)) (*lower)(i, j) = (*point)(i, j);
             }
             if (upper) {
                 (*upper)(i, j) = work[lround((num_samples - 1) * upper_quantile)];
+                if ((*point)(i, j) > (*upper)(i, j)) (*upper)(i, j) = (*point)(i, j);
             }
             ++j;
         }
@@ -487,19 +507,19 @@ void Summarize::transcript_expression(FILE* output, double credible_interval,
 {
     bool print_credible_interval = !isnan(credible_interval);
 
-    matrix<float> med(K, N);
+    matrix<float> point(K, N);
     matrix<float> lower;
     matrix<float> upper;
 
     if (print_credible_interval) {
         lower.resize(K, N);
         upper.resize(K, N);
-        median_ci_transcript_expression(&med, &lower, &upper,
+        point_ci_transcript_expression(&point, &lower, &upper,
                                         credible_interval, unnormalized,
                                         splicing_rate);
     }
     else {
-        median_ci_transcript_expression(&med, NULL, NULL, credible_interval,
+        point_ci_transcript_expression(&point, NULL, NULL, credible_interval,
                                         unnormalized, splicing_rate);
     }
 
@@ -536,12 +556,12 @@ void Summarize::transcript_expression(FILE* output, double credible_interval,
         for (size_t j = 0; j < K; ++j) {
             if (print_credible_interval) {
                 fprintf(output, "\t%e\t%e\t%e",
-                        expr_scale * med(j, i),
+                        expr_scale * point(j, i),
                         expr_scale * lower(j, i),
                         expr_scale * upper(j, i));
             }
             else {
-                fprintf(output, "\t%e", expr_scale * med(j, i));
+                fprintf(output, "\t%e", expr_scale * point(j, i));
             }
         }
         fputc('\n', output);
@@ -563,18 +583,18 @@ void Summarize::gene_expression(FILE* output, double credible_interval,
     }
     size_t num_genes = gid_to_tids.size();
 
-    matrix<float> med(K, num_genes);
+    matrix<float> point(K, num_genes);
     matrix<float> lower;
     matrix<float> upper;
 
     if (print_credible_interval) {
         lower.resize(K, num_genes);
         upper.resize(K, num_genes);
-        median_ci_gene_expression(&med, &lower, &upper,
+        point_ci_gene_expression(&point, &lower, &upper,
                                   credible_interval, unnormalized);
     }
     else {
-        median_ci_gene_expression(&med, NULL, NULL, credible_interval,
+        point_ci_gene_expression(&point, NULL, NULL, credible_interval,
                                   unnormalized);
     }
 
@@ -612,10 +632,10 @@ void Summarize::gene_expression(FILE* output, double credible_interval,
         for (size_t j = 0; j < K; ++j) {
             if (print_credible_interval) {
                 fprintf(output, "\t%e\t%e\t%e",
-                        1e6 * med(j, i), 1e6 * lower(j, i), 1e6 * upper(j, i));
+                        1e6 * point(j, i), 1e6 * lower(j, i), 1e6 * upper(j, i));
             }
             else {
-                fprintf(output, "\t%e", 1e6 * med(j, i));
+                fprintf(output, "\t%e", 1e6 * point(j, i));
             }
         }
         fputc('\n', output);

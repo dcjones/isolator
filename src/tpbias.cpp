@@ -3,8 +3,9 @@
 #include <boost/foreach.hpp>
 #include <boost/unordered_map.hpp>
 
-#include "tpbias.hpp"
 #include "fastmath.hpp"
+#include "nlopt/nlopt.h"
+#include "tpbias.hpp"
 
 
 typedef std::pair<pos_t, pos_t> TPDistPair;
@@ -49,6 +50,37 @@ static double tpbias_loglikelihood(double p,
 }
 
 
+struct TPBiasTrainData
+{
+    TPBiasTrainData(pos_t maxtlen,
+                    DistNormMap& distnorm,
+                    const std::vector<TPDistPair>& xs)
+        : maxtlen(maxtlen)
+        , distnorm(distnorm)
+        , xs(xs)
+    {
+    }
+
+    pos_t maxtlen;
+    DistNormMap& distnorm;
+    const std::vector<TPDistPair>& xs;
+};
+
+
+static double tpbias_nlopt_objective(unsigned int _n, const double* _x,
+                                     double* _grad, void* data)
+{
+    UNUSED(_n);
+    UNUSED(_grad);
+
+    TPBiasTrainData* traindata =
+        reinterpret_cast<TPBiasTrainData*>(data);
+
+    return tpbias_loglikelihood(_x[0], traindata->maxtlen,
+                                traindata->distnorm, traindata->xs);
+}
+
+
 TPBias::TPBias(const std::vector<std::pair<pos_t, pos_t> >& tpdists)
 {
     // normalizing constants for fragment disributions given tlen
@@ -60,28 +92,29 @@ TPBias::TPBias(const std::vector<std::pair<pos_t, pos_t> >& tpdists)
         maxtlen = std::max<pos_t>(maxtlen, tpdist_tlen.second);
     }
 
-    // binary search of the maximum likelihood p
-    double p0 = 0.01;
-    double step = 2.0;
-    double ll0 = tpbias_loglikelihood(p0, maxtlen, distnorm, tpdists);
+    TPBiasTrainData traindata(maxtlen, distnorm, tpdists);
 
-    // Janky hillclimbing. Assume max_p is suboptimal and ll should increase
-    // monotonically as we move towards 0.0, and the optimal answer. So we
-    // just keep dividing by two until the likelihood doesn't increase.
+    nlopt_opt opt = nlopt_create(NLOPT_LN_SBPLX, 1);
+    double lower_limit = 0.0;
+    double upper_limit = 1e-4;
+    nlopt_set_lower_bounds(opt, &lower_limit);
+    nlopt_set_upper_bounds(opt, &upper_limit);
+    nlopt_set_max_objective(opt, tpbias_nlopt_objective,
+                            reinterpret_cast<void*>(&traindata));
+    nlopt_set_ftol_abs(opt, 1e-4);
 
-    while (step > 1.1) {
-        double p = p0 / step;
-        double ll = tpbias_loglikelihood(p, maxtlen, distnorm, tpdists);
-        if (ll > ll0) {
-            p0 = p;
-            ll0 = ll;
-        }
-        else {
-            step *= 0.9;
-        }
+    //double xtol_abs = 1e-9;
+    //nlopt_set_xtol_abs(opt, &xtol_abs);
+
+    p = 1e-5;
+    double maxf;
+    nlopt_result result = nlopt_optimize(opt, &p, &maxf);
+    if (result < 0) {
+        Logger::warn("Failed to fit 3' bias model.");
+        p = 0.0;
     }
 
-    this->p = p0;
+    nlopt_destroy(opt);
 }
 
 

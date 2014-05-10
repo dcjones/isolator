@@ -283,7 +283,8 @@ class TgroupMuSigmaSamplerThread
                         xs[i] = ts(i, tgroup) - mu(condition[i], tgroup);
                     }
 
-                    sigma[tgroup] = sigma_sampler.sample(rng, &xs.at(0), K, alpha, beta);
+                    sigma[tgroup] = 2.0;
+                    //sigma[tgroup] = sigma_sampler.sample(rng, &xs.at(0), K, alpha, beta);
                     assert_finite(sigma[tgroup]);
                 }
 
@@ -461,7 +462,8 @@ class SpliceMuSigmaSamplerThread
                         // in a very low probability state it can be slow to make
                         // progress towards reasonable values.
                         if (burnin_state) {
-                            sigma[j][k] = 0.1;
+                            //sigma[j][k] = 0.1;
+                            sigma[j][k] = 1.0;
                         }
                         else {
                             sigma[j][k] = 0.03;
@@ -871,12 +873,12 @@ Analyze::Analyze(unsigned int rng_seed,
     splice_alpha_beta  = 50.0;
     splice_beta_beta   = 15.0;
 
-    experiment_tgroup_mu0 = -20;
-    experiment_tgroup_sigma0 = 5.0;
+    experiment_tgroup_mu0 = -25;
+    experiment_tgroup_sigma0 = 2.5;
 
     experiment_splice_nu = 5.0;
     experiment_splice_mu0 = 0.5;
-    experiment_splice_sigma0 = 10;
+    experiment_splice_sigma0 = 1.0;
 
     tgroup_expr.resize(T);
     tgroup_row_data.resize(T);
@@ -1024,6 +1026,7 @@ class SamplerTickThread
             , tick_queue(tick_queue)
             , tock_queue(tock_queue)
             , thread(NULL)
+            , optimize_state(false)
         { }
 
         void run()
@@ -1031,7 +1034,14 @@ class SamplerTickThread
             int index;
             while (true) {
                 if ((index = tick_queue.pop()) == -1) break;
-                samplers[index]->sample();
+
+                if (optimize_state) {
+                    samplers[index]->optimize();
+                }
+                else {
+                    samplers[index]->sample();
+                }
+
                 const std::vector<double>& state = samplers[index]->state();
 
                 matrix_row<matrix<double> > row(Q, index);
@@ -1055,12 +1065,20 @@ class SamplerTickThread
             thread = NULL;
         }
 
+        void set_optimize_state(bool state)
+        {
+            optimize_state = state;
+        }
+
+
     private:
         std::vector<Sampler*> samplers;
         matrix<double>& Q;
         Queue<int>& tick_queue;
         Queue<int>& tock_queue;
         boost::thread* thread;
+
+        bool optimize_state;
 
 };
 
@@ -1552,13 +1570,18 @@ void Analyze::run(hid_t output_file_id)
 
     warmup();
 
-    const char* task_name = "Sampling";
-    Logger::push_task(task_name, burnin + num_samples);
+    const char* optimize_task_name = "Optimizing";
+    Logger::push_task(optimize_task_name, burnin);
 
     for (size_t i = 0; i < burnin; ++i) {
-        sample();
-        Logger::get_task(task_name).inc();
+        sample(true);
+        Logger::get_task(optimize_task_name).inc();
     }
+
+    // write the maximum posterior state as sample 0
+    write_output(0);
+    Logger::pop_task(optimize_task_name);
+
 
     BOOST_FOREACH (SpliceMuSigmaSamplerThread* thread, splice_mu_sigma_sampler_threads) {
         thread->end_burnin();
@@ -1569,10 +1592,13 @@ void Analyze::run(hid_t output_file_id)
         thread->end_burnin();
     }
 
-    for (size_t i = 0; i < num_samples; ++i) {
-        sample();
+    const char* sample_task_name = "Sampling";
+    Logger::push_task(sample_task_name, num_samples);
+
+    for (size_t i = 1; i < num_samples; ++i) {
+        sample(false);
         write_output(i);
-        Logger::get_task(task_name).inc();
+        Logger::get_task(sample_task_name).inc();
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -1629,7 +1655,7 @@ void Analyze::run(hid_t output_file_id)
     H5Sclose(h5_sample_scaling_dataspace);
     H5Sclose(h5_sample_scaling_mem_dataspace);
 
-    Logger::pop_task(task_name);
+    Logger::pop_task(sample_task_name);
     cleanup();
 }
 
@@ -1637,10 +1663,10 @@ void Analyze::run(hid_t output_file_id)
 void Analyze::warmup()
 {
     // An attempt at a more efficient warm-up procedure.
-
     BOOST_FOREACH (Sampler* sampler, qsamplers) {
         sampler->engage_priors();
     }
+
 #if 0
     // draw a few samples from the quantification samplers without priors
     for (size_t i = 0; i < 10; ++i) {
@@ -1704,9 +1730,13 @@ void Analyze::warmup()
 }
 
 
-void Analyze::sample()
+void Analyze::sample(bool optimize_state)
 {
     qsampler_update_hyperparameters();
+
+    for (size_t i = 0; i < constants::num_threads; ++i) {
+        qsampler_threads[i]->set_optimize_state(optimize_state);
+    }
 
     for (size_t i = 0; i < K; ++i) {
         qsampler_tick_queue.push(i);
@@ -1988,11 +2018,11 @@ void Analyze::compute_ts_scaling()
 void Analyze::choose_initial_values()
 {
     // tgroup_mu
-    const double tgroup_mu_0 = -10;
+    const double tgroup_mu_0 = -25;
     std::fill(tgroup_mu.data().begin(), tgroup_mu.data().end(), tgroup_mu_0);
 
     // tgroup_sigma
-    const double tgroup_sigma_0 = 1.0;
+    const double tgroup_sigma_0 = 16.0;
     std::fill(tgroup_sigma.begin(), tgroup_sigma.end(), tgroup_sigma_0);
     std::fill(experiment_tgroup_sigma.begin(), experiment_tgroup_sigma.end(), tgroup_sigma_0);
 

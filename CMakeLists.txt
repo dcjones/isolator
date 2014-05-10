@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 2.6)
 project(isolator)
 
 include(CheckIncludeFile)
+include(CheckFunctionExists)
 
 set(CMAKE_COLOR_MAKEFILE ON)
 
@@ -16,6 +17,9 @@ find_package(Boost 1.48.0 COMPONENTS thread system timer REQUIRED)
 find_package(HDF5 COMPONENTS C HL REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(Threads)
+
+check_function_exists(isnan HAVE_ISNAN)
+check_include_file(stdint.h HAVE_STDINT_H)
 
 # Check for SSE or AVX intrinsics
 check_include_file(immintrin.h HAVE_IMMINTRIN_H)

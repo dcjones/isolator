@@ -1,5 +1,6 @@
 
 #include <boost/foreach.hpp>
+#include <boost/math/special_functions/fpclassify.hpp>
 #include <cstdio>
 #include <algorithm>
 
@@ -155,16 +156,24 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
     		++j_fore;
             fore_weight += foreground_gc[j_fore].second;
     	}
-        fore_weight = (1 + fore_weight) / fore_total_weight;
+        fore_weight = fore_weight / fore_total_weight;
 
         double back_weight = 0.0;
     	while (j_back < background_gc.size() && background_gc[j_back].first < bins[i]) {
             ++j_back;
             back_weight += background_gc[j_back].second;
         }
-        back_weight = (1 + back_weight) / back_total_weight;
+        back_weight = back_weight / back_total_weight;
 
     	bin_bias[i] = fore_weight / back_weight;
+
+        if (!boost::math::isfinite(bin_bias[i])) bin_bias[i] = 1.0;
+        if (bin_bias[i] > constants::gcbias_max_bias) {
+            bin_bias[i] = constants::gcbias_max_bias;
+        }
+        if (bin_bias[i] < 1.0 / constants::gcbias_max_bias) {
+            bin_bias[i] = 1.0 / constants::gcbias_max_bias;
+        }
     }
 
     Logger::pop_task(task_name);

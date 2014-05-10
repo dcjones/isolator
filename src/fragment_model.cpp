@@ -376,8 +376,8 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
         // both strands.
         for (std::vector<FragmentModelInterval*>::iterator sbj = sbi;
              sbj != seqbias_intervals.end() && sbj != sbi + 2; ++sbj) {
-            pos_t start = b->core.pos,
-                  end = (pos_t) bam_calend(&b->core, bam1_cigar(b)) - 1;
+            pos_t start = (pos_t) bam_truepos(&b->core, bam1_cigar(b)),
+                  end = (pos_t) bam_trueend(&b->core, bam1_cigar(b)) - 1;
             if ((*sbj)->tid == b->core.tid &&
                 (*sbj)->start <= start && end <= (*sbj)->end) {
                 strand_t b_strand = bam1_strand(b) ? strand_neg : strand_pos;
@@ -407,15 +407,16 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
                 continue;
             }
 
-            if (b->core.pos < intervals[j]->start) break;
-            if (b->core.pos > intervals[j]->end) {
+            pos_t pos = bam_truepos(&b->core, bam1_cigar(b));
+            if (pos < intervals[j]->start) break;
+            if (pos > intervals[j]->end) {
                 if (j == j0) {
                     q.push(intervals[j0++]);
                 }
                 continue;
             }
 
-            pos_t b_end = (pos_t) bam_calend(&b->core, bam1_cigar(b)) - 1;
+            pos_t b_end = (pos_t) bam_trueend(&b->core, bam1_cigar(b)) - 1;
             if (b_end <= intervals[j]->end) {
                 intervals[j]->add_alignment(b);
             }
@@ -625,6 +626,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
                     *interval,
                     FragmentModelInterval::CONSENSUS_EXONIC));
     }
+    Logger::info("%lu consensus exons", (unsigned long) intervals.size());
 
     // exonic intervals for training tpbias
     if (use_3p_correction) {

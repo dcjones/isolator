@@ -96,14 +96,14 @@ class Summarize
         const std::vector<unsigned int>& get_tgroups();
 
     private:
-        void median_ci_transcript_expression(
+        void point_ci_transcript_expression(
                 boost::numeric::ublas::matrix<float>* med,
                 boost::numeric::ublas::matrix<float>* lower,
                 boost::numeric::ublas::matrix<float>* upper,
                 double credible_interval, bool unnormalized,
                 bool splicing_rate);
 
-        void median_ci_gene_expression(
+        void point_ci_gene_expression(
                 boost::numeric::ublas::matrix<float>* med,
                 boost::numeric::ublas::matrix<float>* lower,
                 boost::numeric::ublas::matrix<float>* upper,

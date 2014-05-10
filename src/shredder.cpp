@@ -5,7 +5,24 @@
 
 #include "fastmath.hpp"
 #include "logger.hpp"
+#include "nlopt/nlopt.h"
 #include "shredder.hpp"
+
+
+double shredder_opt_objective(unsigned int _n, const double* _x,
+                              double* _grad, void* data)
+{
+    UNUSED(_n);
+
+    Shredder* sampler = reinterpret_cast<Shredder*>(data);
+    if (_grad) {
+        return sampler->f(_x[0], _grad[0]);
+    }
+    else {
+        double d;
+        return sampler->f(_x[0], d);
+    }
+}
 
 
 static void assert_finite(double x)
@@ -19,12 +36,25 @@ static void assert_finite(double x)
 Shredder::Shredder(double lower_limit, double upper_limit)
     : lower_limit(lower_limit)
     , upper_limit(upper_limit)
+    , opt(NULL)
 {
+    opt = nlopt_create(NLOPT_LD_SLSQP, 1);
+    //opt = nlopt_create(NLOPT_LN_SBPLX, 1);
+    nlopt_set_lower_bounds(opt, &lower_limit);
+    nlopt_set_upper_bounds(opt, &upper_limit);
+    nlopt_set_max_objective(opt, shredder_opt_objective,
+                            reinterpret_cast<void*>(this));
+
+    nlopt_set_ftol_abs(opt, 1e-2);
+
+    double xtol_abs = 1e-9;
+    nlopt_set_xtol_abs(opt, &xtol_abs);
 }
 
 
 Shredder::~Shredder()
 {
+    nlopt_destroy(opt);
 }
 
 
@@ -54,6 +84,24 @@ double Shredder::sample(rng_t& rng, double x0)
     assert(lower_bound <= x && x <= upper_bound);
 
     return x;
+}
+
+
+double Shredder::optimize(double x0)
+{
+    // bounds may have changed
+    nlopt_set_lower_bounds(opt, &lower_limit);
+    nlopt_set_upper_bounds(opt, &upper_limit);
+
+    x0 = std::max<double>(std::min<double>(x0, upper_limit), lower_limit);
+    double maxf;
+    nlopt_result result = nlopt_optimize(opt, &x0, &maxf);
+
+    if (result < 0) {
+        Logger::warn("Optimization failed with code %d", (int) result);
+    }
+
+    return std::max<double>(std::min<double>(x0, upper_limit), lower_limit);
 }
 
 

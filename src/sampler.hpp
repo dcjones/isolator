@@ -84,6 +84,10 @@ class Sampler
         // iterations.
         void sample();
 
+        // Instead drawing a random sample, hillclimp towards the maximum
+        // posterior.
+        void optimize();
+
         // Return the current sampler state: a vector containing the relative
         // abundance of each transcript indexed by tid.
         const std::vector<double>& state() const;
@@ -118,6 +122,9 @@ class Sampler
         unsigned long num_frags() const;
 
     private:
+        // Clear multiread assignments.
+        void clear_multireads();
+
         // Run a single multiread sampler round.
         void sample_multireads();
 

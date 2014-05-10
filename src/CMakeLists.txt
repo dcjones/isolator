@@ -7,6 +7,7 @@ include_directories(${isolator_SOURCE_DIR}/src
 
 add_subdirectory(gtf)
 add_subdirectory(hat-trie)
+add_subdirectory(nlopt)
 add_subdirectory(samtools)
 add_subdirectory(seqbias)
 add_subdirectory(yaml)
@@ -46,6 +47,7 @@ target_link_libraries(isolator
                       samtools
                       seqbias
                       yaml
+                      nlopt
                       ${Boost_SYSTEM_LIBRARY}
                       ${Boost_THREAD_LIBRARY}
                       ${Boost_TIMER_LIBRARY}
@@ -67,6 +69,7 @@ target_link_libraries(samcnt
                       samtools
                       seqbias
                       gtf
+                      nlopt
                       ${Boost_SYSTEM_LIBRARY}
                       ${Boost_THREAD_LIBRARY}
                       ${Boost_TIMER_LIBRARY}
