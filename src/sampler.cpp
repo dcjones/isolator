@@ -740,9 +740,8 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
                 continue;
             }
 
-            pos_t pos = bam_truepos(&b->core, bam1_cigar(b));
-            if (pos < intervals[j]->start) break;
-            if (pos > intervals[j]->end) {
+            if (b->core.pos < intervals[j]->start) break;
+            if (b->core.pos > intervals[j]->end) {
                 if (j == j0) {
                     intervals[j0++]->finish();
                 }
@@ -1683,7 +1682,7 @@ class InterTranscriptSampler
             double x_min = find_slice_edge(x0, slice_height, lp0, d0, -1, &x_min_lp);
             double x_max = find_slice_edge(x0, slice_height, lp0, d0,  1, &x_max_lp);
 
-            const double x_eps = 1e-8;
+            const double x_eps = 1e-6;
             double d;
             double x = (x_min + x_max) / 2;
             while (fabs(x_max - x_min) > x_eps) {
@@ -1774,7 +1773,8 @@ class InterTranscriptSampler
             x0 = std::max<double>(std::min<double>(x0, upper_limit), lower_limit);
 
             nlopt_result result = nlopt_optimize(opt, &x0, &maxf);
-            if (result < 0) {
+            if (result < 0 && (result != NLOPT_FAILURE ||
+                        !boost::math::isfinite(x0) || !boost::math::isfinite(maxf))) {
                 Logger::warn("Optimization failed with code %d", (int) result);
             }
 
@@ -1787,7 +1787,7 @@ class InterTranscriptSampler
         {
             const double lp_eps = 1e-3;
             const double d_eps  = 1e-1;
-            const double x_eps  = 1e-8;
+            const double x_eps  = 1e-6;
 
             double lp = lp0 - slice_height;
             double d = d0;
@@ -1813,8 +1813,8 @@ class InterTranscriptSampler
 
                 // if we are very close to the boundry, and this iteration moves us past
                 // the boundry, just give up.
-                //if (direction < 0 && fabs(x - lower_limit) <= x_eps && (x1 < x || lp > 0.0)) break;
-                //if (direction > 0 && fabs(x - upper_limit) <= x_eps && (x1 > x || lp > 0.0)) break;
+                if (direction < 0 && fabs(x - lower_limit) <= x_eps && (x1 < x || lp > 0.0)) break;
+                if (direction > 0 && fabs(x - upper_limit) <= x_eps && (x1 > x || lp > 0.0)) break;
 
                 // if we are moving in the wrong direction (i.e. toward the other root),
                 // use bisection to correct course.
@@ -2095,8 +2095,8 @@ class AbundanceSamplerThread
                 this->rng = block.rng;
 
                 for (unsigned int c = block.u; c < block.v; ++c) {
+                    sample_intra_component(c);
                     if (optimize_state) {
-                        sample_intra_component(c);
                         optimize_component(c);
                     }
                     else {
@@ -2223,7 +2223,7 @@ float AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 float AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
 {
     float lp = gamma_lnpdf(S.frag_count_sums[c] +
-                           S.component_num_transcripts[c] * constants::tmix_prior_prec,
+                           constants::tmix_prior_prec,
                            1.0, cmixc);
 
     if (S.use_priors) {
@@ -2497,7 +2497,8 @@ void AbundanceSamplerThread::optimize_component(unsigned int c)
     double component_epsilon = S.component_num_transcripts[c] * 1e-6;
     nlopt_set_lower_bounds(component_opt, &component_epsilon);
     nlopt_result result = nlopt_optimize(component_opt, &x0, &maxf);
-    if (result < 0) {
+    if (result < 0 && (result != NLOPT_FAILURE ||
+                !boost::math::isfinite(x0) || !boost::math::isfinite(maxf))) {
         Logger::warn("Optimization failed with code %d", (int) result);
     }
 
@@ -3236,8 +3237,7 @@ void Sampler::init_frag_probs()
 {
     for (unsigned int i = 0; i < num_components; ++i) {
         unsigned component_size = component_frag[i + 1] - component_frag[i];
-        std::fill(frag_probs[i], frag_probs[i] + component_size,
-                  constants::frag_prob_epsilon);
+        std::fill(frag_probs[i], frag_probs[i] + component_size, 0.0);
     }
 
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {

@@ -2,6 +2,7 @@
 #include "constants.hpp"
 
 unsigned int         constants::num_threads                  = 1;
+unsigned int         constants::num_opt_rounds               = 10;
 unsigned int         constants::min_map_qual                 = 0;
 size_t               constants::max_estimate_queue_size      = 500;
 pos_t                constants::min_estimate_exon_length     = 200;
@@ -46,6 +47,6 @@ unsigned int         constants::sampler_hillclimb_samples    = 0;
 unsigned int         constants::min_tss_group_isoforms_conditioning = 50;
 double               constants::sample_scaling_quantile      = 0.9;
 size_t               constants::sample_scaling_truncation    = 100000;
-float                constants::frag_prob_epsilon            = 1e-12;
+float                constants::frag_prob_epsilon            = 1e-14;
 float                constants::min_expr                     = 1e-9;
 

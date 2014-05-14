@@ -5,6 +5,7 @@
 #include <cmath>
 #include <immintrin.h>
 
+#include "constants.hpp"
 #include "fastmath.hpp"
 #include "logger.hpp"
 #include "cpuid.hpp"
@@ -37,6 +38,9 @@ PS16_CONST(neginf, (float) -INFINITY);
 
 // set in fastmath_sse_init
 static __m128 (*log2_sse)(__m128 x) = NULL;
+
+static const float prob_epsilon = constants::frag_prob_epsilon;
+PS16_CONST(prob_epsilon, prob_epsilon);
 
 void* aalloc_sse(size_t n)
 {
@@ -212,6 +216,7 @@ void asxpy_sse(float* xs, const float* ys, const float c,
         x.f[3] = xs[iv.i[3]];
 
         x.v = _mm_add_ps(x.v, yv);
+        x.v = _mm_max_ps(x.v, *reinterpret_cast<const __m128*>(ps16_prob_epsilon));
 
         /* store in xs */
         xs[iv.i[0]] = x.f[0];
@@ -223,9 +228,14 @@ void asxpy_sse(float* xs, const float* ys, const float c,
     /* handle overhang */
     i = 4 * (n / 4);
     switch (n % 4) {
-        case 3: xs[idx[i] - off] += c * ys[i]; ++i;
-        case 2: xs[idx[i] - off] += c * ys[i]; ++i;
-        case 1: xs[idx[i] - off] += c * ys[i];
+        case 3:
+            xs[idx[i] - off] = std::max<float>(prob_epsilon, xs[idx[i] - off] + c * ys[i]);
+            ++i;
+        case 2:
+            xs[idx[i] - off] = std::max<float>(prob_epsilon, xs[idx[i] - off] + c * ys[i]);
+            ++i;
+        case 1:
+            xs[idx[i] - off] = std::max<float>(prob_epsilon, xs[idx[i] - off] + c * ys[i]);
     }
 }
 

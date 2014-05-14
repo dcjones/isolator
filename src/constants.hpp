@@ -17,6 +17,10 @@ namespace constants
     /* Number of threads to use. */
     extern unsigned int num_threads;
 
+    /* Number of optimization rounds to produce the maximum posterior estimate.
+     * */
+    extern unsigned int num_opt_rounds;
+
     /* Minimum allowable map quality. Alignments lower that this are thrown out.
      * */
     extern unsigned int min_map_qual;

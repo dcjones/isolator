@@ -247,12 +247,18 @@ class TgroupMuSigmaSamplerThread
             , tgroup_queue(tgroup_queue)
             , notify_queue(notify_queue)
             , rng_pool(rng_pool)
+            , burnin_state(true)
             , thread(NULL)
         {
             K = ts.size1();
             T = sigma.size();
             C = condition_samples.size();
             xs.resize(K);
+        }
+
+        void end_burnin()
+        {
+            burnin_state = false;
         }
 
         void run()
@@ -283,8 +289,10 @@ class TgroupMuSigmaSamplerThread
                         xs[i] = ts(i, tgroup) - mu(condition[i], tgroup);
                     }
 
-                    sigma[tgroup] = 2.0;
-                    //sigma[tgroup] = sigma_sampler.sample(rng, &xs.at(0), K, alpha, beta);
+                    if (burnin_state) sigma[tgroup] = 1.0;
+                    else {
+                        sigma[tgroup] = sigma_sampler.sample(rng, &xs.at(0), K, alpha, beta);
+                    }
                     assert_finite(sigma[tgroup]);
                 }
 
@@ -317,6 +325,7 @@ class TgroupMuSigmaSamplerThread
         Queue<IdxRange>& tgroup_queue;
         Queue<int>& notify_queue;
         std::vector<rng_t>& rng_pool;
+        bool burnin_state;
         boost::thread* thread;
 
         // temporary data vector
@@ -874,11 +883,11 @@ Analyze::Analyze(unsigned int rng_seed,
     splice_beta_beta   = 15.0;
 
     experiment_tgroup_mu0 = -25;
-    experiment_tgroup_sigma0 = 2.5;
+    experiment_tgroup_sigma0 = 20.0;
 
     experiment_splice_nu = 5.0;
     experiment_splice_mu0 = 0.5;
-    experiment_splice_sigma0 = 1.0;
+    experiment_splice_sigma0 = 10.0;
 
     tgroup_expr.resize(T);
     tgroup_row_data.resize(T);
@@ -1571,9 +1580,14 @@ void Analyze::run(hid_t output_file_id)
     warmup();
 
     const char* optimize_task_name = "Optimizing";
-    Logger::push_task(optimize_task_name, burnin);
+    Logger::push_task(optimize_task_name, burnin + constants::num_opt_rounds);
 
     for (size_t i = 0; i < burnin; ++i) {
+        sample(false);
+        Logger::get_task(optimize_task_name).inc();
+    }
+
+    for (size_t i = 0; i < constants::num_opt_rounds; ++i) {
         sample(true);
         Logger::get_task(optimize_task_name).inc();
     }
@@ -1589,6 +1603,11 @@ void Analyze::run(hid_t output_file_id)
 
     BOOST_FOREACH (ExperimentSpliceMuSigmaSamplerThread* thread,
                    experiment_splice_mu_sigma_sampler_threads) {
+        thread->end_burnin();
+    }
+
+    BOOST_FOREACH (TgroupMuSigmaSamplerThread* thread,
+                   musigma_sampler_threads) {
         thread->end_burnin();
     }
 

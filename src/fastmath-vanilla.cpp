@@ -1,9 +1,13 @@
 
 #include <cmath>
 
+#include "constants.hpp"
 #include "fastmath.hpp"
 #include "fastmath-vanilla.hpp"
 #include "logger.hpp"
+
+
+static const float prob_epsilon = constants::frag_prob_epsilon;
 
 
 void* aalloc_vanilla(size_t n)
@@ -59,7 +63,8 @@ void asxpy_vanilla(float* xs, const float* ys, const float c,
 {
     size_t i;
     for (i = 0; i < n; ++i) {
-        xs[idx[i] - off] += c * ys[i];
+        xs[idx[i] - off] =
+            std::max<float>(xs[idx[i] - off] + c * ys[i], prob_epsilon);
     }
 }
 

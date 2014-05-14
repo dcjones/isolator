@@ -247,6 +247,7 @@ void asxpy_avx(float* xs, const float* ys, const float c,
         x.f[7] = xs[i1.b[3]];
 
         x.v = _mm256_add_ps(x.v, yv);
+        x.v = _mm256_max_ps(x.v, *reinterpret_cast<const __m256*>(ps32_prob_epsilon));
 
         /* store in xs */
         xs[i0.b[0]] = x.f[0];
@@ -262,13 +263,26 @@ void asxpy_avx(float* xs, const float* ys, const float c,
     /* handle overhang */
     i = 8 * (n / 8);
     switch (n % 8) {
-        case 7: xs[idx[i] - off] += c * ys[i]; ++i;
-        case 6: xs[idx[i] - off] += c * ys[i]; ++i;
-        case 5: xs[idx[i] - off] += c * ys[i]; ++i;
-        case 4: xs[idx[i] - off] += c * ys[i]; ++i;
-        case 3: xs[idx[i] - off] += c * ys[i]; ++i;
-        case 2: xs[idx[i] - off] += c * ys[i]; ++i;
-        case 1: xs[idx[i] - off] += c * ys[i];
+        case 7:
+            xs[idx[i] - off] = std::max<float>(prob_epsilon, xs[idx[i] - off] + c * ys[i]);
+            ++i;
+        case 6:
+            xs[idx[i] - off] = std::max<float>(prob_epsilon, xs[idx[i] - off] + c * ys[i]);
+            ++i;
+        case 5:
+            xs[idx[i] - off] = std::max<float>(prob_epsilon, xs[idx[i] - off] + c * ys[i]);
+            ++i;
+        case 4:
+            xs[idx[i] - off] = std::max<float>(prob_epsilon, xs[idx[i] - off] + c * ys[i]);
+            ++i;
+        case 3:
+            xs[idx[i] - off] = std::max<float>(prob_epsilon, xs[idx[i] - off] + c * ys[i]);
+            ++i;
+        case 2:
+            xs[idx[i] - off] = std::max<float>(prob_epsilon, xs[idx[i] - off] + c * ys[i]);
+            ++i;
+        case 1:
+            xs[idx[i] - off] = std::max<float>(prob_epsilon, xs[idx[i] - off] + c * ys[i]);
     }
 }
 

@@ -39,11 +39,10 @@ Shredder::Shredder(double lower_limit, double upper_limit)
     , opt(NULL)
 {
     opt = nlopt_create(NLOPT_LD_SLSQP, 1);
-    //opt = nlopt_create(NLOPT_LN_SBPLX, 1);
     nlopt_set_lower_bounds(opt, &lower_limit);
     nlopt_set_upper_bounds(opt, &upper_limit);
     nlopt_set_max_objective(opt, shredder_opt_objective,
-                            reinterpret_cast<void*>(this));
+            reinterpret_cast<void*>(this));
 
     nlopt_set_ftol_abs(opt, 1e-2);
 
@@ -94,10 +93,12 @@ double Shredder::optimize(double x0)
     nlopt_set_upper_bounds(opt, &upper_limit);
 
     x0 = std::max<double>(std::min<double>(x0, upper_limit), lower_limit);
+    //x0 = (lower_limit + upper_limit) / 2;
     double maxf;
     nlopt_result result = nlopt_optimize(opt, &x0, &maxf);
 
-    if (result < 0) {
+    if (result < 0 && (result != NLOPT_FAILURE ||
+                !boost::math::isfinite(x0) || !boost::math::isfinite(maxf))) {
         Logger::warn("Optimization failed with code %d", (int) result);
     }
 
@@ -111,11 +112,16 @@ double Shredder::find_slice_edge(double x0, double slice_height,
     const double lp_eps = 1e-2;
     const double d_eps  = 1e-3;
     const double x_eps  = 1e-8;
+    
+    // if newton method iterations are not making progress, resort to bisection
+    size_t newton_count = 0;
+    const size_t max_newton_count = 10;
 
     double lp = lp0 - slice_height;
     double d = d0;
     double x = x0;
     double x_bound_lower, x_bound_upper;
+
     if (direction < 0) {
         x_bound_lower = lower_limit;
         x_bound_upper = x0;
@@ -127,7 +133,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
 
     while (fabs(lp) > lp_eps && fabs(x_bound_upper - x_bound_lower) > x_eps) {
         double x1;
-        if (isnan(d) || fabs(d) < d_eps) {
+        if (isnan(d) || d == 0.0 || fabs(d) < d_eps) {
             x1 = (x_bound_lower + x_bound_upper) / 2;
         }
         else {
@@ -150,7 +156,8 @@ double Shredder::find_slice_edge(double x0, double slice_height,
             else        x_bound_upper = x;
         }
 
-        bool bisect = x1 < x_bound_lower + x_eps || x1 > x_bound_upper - x_eps;
+        bool bisect = newton_count >= max_newton_count ||
+            x1 < x_bound_lower + x_eps || x1 > x_bound_upper - x_eps;
 
         // try using the gradient
         if (!bisect) {
@@ -177,7 +184,8 @@ double Shredder::find_slice_edge(double x0, double slice_height,
                     Logger::abort("Slice sampler edge finding is not making progress.");
                 }
             }
-        }
+    }
+    else ++newton_count;
 
         assert_finite(lp);
     }
