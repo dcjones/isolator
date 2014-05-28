@@ -4,9 +4,9 @@
 
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/random/uniform_01.hpp>
-#include <nlopt.h>
 
 #include "common.hpp"
+#include "nlopt/nlopt.h"
 
 
 // A fast, generic, univariate slice sampler implementatation.

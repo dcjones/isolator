@@ -25,22 +25,8 @@
 #define PI16_CONST(name, c) \
     static const ALIGN16_START int pi16_##name[8] ALIGN16_END = {c, c, c, c}
 
-PS16_CONST(1, 1.0f);
-PI16_CONST(inv_mant_mask, ~0x7f800000);
-
-PS16_CONST(log2_c0, 3.1157899f);
-PS16_CONST(log2_c1, -3.3241990f);
-PS16_CONST(log2_c2, 2.5988452f);
-PS16_CONST(log2_c3, -1.2315303f);
-PS16_CONST(log2_c4, 3.1821337e-1f);
-PS16_CONST(log2_c5, -3.4436006e-2f);
-PS16_CONST(neginf, (float) -INFINITY);
-
 // set in fastmath_sse_init
 static __m128 (*log2_sse)(__m128 x) = NULL;
-
-static const float prob_epsilon = constants::frag_prob_epsilon;
-PS16_CONST(prob_epsilon, prob_epsilon);
 
 void* aalloc_sse(size_t n)
 {
@@ -86,6 +72,16 @@ void acopy_sse(void* dest_, const void* src_, size_t n)
 /* Comptue log2 over an sse single vector. */
 __m128 log2_sse2(__m128 x)
 {
+    PS16_CONST(1, 1.0f);
+    PI16_CONST(inv_mant_mask, ~0x7f800000);
+    PS16_CONST(log2_c0, 3.1157899f);
+    PS16_CONST(log2_c1, -3.3241990f);
+    PS16_CONST(log2_c2, 2.5988452f);
+    PS16_CONST(log2_c3, -1.2315303f);
+    PS16_CONST(log2_c4, 3.1821337e-1f);
+    PS16_CONST(log2_c5, -3.4436006e-2f);
+    PS16_CONST(neginf, (float) -INFINITY);
+
     /* extract exponent */
     const __m128i i = _mm_castps_si128(x);
     __m128 e = _mm_cvtepi32_ps(
@@ -110,7 +106,7 @@ __m128 log2_sse2(__m128 x)
     /* handle the case with x= < 0.0 */
     // TODO: test this
     __m128 mask = _mm_cmpgt_ps(x, _mm_setzero_ps());
-    p = _mm_or_ps(_mm_and_ps(mask, p), _mm_andnot_ps(mask, _mm_set1_ps(-INFINITY)));
+    p = _mm_or_ps(_mm_and_ps(mask, p), _mm_andnot_ps(mask, *(__m128*) ps16_neginf));
 
     return p;
 }
@@ -189,6 +185,9 @@ void asxpy_sse(float* xs, const float* ys, const float c,
                const unsigned int* idx, const unsigned int off,
                const size_t n)
 {
+    static const float prob_epsilon = constants::frag_prob_epsilon;
+    PS16_CONST(prob_epsilon, prob_epsilon);
+
     __m128 yv;
     __m128 cv = _mm_set1_ps(c);
     union {

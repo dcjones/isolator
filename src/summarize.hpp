@@ -51,6 +51,12 @@ class Summarize
                              double credible_interval,
                              bool unnormalized);
 
+        void differential_gene_expression(FILE* output, double credible_interval,
+                                          double effect_size);
+
+        void differential_transcript_expression(FILE* output, double credible_interval,
+                                                double effect_size);
+
         void differential_transcription(FILE* output, double credible_interval,
                                         double effect_size);
 

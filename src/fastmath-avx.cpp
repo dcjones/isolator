@@ -34,30 +34,6 @@
     static const ALIGN32_START int pi32_##name[8] ALIGN32_END = {c, c, c, c, c, c, c, c}
 
 
-PS32_CONST(1, 1.0f);
-
-//union {
-    //uint32_t i;
-    //float    f;
-//} inv_mant_mask_int = {~0x7f800000};
-//const unsigned int inv_mant_mask_int = ~0x7f800000;
-//PI32_CONST(inv_mant_mask, *reinterpret_cast<const float*>(&inv_mant_mask_int));
-PI32_CONST(inv_mant_mask, ~0x7f800000);
-PI16_CONST(0x7f, 0x7f);
-
-PS32_CONST(log2_c0, 3.1157899f);
-PS32_CONST(log2_c1, -3.3241990f);
-PS32_CONST(log2_c2, 2.5988452f);
-PS32_CONST(log2_c3, -1.2315303f);
-PS32_CONST(log2_c4, 3.1821337e-1f);
-PS32_CONST(log2_c5, -3.4436006e-2f);
-PS32_CONST(neginf, (float) -INFINITY);
-
-// prevent probabilities from getting below this epsilon
-static const float prob_epsilon = constants::frag_prob_epsilon;
-PS32_CONST(prob_epsilon, prob_epsilon);
-
-
 void* aalloc_avx(size_t n)
 {
     void* xs = _mm_malloc(n, 32);
@@ -106,6 +82,18 @@ void acopy_avx(void* dest_, const void* src_, size_t n)
 /* Hopefully a cleaner version of avx_log2, following intels' amaths. */
 static __m256 log2_avx(__m256 x)
 {
+    PS32_CONST(1, 1.0f);
+    PI32_CONST(inv_mant_mask, ~0x7f800000);
+    PI16_CONST(0x7f, 0x7f);
+
+    PS32_CONST(log2_c0, 3.1157899f);
+    PS32_CONST(log2_c1, -3.3241990f);
+    PS32_CONST(log2_c2, 2.5988452f);
+    PS32_CONST(log2_c3, -1.2315303f);
+    PS32_CONST(log2_c4, 3.1821337e-1f);
+    PS32_CONST(log2_c5, -3.4436006e-2f);
+    PS32_CONST(neginf, (float) -INFINITY);
+
     /* extract the exponent */
     union {
         __m256i a;
@@ -212,6 +200,9 @@ void asxpy_avx(float* xs, const float* ys, const float c,
                const unsigned int* idx, const unsigned int off,
                const size_t n)
 {
+    static const float prob_epsilon = constants::frag_prob_epsilon;
+    PS32_CONST(prob_epsilon, prob_epsilon);
+
     __m256 yv;
     __m256 cv = _mm256_set1_ps(c);
     union {

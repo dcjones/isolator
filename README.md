@@ -6,15 +6,16 @@ There are many methods to analyze RNA-Seq data. Isolator differs in few
 important ways.
 
   * It implements a full hierarchical Bayesian model of an entire RNA-Seq
-    *experiment*. Pooling information leads more accurate expression estimates,
-    particularily at low-levels. Conditions can be compared or clustered
+    *experiment*. Pooling information leads more accurate estimates of effect
+    size, particularily at low-levels. Conditions can be compared or clustered
     without throwing anything out.
   * It asks the right question, estimating posterior probabilities of effect
     sizes, rather than assigning p-values to a vaguely defined notion of
     differential expression.
   * It models, and is capable of distinguishing between, changes in
     *transcription* and changes in *splicing* between two or more conditions.
-  * It models and corrects for sequence bias and GC-bias.
+  * It models and corrects for sequence motif bias at fragment ends, GC-bias,
+    and 3' bias.
   * Compared to other MCMC approaches, it is exceedingly efficient.
 
 *Note*: I've run this tool on a lot of data, evaluated it with multiple
@@ -56,7 +57,7 @@ To build Isolator from source, you will need to first install
 On Debian, Ubuntu, or similar.
 
 ```sh
-apt-get install libboost-dev libhdf5-dev cmake
+apt-get install libboost-dev libboost-thread-dev libboost-system-dev libboost-timer-dev libhdf5-dev cmake
 ```
 
 ### OSX
@@ -87,8 +88,9 @@ This will install the `isolator` program to the default destination (usually
 
 Isolator works in two steps: *analysis* and *summarization*. The analysis step
 will run the sampler for a number of iterations collecting estimates of the
-model parameters, which it will output to a file. To generate human readable
-tables from the raw sampler output,
+model parameters, which it will output to an
+[HDF5](http://www.hdfgroup.org/HDF5/) file. This output can then mu summarized
+and turned into regular tab-delimined tables in a variety of ways.
 
 ## What you'll need
 
@@ -124,8 +126,8 @@ invoked on a single bam file.
 isolator analyze gene_annotations.gtf a.bam
 ```
 
-The analyze command run for a while and output a file named (by default)
-`isolator-output.h5`. It is an [HDF5](http://www.hdfgroup.org/HDF5/), which is
+The analyze command will run for a while and output a file named (by default)
+`isolator-output.h5`. It is an [HDF5](http://www.hdfgroup.org/HDF5/) file, which is
 a standardized data format than can be accessed using wide variety of tools.
 However, data stored in this file is a raw form, and typically far more
 information than is needed. To quickly generate to-the-point results, there is
@@ -175,7 +177,8 @@ credible interval for each point estimate.
 isolator summarize transcript-expression --credible=0.95 isolator-output.h5
 ```
 
-Expression can also be summarized on the gene level:
+Expression can also be summarized on the gene level, according to the `gene_id`
+field in the input GTF file.
 ```sh
 isolator summarize gene-expression isolator-output.h5
 ```
@@ -183,7 +186,7 @@ isolator summarize gene-expression isolator-output.h5
 ### Differential Expression, Transcription, and Splicing
 
 Since Isolator follows a Bayesian methodology, it does not assign p-values to
-differential expression, but rather estimates a probability that that
+differential expression, but rather estimates a probability that
 the condition-wise tendendency has changed by more than some minimum fold
 change. The researcher may choose the minimum fold change (it is set to a log2 fold
 change of 1.5 by default).
@@ -221,5 +224,66 @@ set the conditions being tested and the minimum effect size, respectively.
 Note: for simplicitly the term "splicing" is in used here, when in fact it will
 capture any change in expression dynamics occouring after transcription
 initiation, including changes in splicing and transcription termination.
+
+
+### Using an experiment specification file
+
+In the previous examples we invoked `isolator analyze` by passing some number of
+BAM files as arguments. This can be a pain with complex experiments involving
+many conditions. Furthermore, to keept track of all these conditions, we may
+wish to provide names. The analyze command can also be invoked with a
+[YAML](http://yaml.org/) file describing the experiment and the location of the
+BAM files.
+
+This file is structured like the following.
+
+```yaml
+condition1-name:
+  condition1-replicate1-name: cond1-repl1-reads.bam
+  condition1-replicate2-name: cond1-repl2-reads.bam
+
+condition2-name:
+  condition2-replicate1-name: cond2-repl1-reads.bam
+  condition2-replicate2-name: cond2-repl2-reads.bam
+```
+
+If we same this to `experiment.yml`, we can then invoke the analyze command more
+conveniently:
+
+```sh
+isolator analyze genes.gtf experiment.yml
+```
+
+For a more concrete example, here's an example of a specification of an
+experiment involving six conditions, each with either three or two replicates.
+
+```yaml
+h7-1yr:
+    1-h7-1yr: 1-h7-1yr.bam
+    2-h7-1yr: 2-h7-1yr.bam
+    3-h7-1yr: 3-h7-1yr.bam
+
+h7-day20:
+    4-h7-day20: 4-h7-day20.bam
+    5-h7-day20: 5-h7-day20.bam
+    6-h7-day20: 6-h7-day20.bam
+
+empty-vector:
+    8-empty-vector: 8-empty-vector.bam
+    9-empty-vector: 9-empty-vector.bam
+
+let-7g-oe:
+    10-let-7g-oe: 10-let-7g-oe.bam
+    11-let-7g-oe: 11-let-7g-oe.bam
+    12-let-7g-oe: 12-let-7g-oe.bam
+
+fetal-ventricle:
+    13-fetal-ventricle: 13-fetal-ventricle.bam
+    14-fetal-ventricle: 14-fetal-ventricle.bam
+
+fetal-atrium:
+    15-fetal-atrium: 15-fetal-atrium.bam
+    16-fetal-atrium: 16-fetal-atrium.bam
+```
 
 

@@ -20,19 +20,18 @@
     static const ALIGN16_START int pi16_##name[8] ALIGN16_END = {c, c, c, c}
 
 
-PS16_CONST(1, 1.0f);
-PI16_CONST(inv_mant_mask, ~0x7f800000);
-
-PS16_CONST(log2_c0, 3.1157899f);
-PS16_CONST(log2_c1, -3.3241990f);
-PS16_CONST(log2_c2, 2.5988452f);
-PS16_CONST(log2_c3, -1.2315303f);
-PS16_CONST(log2_c4, 3.1821337e-1f);
-PS16_CONST(log2_c5, -3.4436006e-2f);
-
-
 __m128 log2_sse4(__m128 x)
 {
+    PS16_CONST(1, 1.0f);
+    PI16_CONST(inv_mant_mask, ~0x7f800000);
+    PS16_CONST(log2_c0, 3.1157899f);
+    PS16_CONST(log2_c1, -3.3241990f);
+    PS16_CONST(log2_c2, 2.5988452f);
+    PS16_CONST(log2_c3, -1.2315303f);
+    PS16_CONST(log2_c4, 3.1821337e-1f);
+    PS16_CONST(log2_c5, -3.4436006e-2f);
+    PS16_CONST(neginf, (float) -INFINITY);
+
     /* extract exponent */
     const __m128i i = _mm_castps_si128(x);
     __m128 e = _mm_cvtepi32_ps(
@@ -55,7 +54,7 @@ __m128 log2_sse4(__m128 x)
     p = _mm_add_ps(_mm_mul_ps(p, _mm_sub_ps(m, *(__m128*) ps16_1)), e);
 
     /* handle the case with x= < 0.0 */
-    p = _mm_blendv_ps(p, _mm_set1_ps(-INFINITY), _mm_cmple_ps(x, _mm_setzero_ps()));
+    p = _mm_blendv_ps(p, *(__m128*) ps16_neginf, _mm_cmple_ps(x, _mm_setzero_ps()));
 
     return p;
 }

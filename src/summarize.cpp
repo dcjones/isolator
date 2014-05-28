@@ -1551,6 +1551,20 @@ void Summarize::differential_feature_splicing(FILE* output,
 }
 
 
+void Summarize::differential_gene_expression(FILE* output, double credible_interval,
+                                             double effect_size)
+{
+    // TODO: Do this in the morning.
+}
+
+
+void Summarize::differential_transcript_expression(FILE* output, double credible_interval,
+                                                   double effect_size)
+{
+    // TODO: Do this in the morning.
+}
+
+
 void Summarize::condition_splicing(FILE* output, double credible_interval)
 {
     bool print_credible_interval = !isnan(credible_interval);
