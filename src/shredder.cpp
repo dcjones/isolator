@@ -3,6 +3,7 @@
 #include <boost/math/special_functions/digamma.hpp>
 #include <boost/math/special_functions/fpclassify.hpp>
 
+#include "constants.hpp"
 #include "fastmath.hpp"
 #include "logger.hpp"
 #include "nlopt/nlopt.h"
@@ -33,9 +34,10 @@ static void assert_finite(double x)
 }
 
 
-Shredder::Shredder(double lower_limit, double upper_limit)
+Shredder::Shredder(double lower_limit, double upper_limit, double tolerance)
     : lower_limit(lower_limit)
     , upper_limit(upper_limit)
+    , tolerance(tolerance)
     , opt(NULL)
 {
     opt = nlopt_create(NLOPT_LD_SLSQP, 1);
@@ -45,9 +47,7 @@ Shredder::Shredder(double lower_limit, double upper_limit)
             reinterpret_cast<void*>(this));
 
     nlopt_set_ftol_abs(opt, 1e-2);
-
-    double xtol_abs = 1e-8;
-    nlopt_set_xtol_abs(opt, &xtol_abs);
+    nlopt_set_xtol_abs(opt, &tolerance);
 }
 
 
@@ -63,14 +63,15 @@ double Shredder::sample(rng_t& rng, double x0)
     double lp0 = f(x0, d0);
     assert_finite(lp0);
 
-    double slice_height = fastlog(random_uniform_01(rng)) + lp0;
+    double slice_height = fastlog(
+            std::max<double>(constants::zero_eps, random_uniform_01(rng))) + lp0;
+    assert_finite(slice_height);
 
     x_min = find_slice_edge(x0, slice_height, lp0, d0, -1);
     x_max = find_slice_edge(x0, slice_height, lp0, d0,  1);
 
     double x = (x_max + x_min) / 2;
-    const double x_eps  = 1e-8;
-    while (x_max - x_min > x_eps) {
+    while (x_max - x_min > tolerance) {
         x = x_min + (x_max - x_min) * random_uniform_01(rng);
         double d;
         double lp = f(x, d);
@@ -111,8 +112,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
 {
     const double lp_eps = 1e-2;
     const double d_eps  = 1e-3;
-    const double x_eps  = 1e-8;
-    
+
     // if newton method iterations are not making progress, resort to bisection
     size_t newton_count = 0;
     const size_t max_newton_count = 10;
@@ -131,7 +131,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
         x_bound_upper = upper_limit;
     }
 
-    while (fabs(lp) > lp_eps && fabs(x_bound_upper - x_bound_lower) > x_eps) {
+    while (fabs(lp) > lp_eps && fabs(x_bound_upper - x_bound_lower) > tolerance) {
         double x1;
         if (isnan(d) || d == 0.0 || fabs(d) < d_eps) {
             x1 = (x_bound_lower + x_bound_upper) / 2;
@@ -142,8 +142,8 @@ double Shredder::find_slice_edge(double x0, double slice_height,
 
         // if we are very close to the boundry, and this iteration moves us past
         // the boundry, just give up.
-        if (direction < 0 && fabs(x - lower_limit) <= x_eps && (x1 < x || lp > 0.0)) break;
-        if (direction > 0 && fabs(x - upper_limit) <= x_eps && (x1 > x || lp > 0.0)) break;
+        if (direction < 0 && fabs(x - lower_limit) <= tolerance && (x1 < x || lp > 0.0)) break;
+        if (direction > 0 && fabs(x - upper_limit) <= tolerance && (x1 > x || lp > 0.0)) break;
 
         // if we are moving in the wrong direction (i.e. toward the other root),
         // use bisection to correct course.
@@ -157,7 +157,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
         }
 
         bool bisect = newton_count >= max_newton_count ||
-            x1 < x_bound_lower + x_eps || x1 > x_bound_upper - x_eps;
+            x1 < x_bound_lower + tolerance || x1 > x_bound_upper - tolerance;
 
         // try using the gradient
         if (!bisect) {

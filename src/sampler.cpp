@@ -1303,10 +1303,12 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
         if (offset2 < 0 && offset2 >= tlen) return 0.0;
         w *= seqbias[a.mate2->strand == t.strand ? 0 : 1][offset2];
 
-        pos_t pos = std::min<pos_t>(a.mate1->start, a.mate2->start);
+        pos_t offset = t.get_offset(
+                std::min<pos_t>(a.mate1->start, a.mate2->start));
         if (fm.gcbias) {
-            float gc = tseq0.gc_count(L + pos, L + pos + frag_len - 1) / (float) frag_len;
-            w *= fm.gcbias->get_bias(gc);
+            float gc = tseq0.gc_count(
+                    L + offset, L + offset + frag_len - 1) / (float) frag_len;
+            w *= fm.gcbias->get_bias(gc / frag_len);
         }
 
     }
@@ -1318,15 +1320,13 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
             w *= seqbias[a.mate1->strand == t.strand ? 0 : 1][offset];
 
             if (fm.gcbias) {
-                pos_t pos;
-                if (a.mate1->strand == strand_pos) {
-                    pos = a.mate1->start;
+                if (a.mate1->strand == strand_neg) {
+                    offset = std::max<pos_t>(0, offset - frag_len + 1);
                 }
-                else {
-                    pos = a.mate1->end - frag_len + 1;
-                }
-                float gc = tseq0.gc_count(L + pos, L + pos + frag_len - 1);
-                w *= fm.gcbias->get_bias(gc);
+                float gc = tseq0.gc_count(
+                        L + offset,
+                        std::min<pos_t>(tlen - 1, L + offset + frag_len - 1));
+                w *= fm.gcbias->get_bias(gc / frag_len);
             }
         }
 
@@ -1338,15 +1338,13 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
             assert_finite(w);
 
             if (fm.gcbias) {
-                pos_t pos;
-                if (a.mate2->strand == strand_pos) {
-                    pos = a.mate2->start;
+                if (a.mate2->strand == strand_neg) {
+                    offset = std::max<pos_t>(0, offset - frag_len + 1);
                 }
-                else {
-                    pos = a.mate2->end - frag_len + 1;
-                }
-                float gc = tseq0.gc_count(L + pos, L + pos + frag_len - 1);
-                w *= fm.gcbias->get_bias(gc);
+                float gc = tseq0.gc_count(
+                        L + offset,
+                        std::min<pos_t>(tlen - 1, L + offset + frag_len - 1));
+                w *= fm.gcbias->get_bias(gc / frag_len);
                 assert_finite(w);
             }
         }
@@ -1354,35 +1352,33 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
 
     // 3' bias
     if (t.strand == strand_pos && fm.tpbias && fm.tpbias->p != 0.0) {
-        pos_t pos;
+        pos_t tpos;
         if (a.mate1 && a.mate1->strand == 0) {
-            pos = a.mate1->start;
+            tpos = t.get_offset(a.mate1->start);
         }
         else if (a.mate2 && a.mate2->strand == 0) {
-            pos = a.mate2->start;
+            tpos = t.get_offset(a.mate2->start);
         }
         else {
             const Alignment* mate = a.mate1 ? a.mate1 : a.mate2;
-            pos = mate->end - frag_len + 1;
+            tpos = std::max<pos_t>(0, t.get_offset(mate->end) - frag_len);
         }
-        pos_t tpos = t.get_offset(pos);
         assert(0 <= tpos && tpos < tlen);
         w *= fm.tpbias->get_bias(tlen - tpos - 1);
         assert_finite(w);
     }
     else if (t.strand == strand_neg && fm.tpbias && fm.tpbias->p != 0.0) {
-        pos_t pos;
+        pos_t tpos;
         if (a.mate1 && a.mate1->strand == 1) {
-            pos = a.mate1->end;
+            tpos = t.get_offset(a.mate1->end);
         }
         else if (a.mate2 && a.mate2->strand == 1) {
-            pos = a.mate2->end;
+            tpos = t.get_offset(a.mate2->end);
         }
         else {
             const Alignment* mate = a.mate1 ? a.mate1 : a.mate2;
-            pos = mate->start + frag_len - 1;
+            tpos = std::min<pos_t>(tlen - 1, t.get_offset(mate->start) + frag_len);
         }
-        pos_t tpos = t.get_offset(pos);
         assert(0 <= tpos && tpos < tlen);
         w *= fm.tpbias->get_bias(tpos);
         assert_finite(w);
@@ -1398,19 +1394,21 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
             fm.strand_specificity : (1.0 - fm.strand_specificity);
     }
 
-    float frag_len_pr = frag_len_p(frag_len) / frag_len_c(tlen);
+    float frag_len_pr = frag_len_p(frag_len);
     if (frag_len_pr < constants::min_frag_len_pr) {
         return 0.0;
     }
+    frag_len_pr /= frag_len_c(tlen);
 
-    if (frag_len_pr * w < constants::min_frag_weight) {
+    if (ws[frag_len] == 0.0 || frag_len_pr * w < constants::min_frag_weight) {
         return 0.0;
     }
 
     w = frag_len_pr * w / ws[frag_len];
 
     if (!boost::math::isfinite(w)) {
-        Logger::abort("Non-finite fragment weight computed.");
+        Logger::abort("Non-finite fragment weight computed. %e",
+                      frag_len_pr);
     }
 
     return w;
@@ -1455,7 +1453,7 @@ class InterTgroupSampler : public Shredder
 {
     public:
         InterTgroupSampler(Sampler& S)
-            : Shredder(1e-6, 1.0 - 1e-6)
+            : Shredder(1e-6, 1.0 - 1e-6, 1e-6)
             , S(S)
         {
 
@@ -1676,7 +1674,8 @@ class InterTranscriptSampler
             double lp0 = f(x0, d0);
             assert_finite(lp0);
 
-            double slice_height = fastlog(random_uniform_01(rng)) + lp0;
+            double slice_height = fastlog(
+                    std::max<double>(random_uniform_01(rng), constants::zero_eps)) + lp0;
 
             double x_min_lp, x_max_lp;
             double x_min = find_slice_edge(x0, slice_height, lp0, d0, -1, &x_min_lp);
@@ -2005,8 +2004,6 @@ class InterTranscriptSampler
 
         rng_t rng;
         boost::random::uniform_01<double> random_uniform_01;
-
-        double xtol_abs, xtol_rel;
 
         friend double intertranscriptsampler_nlopt_objective(
                     unsigned int _n,const double* _x, double* _grad, void* data);
@@ -2458,7 +2455,8 @@ void AbundanceSamplerThread::sample_component(unsigned int c)
     float x0 = S.cmix[c];
 
     float lp0 = compute_component_probability(c, x0);
-    float slice_height = lp0 + fastlog(random_uniform_01(*rng));
+    float slice_height = lp0 +
+        fastlog(std::max<double>(constants::zero_eps, random_uniform_01(*rng)));
     float step = 1.0;
 
     float x_min = find_component_slice_edge(c, x0, slice_height, -step);
@@ -2492,7 +2490,7 @@ void AbundanceSamplerThread::optimize_component(unsigned int c)
     this->c = c;
     double x0 = S.frag_count_sums[c] +
                 constants::tmix_prior_prec * S.component_num_transcripts[c];
-          
+
     double maxf;
     double component_epsilon = S.component_num_transcripts[c] * 1e-6;
     nlopt_set_lower_bounds(component_opt, &component_epsilon);

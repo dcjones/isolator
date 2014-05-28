@@ -24,11 +24,12 @@ static double geometric_logcdf_upper(double p, unsigned int k)
 }
 
 
-static double tpbias_loglikelihood(double p,
+static double tpbias_loglikelihood(double lp,
                                    pos_t maxtlen,
                                    DistNormMap& distnorm,
                                    const std::vector<TPDistPair>& xs)
 {
+    double p = exp(lp);
     double norm = 0.0;
     double ppower = 1.0;
     for (pos_t tlen = 0; tlen <= maxtlen; ++tlen) {
@@ -94,25 +95,36 @@ TPBias::TPBias(const std::vector<std::pair<pos_t, pos_t> >& tpdists)
 
     TPBiasTrainData traindata(maxtlen, distnorm, tpdists);
 
+#if 0
+    FILE* out = fopen("tpdists.tsv", "w");
+    fprintf(out, "pos\ttlen\n");
+    BOOST_FOREACH (const TPDistPair& x, tpdists)  {
+        fprintf(out, "%ld\t%ld\n", x.first, x.second);
+    }
+    fclose(out);
+#endif
+
     nlopt_opt opt = nlopt_create(NLOPT_LN_SBPLX, 1);
-    double lower_limit = 0.0;
-    double upper_limit = 1e-4;
+    double lower_limit = -100;
+    double upper_limit = -10.0;
     nlopt_set_lower_bounds(opt, &lower_limit);
     nlopt_set_upper_bounds(opt, &upper_limit);
     nlopt_set_max_objective(opt, tpbias_nlopt_objective,
                             reinterpret_cast<void*>(&traindata));
-    nlopt_set_ftol_abs(opt, 1e-4);
+    //nlopt_set_ftol_abs(opt, 1e-4);
 
-    //double xtol_abs = 1e-9;
-    //nlopt_set_xtol_abs(opt, &xtol_abs);
+    double xtol_abs = 1e-3;
+    nlopt_set_xtol_abs(opt, &xtol_abs);
 
-    p = 1e-5;
+    p = -12;
     double maxf;
     nlopt_result result = nlopt_optimize(opt, &p, &maxf);
     if (result < 0) {
         Logger::warn("Failed to fit 3' bias model.");
         p = 0.0;
     }
+
+    p = exp(p);
 
     nlopt_destroy(opt);
 }

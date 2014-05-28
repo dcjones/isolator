@@ -17,11 +17,13 @@
 
 
 class SamplerTickThread;
-class TgroupMuSigmaSamplerThread;
+class ConditionTgroupMuSigmaSamplerThread;
 class ExperimentTgroupMuSigmaSamplerThread;
+class GammaBetaSampler;
 class AlphaSampler;
 class BetaSampler;
-class SpliceMuSigmaSamplerThread;
+class GammaNormalSigmaSampler;
+class ConditionSpliceMuSigmaSamplerThread;
 class ExperimentSpliceMuSigmaSamplerThread;
 typedef std::pair<int, int> IdxRange;
 
@@ -35,7 +37,17 @@ class Analyze
                 TranscriptSet& ts,
                 const char* genome_filename,
                 bool run_gc_correction,
-                bool run_3p_correction);
+                bool run_3p_correction,
+                double experiment_tgroup_sigma_alpha,
+                double experiment_tgroup_sigma_beta,
+                double experiment_splice_sigma_alpha,
+                double experiment_splice_sigma_beta,
+                double condition_tgroup_alpha,
+                double condition_tgroup_beta_a,
+                double condition_tgroup_beta_b,
+                double condition_splice_alpha,
+                double condition_splice_beta_a,
+                double condition_splice_beta_b);
         ~Analyze();
 
         // Add a replicate under a particular condition
@@ -93,11 +105,12 @@ class Analyze
 
         // threads used for iterating samplers
         std::vector<SamplerTickThread*> qsampler_threads;
-        std::vector<TgroupMuSigmaSamplerThread*> musigma_sampler_threads;
+        std::vector<ConditionTgroupMuSigmaSamplerThread*> musigma_sampler_threads;
         std::vector<ExperimentTgroupMuSigmaSamplerThread*> experiment_musigma_sampler_threads;
-        AlphaSampler* alpha_sampler;
-        BetaSampler* beta_sampler;
-        std::vector<SpliceMuSigmaSamplerThread*> splice_mu_sigma_sampler_threads;
+        GammaBetaSampler* gamma_beta_sampler;
+        BetaSampler* invgamma_beta_sampler;
+        GammaNormalSigmaSampler* gamma_normal_sigma_sampler;
+        std::vector<ConditionSpliceMuSigmaSamplerThread*> splice_mu_sigma_sampler_threads;
         std::vector<ExperimentSpliceMuSigmaSamplerThread*>
             experiment_splice_mu_sigma_sampler_threads;
 
@@ -134,25 +147,32 @@ class Analyze
         boost::numeric::ublas::matrix<double> xs;
 
         // tgroup position parameter, indexed by condition -> tgroup
-        boost::numeric::ublas::matrix<double> tgroup_mu;
+        boost::numeric::ublas::matrix<double> condition_tgroup_mu;
 
         // tgroup scale parameter, indexed by tgroup
-        std::vector<double> tgroup_sigma;
+        std::vector<double> condition_tgroup_sigma;
 
-        // parameters of the inverse gamma prior on tgroup_sigma
-        double tgroup_alpha, tgroup_beta;
+        // parameters of the inverse gamma prior on condition_tgroup_sigma
+        double condition_tgroup_alpha, condition_tgroup_beta;
+
+        // parameters of the inverse gamma prior on condition_splice_sigma
+        double condition_splice_alpha, condition_splice_beta;
 
         // experiment-wise tgroup position paremeter, indexed by tgroup
         std::vector<double> experiment_tgroup_mu;
 
-        // experiment-wide tgroup scale parameter, indexed by tgroup
-        std::vector<double> experiment_tgroup_sigma;
+        // experiment-wide tgroup scale parameter
+        double experiment_tgroup_sigma;
+
+        // gamma hypeparameters for prior on experiment_tgroup_sigma
+        double experiment_tgroup_sigma_alpha;
+        double experiment_tgroup_sigma_beta;
+
+        // degrees of freedom parameter for experiment tgroup mu prior
+        double experiment_tgroup_nu;
 
         // parameters for normal prior over experiment_tgroup_mu
         double experiment_tgroup_mu0, experiment_tgroup_sigma0;
-
-        // experiment wide parameters for the inverse gamma prior on experiment_tgroup_mu
-        double experiment_tgroup_alpha, experiment_tgroup_beta;
 
         // temporary space used by compute_xs
         std::vector<double> tgroup_expr;
@@ -173,8 +193,12 @@ class Analyze
         // prior parameters for experimient_splice_mu
         double experiment_splice_nu, experiment_splice_mu0, experiment_splice_sigma0;
 
-        // per-spliced-tgroup experiment precision
-        std::vector<std::vector<double> > experiment_splice_sigma;
+        // experiment std. dev.
+        double experiment_splice_sigma;
+
+        // gamma hypeparameters for prior on experiment_splice_sigma
+        double experiment_splice_sigma_alpha;
+        double experiment_splice_sigma_beta;
 
         // splicing precision, indexed by spliced tgroup
         std::vector<std::vector<double> > condition_splice_sigma;
@@ -182,17 +206,13 @@ class Analyze
         // flattened condition_splice_sigma used for sampling alpha, beta
         // params.
         std::vector<double> condition_splice_sigma_work;
-
-        // parameters for the gamma prior on splice_precision
-        double splice_alpha, splice_beta;
-
-        // gamma priors on experiment-wide splice distributions
-        double experiment_splice_alpha, experiment_splice_beta;
+        std::vector<double> experiment_splice_sigma_work;
+        std::vector<double> experiment_tgroup_sigma_work;
 
         // paramaters for the inverse gamma priors on splice_alpha and
         // splice_beta
-        double splice_alpha_alpha, splice_beta_alpha;
-        double splice_alpha_beta, splice_beta_beta;
+        double condition_splice_beta_a,
+               condition_splice_beta_b;
 
         // Condition index corresponding to the given name
         std::map<std::string, int> condition_index;
@@ -219,9 +239,8 @@ class Analyze
         unsigned int T;
 
         // Hyperparams for inverse gamma prior on tgroup_alpha/tgroup_beta
-        double tgroup_alpha_alpha, tgroup_beta_alpha;
-        double tgroup_alpha_beta, tgroup_beta_beta;
-
+        double condition_tgroup_beta_a,
+               condition_tgroup_beta_b;
 
         // RNG used for alpha/beta samplers
         unsigned int rng_seed;

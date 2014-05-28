@@ -13,7 +13,7 @@
 class Shredder
 {
     public:
-        Shredder(double lower_limit, double upper_limit);
+        Shredder(double lower_limit, double upper_limit, double tolerance);
         virtual ~Shredder();
 
         // Generate a new sample given the current value x0.
@@ -31,7 +31,7 @@ class Shredder
         virtual double f(double x, double& d) = 0;
 
         // Bounds on the parameter being sampled over
-        double lower_limit, upper_limit;
+        double lower_limit, upper_limit, tolerance;
 
         boost::random::uniform_01<double> random_uniform_01;
 

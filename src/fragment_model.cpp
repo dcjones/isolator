@@ -635,7 +635,8 @@ void FragmentModel::estimate(TranscriptSet& ts,
             pos_t offset = 0;
             pos_t tlen = t->exonic_length();
 
-            if (tlen < constants::tpbias_min_tlen) continue;
+            if (tlen < constants::tpbias_min_tlen ||
+                tlen > constants::tpbias_max_tlen) continue;
             if (num_tpbias_transcripts++ > constants::tpbias_max_transcripts) break;
 
             BOOST_FOREACH (const Exon& exon, *t) {

@@ -182,12 +182,12 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
 
 double GCBias::get_bias(double gc)
 {
-	for (size_t i = 0; i < bins.size(); ++i) {
-		if (bins[i] > gc) {
-			return bin_bias[i];
-		}
-	}
-	return bin_bias.back();
+    std::vector<double>::iterator i =
+        std::lower_bound(bins.begin(), bins.end(), gc);
+
+    if (i == bins.end()) return bin_bias.back();
+
+    return bin_bias[i - bins.begin()];
 }
 
 

@@ -387,9 +387,9 @@ static void print_analyze_help(FILE* fout)
     fprintf(fout,
         "\nOptions:\n"
         "-h, --help                Print this help message\n"
-        "-o, --output=FILE         File to write HDF5 output to (default: isolator_output.hdf5)\n"
-        "    --introns             Input consists of a BED file containing introns."
-        "    --exons               Input consists of a BED file containing exons."
+        "-o, --output=FILE         File to write HDF5 output to (default: isolator-output.hdf5)\n"
+        "    --introns             Input consists of a BED file containing introns.\n"
+        "    --exons               Input consists of a BED file containing exons.\n"
         "-v, --verbose             Print a bunch of information useful mainly for debugging\n"
         "-g, --genomic-seq=FILE    Correct for sequence bias, given the a the sequence\n"
         "                          against which the reads are aligned, in FAST format.\n"
@@ -397,8 +397,20 @@ static void print_analyze_help(FILE* fout)
         "    --no-gc-correction    disable fragment GC-content correction.\n"
         "    --no-3p-bias          disable trancript 3' bias correction.\n"
         "-N, --num-samples         generate this many samples (default: 250)\n"
-        "-B, --burnin              warmup for this many samples before collecting data (default: 100)\n\n"
-        "See 'isolator help teste' for more.\n");
+        "-B, --burnin              warmup for this many samples before collecting data (default: 10)\n\n"
+        "Model parameters:\n"
+        "    --experiment_tgroup_sigma_alpha\n"
+        "    --experiment_tgroup_sigma_beta\n"
+        "    --experiment_splice_sigma_alpha\n"
+        "    --experiment_splice_sigma_beta\n"
+        "    --condition_tgroup_alpha\n"
+        "    --condition_tgroup_beta_a\n"
+        "    --condition_tgroup_beta_b\n"
+        "    --condition_splice_alpha\n"
+        "    --condition_splice_beta_a\n"
+        "    --condition_splice_beta_b\n"
+        "\n"
+        "See 'isolator help analyze' for more.\n");
 }
 
 
@@ -948,6 +960,20 @@ static int isolator_analyze(int argc, char* argv[])
         {"num-samples",          required_argument, NULL, 'N'},
         {"burnin",               required_argument, NULL, 'B'},
         {"tss-cluster-distance", required_argument, NULL, 0},
+
+        {"experiment_tgroup_sigma_alpha",  required_argument, NULL, 0},
+        {"experiment_tgroup_sigma_beta",   required_argument, NULL, 0},
+
+        {"experiment_splice_sigma_alpha",  required_argument, NULL, 0},
+        {"experiment_splice_sigma_beta",   required_argument, NULL, 0},
+
+        {"condition_tgroup_alpha",         required_argument, NULL, 0},
+        {"condition_tgroup_beta_a",        required_argument, NULL, 0},
+        {"condition_tgroup_beta_b",        required_argument, NULL, 0},
+
+        {"condition_splice_alpha",         required_argument, NULL, 0},
+        {"condition_splice_beta_a",        required_argument, NULL, 0},
+        {"condition_splice_beta_b",        required_argument, NULL, 0},
         {0, 0, 0, 0}
     };
 
@@ -964,8 +990,24 @@ static int isolator_analyze(int argc, char* argv[])
     bool use_exons = false;
     unsigned int rng_seed = 0xaca430b9;
 
+    // model parameter defaults
+    double experiment_tgroup_sigma_alpha = 2.0,
+           experiment_tgroup_sigma_beta = 0.5,
+
+           experiment_splice_sigma_alpha = 5.0,
+           experiment_splice_sigma_beta = 0.1,
+
+           condition_tgroup_alpha = 3.0,
+           condition_tgroup_beta_a = 3.0,
+           condition_tgroup_beta_b = 1000.0,
+
+           condition_splice_alpha = 3.0,
+           condition_splice_beta_a = 3.0,
+           condition_splice_beta_b = 50.0;
+
     int opt;
     int optidx;
+    std::string longopt_name;
     while (true) {
         opt = getopt_long(argc, argv, "ho:vg:p:N:", long_options, &optidx);
 
@@ -1005,20 +1047,52 @@ static int isolator_analyze(int argc, char* argv[])
                 break;
 
             case 0:
-                if (strcmp(long_options[optidx].name, "no-gc-correction") == 0) {
+                longopt_name = long_options[optidx].name;
+
+                if (longopt_name == "no-gc-correction") {
                     run_gc_correction = false;
                 }
-                else if (strcmp(long_options[optidx].name, "no-3p-correction") == 0) {
+                else if (longopt_name == "no-3p-correction") {
                     run_3p_correction = false;
                 }
-                else if (strcmp(long_options[optidx].name, "tss-cluster-distance") == 0) {
+                else if (longopt_name == "tss-cluster-distance") {
                     tss_cluster_dist = strtod(optarg, NULL);
                 }
-                else if (strcmp(long_options[optidx].name, "introns") == 0) {
+                else if (longopt_name == "introns") {
                     use_introns = true;
                 }
-                else if (strcmp(long_options[optidx].name, "exons") == 0) {
+                else if (longopt_name == "exons") {
                     use_exons = true;
+                }
+                else if (longopt_name == "experiment_tgroup_sigma_alpha") {
+                    experiment_tgroup_sigma_alpha = strtod(optarg, NULL);
+                }
+                else if (longopt_name == "experiment_tgroup_sigma_beta") {
+                    experiment_tgroup_sigma_beta = strtod(optarg, NULL);
+                }
+                else if (longopt_name == "experiment_splice_sigma_alpha") {
+                    experiment_splice_sigma_alpha = strtod(optarg, NULL);
+                }
+                else if (longopt_name == "experiment_splice_sigma_beta") {
+                    experiment_splice_sigma_beta = strtod(optarg, NULL);
+                }
+                else if (longopt_name == "condition_tgroup_alpha") {
+                    condition_tgroup_alpha = strtod(optarg, NULL);
+                }
+                else if (longopt_name == "condition_tgroup_beta_a") {
+                    condition_tgroup_beta_a = strtod(optarg, NULL);
+                }
+                else if (longopt_name == "condition_tgroup_beta_b") {
+                    condition_tgroup_beta_b = strtod(optarg, NULL);
+                }
+                else if (longopt_name == "condition_splice_alpha") {
+                    condition_splice_alpha = strtod(optarg, NULL);
+                }
+                else if (longopt_name == "condition_splice_beta_a") {
+                    condition_splice_beta_a = strtod(optarg, NULL);
+                }
+                else if (longopt_name == "condition_splice_beta_b") {
+                    condition_splice_beta_b = strtod(optarg, NULL);
                 }
                 break;
 
@@ -1093,7 +1167,18 @@ static int isolator_analyze(int argc, char* argv[])
     }
 
     Analyze analyze(rng_seed, burnin, num_samples, ts, fa_fn,
-                    run_gc_correction, run_3p_correction);
+                    run_gc_correction, run_3p_correction,
+                    experiment_tgroup_sigma_alpha,
+                    experiment_tgroup_sigma_beta,
+                    experiment_splice_sigma_alpha,
+                    experiment_splice_sigma_beta,
+                    condition_tgroup_alpha,
+                    condition_tgroup_beta_a,
+                    condition_tgroup_beta_b,
+                    condition_splice_alpha,
+                    condition_splice_beta_a,
+                    condition_splice_beta_b);
+
     for (size_t i = 0; i < metadata.sample_conditions.size(); ++i) {
         analyze.add_sample(metadata.sample_conditions[i].c_str(),
                            metadata.sample_filenames[i].c_str());

@@ -69,8 +69,8 @@ namespace constants
      * risking over/underflow. */
     extern double gcbias_max_bias;
 
-    /* Minimum transcript length used to train 3' bias. */
-    extern pos_t tpbias_min_tlen;
+    /* Minimum and maximum transcript length used to train 3' bias. */
+    extern pos_t tpbias_min_tlen, tpbias_max_tlen;
 
     /* Maximum number of transcripts to use to train 3' bias. */
     extern size_t tpbias_max_transcripts;
@@ -202,6 +202,24 @@ namespace constants
     /* Round miniscule expression values up to this value, since at that
      * scale changes are meaningless. */
     extern float min_expr;
+
+    /* Hyperparameters for the normal prior on experiment_tgroup_mu values. */
+    extern double analyze_experiment_tgroup_mu0;
+    extern double analyze_experiment_tgroup_sigma0;
+
+    /* Hyperparameters for the normal prior on experiment_splice_mu values. */
+    extern double analyze_experiment_splice_mu0;
+    extern double analyze_experiment_splice_sigma0;
+
+    /* Student-t nu parameter for the experiment tgroup and splice
+     * distributions. */
+    extern double analyze_experiment_tgroup_nu;
+    extern double analyze_experiment_splice_nu;
+
+    /* When there is no data, group level variance parameters can converge
+     * to near zero, causing the sampler to get stuck. To avoid this, we force
+     * variance parameters to be above some small value. */
+    extern double analyze_min_splice_sigma;
 }
 
 #endif

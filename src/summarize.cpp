@@ -703,7 +703,6 @@ void Summarize::differential_transcription(FILE* output, double credible_interva
     std::vector<float> work(num_samples);
 
     size_t C = dims[1];
-    fprintf(stderr, "C = %u\n", (unsigned int) C);
     for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
         read_condition_tgroup_mean(condition_a, condition_a_data);
         for (unsigned int condition_b = condition_a + 1; condition_b < C; ++condition_b) {
@@ -806,9 +805,9 @@ void Summarize::differential_splicing(FILE* output, double credible_interval,
 
     fprintf(output,
             "gene_name\tgene_id\ttranscript_id\tcondition_a\tcondition_b\t"
-            "down_pr\tup_pr\tmedian_log2_fold_change");
+            "down_pr\tup_pr\tmedian_change");
     if (print_credible_interval) {
-        fprintf(output, "\tlower_log2_fold_change\tupper_log2_fold_change");
+        fprintf(output, "\tlower_change\tupper_change");
     }
     fputc('\n', output);
 
