@@ -1645,7 +1645,8 @@ class InterTranscriptSampler
             , lower_limit(constants::zero_eps)
             , upper_limit(1.0 - constants::zero_eps)
         {
-            opt = nlopt_create(NLOPT_LD_SLSQP, 1);
+            //opt = nlopt_create(NLOPT_LD_SLSQP, 1);
+            opt = nlopt_create(NLOPT_LN_SBPLX, 1);
             nlopt_set_lower_bounds(opt, &lower_limit);
             nlopt_set_upper_bounds(opt, &upper_limit);
             nlopt_set_max_objective(opt, intertranscriptsampler_nlopt_objective,
@@ -1776,6 +1777,7 @@ class InterTranscriptSampler
                         !boost::math::isfinite(x0) || !boost::math::isfinite(maxf))) {
                 Logger::warn("Optimization failed with code %d", (int) result);
             }
+            assert_finite(x0);
 
             return x0;
         }
@@ -1802,12 +1804,9 @@ class InterTranscriptSampler
             }
 
             while (fabs(lp) > lp_eps && fabs(x_bound_upper - x_bound_lower) > x_eps) {
-                double x1;
-                if (fabs(d) < d_eps) {
+                double x1 = x - lp / d;
+                if (fabs(d) < d_eps || !boost::math::isfinite(x1)) {
                     x1 = (x_bound_lower + x_bound_upper) / 2;
-                }
-                else {
-                    x1 = x - lp / d;
                 }
 
                 // if we are very close to the boundry, and this iteration moves us past
@@ -1908,6 +1907,8 @@ class InterTranscriptSampler
 
             double d = 2 * (2 * c * (wu - wv)) /
                 (a * wu * wv + c * (wu * (-x) + wu + wv * x));
+
+            assert_finite(d);
 
             return d;
         }
@@ -2326,6 +2327,7 @@ void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u,
               S.component_frag[c],
               S.weight_matrix->rowlens[tid]);
         S.tmix[tid] = tmix_tid;
+        assert_finite(S.tmix[tid]);
     }
 
     BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
@@ -2337,6 +2339,7 @@ void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u,
               S.component_frag[c],
               S.weight_matrix->rowlens[tid]);
         S.tmix[tid] = tmix_tid;
+        assert_finite(S.tmix[tid]);
     }
 
     size_t component_size = S.component_frag[c+1] - S.component_frag[c];
@@ -2386,10 +2389,12 @@ void AbundanceSamplerThread::sample_inter_transcript(unsigned int u, unsigned in
     float tmixu = x * (S.tmix[u] + S.tmix[v]);
     tmixu = std::max<double>(tmixu, constants::zero_eps);
     tmixu = std::min<double>(tmixu, 1.0 - constants::zero_eps);
+    assert_finite(tmixu);
 
     float tmixv = (1 - x) * (S.tmix[u] + S.tmix[v]);
     tmixv = std::max<double>(tmixv, constants::zero_eps);
     tmixv = std::min<double>(tmixv, 1.0 - constants::zero_eps);
+    assert_finite(tmixv);
 
     float tmix_delta_u = tmixu - S.tmix[u];
     float tmix_delta_v = tmixv - S.tmix[v];

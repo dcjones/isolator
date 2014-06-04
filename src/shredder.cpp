@@ -132,12 +132,9 @@ double Shredder::find_slice_edge(double x0, double slice_height,
     }
 
     while (fabs(lp) > lp_eps && fabs(x_bound_upper - x_bound_lower) > tolerance) {
-        double x1;
-        if (isnan(d) || d == 0.0 || fabs(d) < d_eps) {
+        double x1 = x - lp / d;
+        if (isnan(d) || d == 0.0 || fabs(d) < d_eps || !boost::math::isfinite(x1)) {
             x1 = (x_bound_lower + x_bound_upper) / 2;
-        }
-        else {
-            x1 = x - lp / d;
         }
 
         // if we are very close to the boundry, and this iteration moves us past
