@@ -1478,14 +1478,14 @@ class InterTgroupSampler : public Shredder
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
                 if (S.weight_matrix->rowlens[tid] > 0) {
                     f0 = std::min(f0, S.weight_matrix->idxs[tid][0]);
-                    f1 = std::max(f1, S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1]);
+                    f1 = std::max(f1, 1 + S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1]);
                 }
             }
 
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
                 if (S.weight_matrix->rowlens[tid] > 0) {
                     f0 = std::min(f0, S.weight_matrix->idxs[tid][0]);
-                    f1 = std::max(f1, S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1]);
+                    f1 = std::max(f1, 1 + S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1]);
                 }
             }
             if (f0 > f1) f0 = f1 = S.component_frag[c];
@@ -1602,8 +1602,13 @@ class InterTgroupSampler : public Shredder
                 prior_lp_delta += tgroup_prior.f(mu_v, S.hp.tgroup_sigma[v], &logxv, 1);
                 prior_lp_delta -= fastlog(1 - x); // jacobian
 
-                d += (mu_u - logxu) / (sq(S.hp.tgroup_sigma[u]) * x) - 1/x;
-                d += (mu_v - logxv) / (sq(S.hp.tgroup_sigma[v]) * (x - 1)) - 1/(1-x);
+                // derivative of normal log-pdf
+                d += (mu_u - logxu) / (sq(S.hp.tgroup_sigma[u]) * x);
+                d += (mu_v - logxv) / (sq(S.hp.tgroup_sigma[v]) * (x - 1));
+
+                // derivative of jacobian
+                d -= 1/x;
+                d -= 1/(1-x);
             }
 
             return lp0 - lpf01 +
@@ -1947,7 +1952,6 @@ class InterTranscriptSampler
                           S.weight_matrix->rowlens[v]);
 
             d *= tmixu + tmixv;
-            d /= M_LN2;
 
             double prior_lp_delta = 0.0;
             if (S.use_priors) {
@@ -1968,13 +1972,14 @@ class InterTranscriptSampler
                                                  S.hp.splice_sigma[v],
                                                  &wtmixv, 1);
 
+                // jacobian
                 prior_lp_delta += log_weight_transform_gradient(x);
 
                 d += splice_prior.df_dx(S.hp.splice_mu[u],
                                         S.hp.splice_sigma[u],
                                         &wtmixu, 1);
 
-                d += splice_prior.df_dx(S.hp.splice_mu[v],
+                d -= splice_prior.df_dx(S.hp.splice_mu[v],
                                         S.hp.splice_sigma[v],
                                         &wtmixv, 1);
 
