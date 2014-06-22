@@ -61,12 +61,11 @@ void acopy_avx(void* dest_, const void* src_, size_t n)
 
     __m256 x;
     size_t i;
-    for (i = 0; i < n / 8; ++i) {
-        x = _mm256_load_ps(src + 8 * i);
-        _mm256_store_ps(dest + 8 * i, x);
+    for (i = 0; i + 8 <= n; i += 8) {
+        x = _mm256_load_ps(src + i);
+        _mm256_store_ps(dest + i, x);
     }
 
-    i *= 8;
     switch (n % 8) {
         case 7: dest[i] = src[i]; ++i;
         case 6: dest[i] = src[i]; ++i;
@@ -84,7 +83,6 @@ static __m256 log2_avx(__m256 x)
 {
     PS32_CONST(1, 1.0f);
     PI32_CONST(inv_mant_mask, ~0x7f800000);
-    PI16_CONST(0x7f, 0x7f);
 
     PS32_CONST(log2_c0, 3.1157899f);
     PS32_CONST(log2_c1, -3.3241990f);
@@ -94,15 +92,16 @@ static __m256 log2_avx(__m256 x)
     PS32_CONST(log2_c5, -3.4436006e-2f);
     PS32_CONST(neginf, (float) -INFINITY);
 
+    PS32_CONST(exp_c, 1.1920928955078125e-7f);
+    PI32_CONST(mant_mask, 0x7f800000);
+    PS32_CONST(7f, 127.0f);
+
     /* extract the exponent */
-    union {
-        __m256i a;
-        __m128i b[2];
-    } xi;
-    xi.a = _mm256_castps_si256(x);
-    xi.b[0] = _mm_sub_epi32(_mm_srli_epi32(xi.b[0], 23), *(__m128i*) pi16_0x7f);
-    xi.b[1] = _mm_sub_epi32(_mm_srli_epi32(xi.b[1], 23), *(__m128i*) pi16_0x7f);
-    __m256 e = _mm256_cvtepi32_ps(xi.a);
+    __m256 e = x;
+    e = _mm256_and_ps(e, *(__m256*) pi32_mant_mask);
+    e = _mm256_cvtepi32_ps( *(__m256i*) &e);
+    e = _mm256_mul_ps(e, *(__m256*) ps32_exp_c);
+    e = _mm256_sub_ps(e, *(__m256*) ps32_7f);
 
     /* extract the mantissa */
     __m256 m = _mm256_and_ps(x, *(__m256*) pi32_inv_mant_mask);
@@ -134,9 +133,9 @@ float dotlog_avx(const float* xs, const float* ys, const size_t n)
 
     __m256 xv, yv;
     size_t i;
-    for (i = 0; i < n / 8; ++i) {
-        xv = _mm256_load_ps(xs + 8 * i);
-        yv = _mm256_load_ps(ys + 8 * i);
+    for (i = 0; i + 8 <= n; i += 8) {
+        xv = _mm256_load_ps(xs + i);
+        yv = _mm256_load_ps(ys + i);
         ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(xv, log2_avx(yv)));
     }
 
@@ -144,7 +143,6 @@ float dotlog_avx(const float* xs, const float* ys, const size_t n)
                  ans.f[4] + ans.f[5] + ans.f[6] + ans.f[7];
 
     /* handle any overhang */
-    i *= 8;
     switch (n % 8) {
         case 7: fans += xs[i] * fastlog2(ys[i]); ++i;
         case 6: fans += xs[i] * fastlog2(ys[i]); ++i;
@@ -218,7 +216,7 @@ void asxpy_avx(float* xs, const float* ys, const float c,
     __m128i voff = _mm_set1_epi32((int) off);
 
     size_t i;
-    for (i = 0; i < 8 * (n / 8); i += 8) {
+    for (i = 0; i + 8 <= n; i += 8) {
         yv = _mm256_mul_ps(cv, _mm256_load_ps(ys + i));
 
         i0.a = _mm_load_si128((__m128i*)(idx + i));
@@ -252,7 +250,6 @@ void asxpy_avx(float* xs, const float* ys, const float c,
     }
 
     /* handle overhang */
-    i = 8 * (n / 8);
     switch (n % 8) {
         case 7:
             xs[idx[i] - off] = std::max<float>(prob_epsilon, xs[idx[i] - off] + c * ys[i]);
@@ -296,7 +293,7 @@ float asxtydsz_avx(const float* xs, const float* ys, const float* zs,
     __m128i voff = _mm_set1_epi32((int) off);
 
     size_t i;
-    for (i = 0; i < 8 * (n / 8); i += 8) {
+    for (i = 0; i + 8 <= n; i += 8) {
         __m256 y = _mm256_load_ps(ys + i);
 
         i0.a = _mm_load_si128((__m128i*)(idx + i));
@@ -333,7 +330,6 @@ float asxtydsz_avx(const float* xs, const float* ys, const float* zs,
 
 
     /* handle overhang */
-    i = 8 * (n / 8);
     switch (n % 8) {
         case 7: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
         case 6: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
