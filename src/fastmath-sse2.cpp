@@ -30,7 +30,7 @@ static __m128 (*log2_sse)(__m128 x) = NULL;
 
 void* aalloc_sse(size_t n)
 {
-    void* xs = _mm_malloc(n, 16);
+    void* xs = _mm_malloc(n, 32);
     if (xs == NULL) {
         Logger::abort("Can't allocate an array of size %ul.",
                       (unsigned long) n);
@@ -267,6 +267,11 @@ float asxtydsz_sse(const float* xs, const float* ys, const float* zs,
         x.f[1] = xs[i0.b[1]];
         x.f[2] = xs[i0.b[2]];
         x.f[3] = xs[i0.b[3]];
+
+        z.f[0] = zs[i0.b[0]];
+        z.f[1] = zs[i0.b[1]];
+        z.f[2] = zs[i0.b[2]];
+        z.f[3] = zs[i0.b[3]];
 
         ans.v = _mm_add_ps(ans.v, _mm_div_ps(_mm_mul_ps(x.v, y), z.v));
     }
