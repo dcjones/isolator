@@ -285,6 +285,7 @@ class ConditionSpliceEtaSampler : public Shredder
                       const std::vector<double>& unadj_condition_splice_mu,
                       double unadj_condition_splice_sigma,
                       const matrix_column<matrix<double> >& splice_data,
+                      const std::vector<double>& sample_mu,
                       const std::vector<std::vector<int> >& condition_samples,
                       double experiment_splice_nu,
                       double experiment_splice_mu,
@@ -295,6 +296,7 @@ class ConditionSpliceEtaSampler : public Shredder
             this->unadj_condition_splice_mu = &unadj_condition_splice_mu;
             this->unadj_condition_splice_sigma = unadj_condition_splice_sigma;
             this->splice_data = &splice_data;
+            this->sample_mu = &sample_mu;
             this->condition_samples = &condition_samples;
             this->experiment_splice_mu = experiment_splice_mu;
             this->experiment_splice_sigma = experiment_splice_sigma;
@@ -317,6 +319,7 @@ class ConditionSpliceEtaSampler : public Shredder
         const std::vector<double>* unadj_condition_splice_mu;
         const matrix_column<matrix<double> >* splice_data;
         const std::vector<std::vector<int> >* condition_samples;
+        const std::vector<double>* sample_mu;
 
         double unadj_condition_splice_sigma,
                experiment_splice_mu,
@@ -343,7 +346,7 @@ class ConditionSpliceEtaSampler : public Shredder
                 }
 
                 double condition_splice_mu =
-                    eta * (*unadj_condition_splice_mu)[i] + experiment_splice_mu;
+                    eta * (*unadj_condition_splice_mu)[i] + (*sample_mu)[i];
 
                 fx += mu_prior_logpdf.f(experiment_splice_nu, experiment_splice_mu,
                                         experiment_splice_sigma, &condition_splice_mu, 1);
@@ -562,7 +565,9 @@ class ConditionSpliceMuSigmaEtaSamplerThread
                 max_size2 = std::max<size_t>(tids.size(), max_size2);
             }
             matrix<double> dataj(K, max_size2);
+
             std::vector<double> unadj_mu(C);
+            std::vector<double> sample_mu(C);
 
             while (true) {
                 IdxRange js = spliced_tgroup_queue.pop();
@@ -590,8 +595,15 @@ class ConditionSpliceMuSigmaEtaSamplerThread
                         double unadj_sigma = condition_splice_sigma[j][k] /
                                              fabs(condition_splice_eta[j][k]);
                         for (size_t i = 0; i < C; ++i) {
+                            sample_mu[i] = 0.0;
+                            for (size_t l = 0; l < condition_samples[i].size(); ++l) {
+                                size_t sample_idx = condition_samples[i][l];
+                                sample_mu[i] += dataj(sample_idx, k);
+                            }
+                            sample_mu[i] /= condition_samples[i].size();
+
                             unadj_mu[i] =
-                                (condition_splice_mu[i][j][k] - experiment_splice_mu[j][k]) /
+                                (condition_splice_mu[i][j][k] - sample_mu[i]) /
                                 condition_splice_eta[j][k];
                         }
 
@@ -599,7 +611,8 @@ class ConditionSpliceMuSigmaEtaSamplerThread
 
                         condition_splice_eta[j][k] = eta_sampler.sample(
                                 rng, condition_splice_eta[j][k],
-                                unadj_mu, unadj_sigma, col, condition_samples,
+                                unadj_mu, unadj_sigma, col, sample_mu,
+                                condition_samples,
                                 experiment_splice_nu,
                                 experiment_splice_mu[j][k],
                                 experiment_splice_sigma,
@@ -613,7 +626,7 @@ class ConditionSpliceMuSigmaEtaSamplerThread
                         for (size_t i = 0; i < C; ++i) {
                             condition_splice_mu[i][j][k] =
                                 unadj_mu[i] * condition_splice_eta[j][k] +
-                                experiment_splice_mu[j][k];
+                                sample_mu[i];
                         }
                     }
 
