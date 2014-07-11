@@ -110,7 +110,7 @@ class NormalTMuSampler : public Shredder
 {
     public:
         NormalTMuSampler(double lower_bound, double upper_bound)
-            : Shredder(lower_bound, upper_bound, 1e-4)
+            : Shredder(lower_bound, upper_bound, 1e-5)
         {
         }
 
@@ -157,7 +157,7 @@ class StudentTMuSampler : public Shredder
 {
     public:
         StudentTMuSampler(double lower_bound, double upper_bound)
-            : Shredder(lower_bound, upper_bound, 1e-4)
+            : Shredder(lower_bound, upper_bound, 1e-5)
         {
         }
 
@@ -233,7 +233,7 @@ class GammaNormalSigmaSampler : public Shredder
 {
     public:
         GammaNormalSigmaSampler()
-            : Shredder(1e-8, 1e5, 1e-3)
+            : Shredder(1e-8, 1e5, 1e-5)
         {
         }
 
@@ -277,7 +277,7 @@ class ConditionSpliceEtaSampler : public Shredder
 {
     public:
         ConditionSpliceEtaSampler()
-            : Shredder(-1000, 1000, 1e-3)
+            : Shredder(-1000, 1000, 1e-5)
         {}
 
         double sample(rng_t& rng,
