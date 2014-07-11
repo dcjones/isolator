@@ -273,6 +273,93 @@ class GammaNormalSigmaSampler : public Shredder
 };
 
 
+class ConditionSpliceEtaSampler : public Shredder
+{
+    public:
+        ConditionSpliceEtaSampler()
+            : Shredder(-1000, 1000, 1e-3)
+        {}
+
+        double sample(rng_t& rng,
+                      double condition_splice_eta,
+                      const std::vector<double>& unadj_condition_splice_mu,
+                      double unadj_condition_splice_sigma,
+                      const matrix_column<matrix<double> >& splice_data,
+                      const std::vector<std::vector<int> >& condition_samples,
+                      double experiment_splice_nu,
+                      double experiment_splice_mu,
+                      double experiment_splice_sigma,
+                      double condition_splice_alpha,
+                      double condition_splice_beta)
+        {
+            this->unadj_condition_splice_mu = &unadj_condition_splice_mu;
+            this->unadj_condition_splice_sigma = unadj_condition_splice_sigma;
+            this->splice_data = &splice_data;
+            this->condition_samples = &condition_samples;
+            this->experiment_splice_mu = experiment_splice_mu;
+            this->experiment_splice_sigma = experiment_splice_sigma;
+            this->experiment_splice_nu = experiment_splice_nu;
+            this->condition_splice_alpha = condition_splice_alpha;
+            this->condition_splice_beta = condition_splice_beta;
+
+            if (data_tmp.size() < splice_data.size()) {
+                data_tmp.resize(splice_data.size());
+            }
+
+            return Shredder::sample(rng, condition_splice_eta);
+        }
+
+    private:
+        NormalLogPdf likelihood_logpdf;
+        StudentsTLogPdf mu_prior_logpdf;
+        GammaLogPdf sigma_prior_logpdf;
+
+        const std::vector<double>* unadj_condition_splice_mu;
+        const matrix_column<matrix<double> >* splice_data;
+        const std::vector<std::vector<int> >* condition_samples;
+
+        double unadj_condition_splice_sigma,
+               experiment_splice_mu,
+               experiment_splice_sigma,
+               experiment_splice_nu,
+               condition_splice_alpha,
+               condition_splice_beta;
+
+        std::vector<double> data_tmp;
+
+    protected:
+        double f(double eta, double& d)
+        {
+            // TODO: condition_samples and all that
+
+            double fx = 0.0;
+            d = 0.0;
+            double condition_splice_sigma = fabs(eta) * unadj_condition_splice_sigma;
+
+            for (size_t i = 0; i < unadj_condition_splice_mu->size(); ++i) {
+                for (size_t l = 0; l < (*condition_samples)[i].size(); ++l) {
+                    size_t sample_idx = (*condition_samples)[i][l];
+                    data_tmp[l] = (*splice_data)(sample_idx);
+                }
+
+                double condition_splice_mu =
+                    eta * (*unadj_condition_splice_mu)[i] + experiment_splice_mu;
+
+                fx += mu_prior_logpdf.f(experiment_splice_nu, experiment_splice_mu,
+                                        experiment_splice_sigma, &condition_splice_mu, 1);
+
+                fx += likelihood_logpdf.f(condition_splice_mu, condition_splice_sigma,
+                                          &data_tmp.at(0), (*condition_samples)[i].size());
+            }
+
+            fx += sigma_prior_logpdf.f(condition_splice_alpha, condition_splice_beta,
+                                       &condition_splice_sigma, 1);
+
+            return fx;
+        }
+};
+
+
 class ConditionTgroupMuSigmaSamplerThread
 {
     public:
@@ -413,12 +500,13 @@ class ConditionTgroupMuSigmaSamplerThread
 
 // Sample parameters giving the mean within-group splicing proportions per
 // condition.
-class ConditionSpliceMuSigmaSamplerThread
+class ConditionSpliceMuSigmaEtaSamplerThread
 {
     public:
-        ConditionSpliceMuSigmaSamplerThread(
+        ConditionSpliceMuSigmaEtaSamplerThread(
                         std::vector<std::vector<std::vector<double> > >& condition_splice_mu,
                         std::vector<std::vector<double> >& condition_splice_sigma,
+                        std::vector<std::vector<double> >& condition_splice_eta,
                         const std::vector<std::vector<double> >& experiment_splice_mu,
                         double& experiment_splice_sigma,
                         double experiment_splice_nu,
@@ -434,6 +522,7 @@ class ConditionSpliceMuSigmaSamplerThread
                         std::vector<rng_t>& rng_pool)
             : condition_splice_mu(condition_splice_mu)
             , condition_splice_sigma(condition_splice_sigma)
+            , condition_splice_eta(condition_splice_eta)
             , experiment_splice_mu(experiment_splice_mu)
             , experiment_splice_sigma(experiment_splice_sigma)
             , experiment_splice_nu(experiment_splice_nu)
@@ -473,6 +562,7 @@ class ConditionSpliceMuSigmaSamplerThread
                 max_size2 = std::max<size_t>(tids.size(), max_size2);
             }
             matrix<double> dataj(K, max_size2);
+            std::vector<double> unadj_mu(C);
 
             while (true) {
                 IdxRange js = spliced_tgroup_queue.pop();
@@ -495,7 +585,39 @@ class ConditionSpliceMuSigmaSamplerThread
                         }
                     }
 
-                    // sample parameters for each condition
+                    // sample eta
+                    for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
+                        double unadj_sigma = condition_splice_sigma[j][k] /
+                                             fabs(condition_splice_eta[j][k]);
+                        for (size_t i = 0; i < C; ++i) {
+                            unadj_mu[i] =
+                                (condition_splice_mu[i][j][k] - experiment_splice_mu[j][k]) /
+                                condition_splice_eta[j][k];
+                        }
+
+                        matrix_column<matrix<double> > col(dataj, k);
+
+                        condition_splice_eta[j][k] = eta_sampler.sample(
+                                rng, condition_splice_eta[j][k],
+                                unadj_mu, unadj_sigma, col, condition_samples,
+                                experiment_splice_nu,
+                                experiment_splice_mu[j][k],
+                                experiment_splice_sigma,
+                                condition_splice_alpha,
+                                condition_splice_beta);
+
+                        // readjust mu and sigma by eta
+                        condition_splice_sigma[j][k] =
+                            unadj_sigma * fabs(condition_splice_eta[j][k]);
+
+                        for (size_t i = 0; i < C; ++i) {
+                            condition_splice_mu[i][j][k] =
+                                unadj_mu[i] * condition_splice_eta[j][k] +
+                                experiment_splice_mu[j][k];
+                        }
+                    }
+
+                    // sample mu
                     for (size_t i = 0; i < C; ++i) {
                         for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                             for (size_t l = 0; l < condition_samples[i].size(); ++l) {
@@ -515,6 +637,7 @@ class ConditionSpliceMuSigmaSamplerThread
                         }
                     }
 
+                    // sample sigma
                     for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
                         matrix_column<matrix<double> > col(dataj, k);
                         std::copy(col.begin(), col.end(), data.begin());
@@ -551,7 +674,7 @@ class ConditionSpliceMuSigmaSamplerThread
         void start()
         {
             thread = new boost::thread(
-                    boost::bind(&ConditionSpliceMuSigmaSamplerThread::run, this));
+                    boost::bind(&ConditionSpliceMuSigmaEtaSamplerThread::run, this));
         }
 
         void join()
@@ -565,6 +688,7 @@ class ConditionSpliceMuSigmaSamplerThread
         // what we are sampling over
         std::vector<std::vector<std::vector<double> > >& condition_splice_mu;
         std::vector<std::vector<double> >& condition_splice_sigma;
+        std::vector<std::vector<double> >& condition_splice_eta;
 
         const std::vector<std::vector<double> >& experiment_splice_mu;
         double& experiment_splice_sigma;
@@ -589,6 +713,7 @@ class ConditionSpliceMuSigmaSamplerThread
         size_t C, K;
         NormalTMuSampler mu_sampler;
         GammaNormalSigmaSampler sigma_sampler;
+        ConditionSpliceEtaSampler eta_sampler;
         bool burnin_state;
 
         boost::thread* thread;
@@ -933,7 +1058,6 @@ class ExperimentTgroupMuSigmaSamplerThread
 
         StudentTMuSampler mu_sampler;
 };
-
 
 
 Analyze::Analyze(unsigned int rng_seed,
@@ -1574,12 +1698,17 @@ void Analyze::run(hid_t output_file_id)
     }
 
     condition_splice_sigma.resize(spliced_tgroup_indexes.size());
+    condition_splice_eta.resize(spliced_tgroup_indexes.size());
     size_t flattened_sigma_size = 0;
     for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
         condition_splice_sigma[j].resize(
             tgroup_tids[spliced_tgroup_indexes[j]].size());
         std::fill(condition_splice_sigma[j].begin(),
                   condition_splice_sigma[j].end(), 0.1);
+        condition_splice_eta[j].resize(
+            tgroup_tids[spliced_tgroup_indexes[j]].size());
+        std::fill(condition_splice_eta[j].begin(),
+                  condition_splice_eta[j].end(), 1.0);
         flattened_sigma_size += condition_splice_sigma[j].size();
     }
 
@@ -1645,9 +1774,9 @@ void Analyze::run(hid_t output_file_id)
     }
 
     splice_mu_sigma_sampler_threads.resize(constants::num_threads);
-    BOOST_FOREACH (ConditionSpliceMuSigmaSamplerThread*& thread, splice_mu_sigma_sampler_threads) {
-        thread = new ConditionSpliceMuSigmaSamplerThread(
-                condition_splice_mu, condition_splice_sigma,
+    BOOST_FOREACH (ConditionSpliceMuSigmaEtaSamplerThread*& thread, splice_mu_sigma_sampler_threads) {
+        thread = new ConditionSpliceMuSigmaEtaSamplerThread(
+                condition_splice_mu, condition_splice_sigma, condition_splice_eta,
                 experiment_splice_mu, experiment_splice_sigma, experiment_splice_nu,
                 condition_splice_alpha, condition_splice_beta, Q,
                 spliced_tgroup_indexes,
@@ -1698,7 +1827,7 @@ void Analyze::run(hid_t output_file_id)
     Logger::pop_task(optimize_task_name);
 
 
-    BOOST_FOREACH (ConditionSpliceMuSigmaSamplerThread* thread, splice_mu_sigma_sampler_threads) {
+    BOOST_FOREACH (ConditionSpliceMuSigmaEtaSamplerThread* thread, splice_mu_sigma_sampler_threads) {
         thread->end_burnin();
     }
 
@@ -1939,6 +2068,8 @@ void Analyze::sample(bool optimize_state)
         splice_mu_sigma_sampler_notify_queue.pop();
     }
 
+    // TODO: sample splice eta
+
     // sample experiment-level parameters
 
     for (size_t i = 0; i < T; i += block_size) {
@@ -2106,6 +2237,37 @@ void Analyze::compute_ts_scaling()
         }
     }
 }
+
+
+#if 0
+void Analyze::sample_condition_splice_eta()
+{
+    // compute adjusted parameters
+    double abs_condition_splice_eta = fabs(condition_splice_eta);
+    for (size_t i = 0; i < condition_splice_sigma.size(); ++i) {
+        condition_splice_sigma_adj[i] =
+            condition_splice_sigma[i] / abs_condition_splice_eta;
+    }
+
+    for (size_t i = 0; i < C; ++i) {
+        for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
+
+        }
+    }
+
+
+    // TODO
+
+
+    // we need to reparamaterize the condition_splice_sigmas
+    // and the condition_splice_mus, sample eta, then
+    // un-reparameterize
+
+
+
+
+}
+#endif
 
 
 void Analyze::choose_initial_values()

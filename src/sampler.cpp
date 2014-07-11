@@ -2577,7 +2577,7 @@ class MultireadSamplerThread
                             float p = align_pr *
                                       S.cmix[c] *
                                       S.frag_probs[c][f - S.component_frag[c]];
-  
+
                             //float p = align_pr;
 
                             if (r <= p) {
