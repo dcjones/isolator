@@ -444,6 +444,12 @@ static void write_metadata(hid_t file_id, const IsolatorMetadata& metadata)
     H5Awrite(attr, varstring_type, &attr_value);
     H5Aclose(attr);
 
+
+    attr = H5Acreate1(group, "commit", varstring_type, dataspace, H5P_DEFAULT);
+    attr_value = metadata.commit.c_str();
+    H5Awrite(attr, varstring_type, &attr_value);
+    H5Aclose(attr);
+
     attr = H5Acreate1(group, "date", varstring_type, dataspace, H5P_DEFAULT);
     attr_value = metadata.date.c_str();
     H5Awrite(attr, varstring_type, &attr_value);
@@ -1204,6 +1210,7 @@ static int isolator_analyze(int argc, char* argv[])
     }
 
     metadata.version = GITVERSION;
+    metadata.commit = GITCOMMIT;
 
     time_t t = time(NULL);
     struct tm timestruct;

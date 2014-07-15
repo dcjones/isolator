@@ -21,6 +21,7 @@ struct IsolatorMetadata
 {
     std::string command_line;
     std::string version;
+    std::string commit;
     std::string date;
     std::string elapsed_seconds;
     std::vector<std::string> sample_filenames;

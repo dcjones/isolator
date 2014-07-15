@@ -2023,6 +2023,11 @@ void Summarize::read_metadata(IsolatorMetadata& metadata)
     metadata.version = data[0];
     H5Aclose(attr);
 
+    attr = H5Aopen_checked(group, "commit", H5P_DEFAULT);
+    H5Aread(attr, varstring_type, &data.at(0));
+    metadata.commit = data[0];
+    H5Aclose(attr);
+
     attr = H5Aopen_checked(group, "date", H5P_DEFAULT);
     H5Aread(attr, varstring_type, &data.at(0));
     metadata.date = data[0];

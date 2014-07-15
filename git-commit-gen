@@ -1,0 +1,12 @@
+#!/bin/sh
+
+git status > /dev/null
+if [ $? -eq 0 ]
+then
+    V=`git rev-parse HEAD`
+else
+    V="unknown"
+fi
+
+echo $V
+
