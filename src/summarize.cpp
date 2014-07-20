@@ -1,5 +1,6 @@
 
 #include <algorithm>
+#include <boost/math/special_functions/fpclassify.hpp>
 #include <boost/foreach.hpp>
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/numeric/ublas/matrix_proxy.hpp>
@@ -901,7 +902,9 @@ void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& s
 
                 for (size_t l = 0; l < tgroup_tids[tgroup].size(); ++l) {
                     splicing[k][i][j][l] =
-                        reinterpret_cast<float*>(buffer[k].p)[l];
+                        std::min<double>(1.0,
+                            std::max<double>(0.0,
+                                reinterpret_cast<float*>(buffer[k].p)[l]));
                 }
             }
         }
@@ -1315,7 +1318,7 @@ void Summarize::differential_feature_splicing(FILE* output,
                                               double effect_size)
 {
     if (isnan(effect_size)) {
-        effect_size = 0.1;
+        effect_size = 0.2;
     }
     bool print_credible_interval = !isnan(credible_interval);
     double lower_quantile = 0.5 - credible_interval/2;
@@ -1402,22 +1405,38 @@ void Summarize::differential_feature_splicing(FILE* output,
         // pre-compute spliced in proportions
         for (unsigned int j = 0; j < C; ++j) {
             for (size_t k = 0; k < num_samples; ++k) {
+                double spliced_in_tgroup_expr_total = 0.0;
                 double spliced_in = -INFINITY;
                 BOOST_FOREACH (unsigned int tid, including_tids[i]) {
                     unsigned int tg = tgroup[tid];
-                    if (used_tgroups.find(tg) == used_tgroups.end()) continue;
+                    if (used_tgroups.find(tg) == used_tgroups.end()) {
+                        continue;
+                    }
 
                     unsigned int stg = tgroup_spliced_tgroup[tg];
-                    if (stg == (unsigned int) -1) continue;
+                    if (stg == (unsigned int) -1) {
+                        continue;
+                    }
                     unsigned int stid = tid_tgroup_index[tid];
 
-                    double x = log(splicing[stg][k][j][stid]) +
-                               tgroup_means[k][j][tg];
+                    double tgm = tgroup_means[k][j][tg];
+                    if (spliced_in_tgroup_expr_total == 0.0) {
+                        spliced_in_tgroup_expr_total = tgm;
+                    }
+                    else {
+                        spliced_in_tgroup_expr_total = logaddexp(
+                                spliced_in_tgroup_expr_total, tgm);
+                    }
+
+                    double x = log(splicing[stg][k][j][stid]) + tgm;
+
                     if (isinf(spliced_in)) spliced_in = x;
                     else spliced_in = logaddexp(spliced_in, x);
                 }
+                spliced_in -= spliced_in_tgroup_expr_total;
 
                 double spliced_out = -INFINITY;
+                double spliced_out_tgroup_expr_total = 0.0;
                 BOOST_FOREACH (unsigned int tid, excluding_tids[i]) {
                     unsigned int tg = tgroup[tid];
                     if (used_tgroups.find(tg) == used_tgroups.end()) continue;
@@ -1426,14 +1445,24 @@ void Summarize::differential_feature_splicing(FILE* output,
                     if (stg == (unsigned int) -1) continue;
                     unsigned int stid = tid_tgroup_index[tid];
 
+                    double tgm = tgroup_means[k][j][tg];
+                    if (spliced_out_tgroup_expr_total == 0.0) {
+                        spliced_out_tgroup_expr_total = tgm;
+                    }
+                    else {
+                        spliced_out_tgroup_expr_total = logaddexp(
+                                spliced_out_tgroup_expr_total, tgm);
+                    }
+
                     double x = log(splicing[stg][k][j][stid]) +
                                tgroup_means[k][j][tg];
                     if (isinf(spliced_out)) spliced_out = x;
                     else spliced_out = logaddexp(spliced_out, x);
                 }
+                spliced_out -= spliced_out_tgroup_expr_total;
 
                 spliced_in_proportion[j][k] =
-                    (spliced_in - logaddexp(spliced_in, spliced_out)) / M_LN2;
+                    exp(spliced_in - logaddexp(spliced_in, spliced_out));
             }
         }
 
@@ -1547,7 +1576,6 @@ void Summarize::differential_feature_splicing(FILE* output,
             }
         }
     }
-
 }
 
 
