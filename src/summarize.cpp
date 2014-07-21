@@ -1367,7 +1367,7 @@ void Summarize::differential_feature_splicing(FILE* output,
             "\tcondition_b"
             "\tdown_pr"
             "\tup_pr"
-            "\tmedian_log2_fold_change");
+            "\tmedian_change");
 
     if (print_credible_interval) {
         fprintf(output, "\tlower_log2_fold_change\tupper_log2_fold_change");
