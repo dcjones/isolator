@@ -54,7 +54,7 @@ class Analyze
         void add_sample(const char* condition_name,
                         const char* filename);
 
-        void run(hid_t file_id);
+        void run(hid_t file_id, bool dryrun);
 
     private:
         void setup_samplers();
@@ -283,6 +283,8 @@ class Analyze
 
         // a write buffer for converting doubles to floats before hdf5 output
         std::vector<float> tgroup_row_data;
+
+        friend void write_qc_data(FILE* fout, Analyze& analyze);
 };
 
 

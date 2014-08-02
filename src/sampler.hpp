@@ -121,6 +121,8 @@ class Sampler
 
         unsigned long num_frags() const;
 
+        unsigned long num_alignments() const;
+
     private:
         // Clear multiread assignments.
         void clear_multireads();

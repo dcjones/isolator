@@ -3276,3 +3276,10 @@ unsigned long Sampler::num_frags() const
     return lround(total_frag_count);
 }
 
+
+unsigned long Sampler::num_alignments() const
+{
+    return weight_matrix->ncol;
+}
+
+
