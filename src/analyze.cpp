@@ -2081,8 +2081,6 @@ void Analyze::sample(bool optimize_state)
         splice_mu_sigma_sampler_notify_queue.pop();
     }
 
-    // TODO: sample splice eta
-
     // sample experiment-level parameters
 
     for (size_t i = 0; i < T; i += block_size) {
@@ -2250,37 +2248,6 @@ void Analyze::compute_ts_scaling()
         }
     }
 }
-
-
-#if 0
-void Analyze::sample_condition_splice_eta()
-{
-    // compute adjusted parameters
-    double abs_condition_splice_eta = fabs(condition_splice_eta);
-    for (size_t i = 0; i < condition_splice_sigma.size(); ++i) {
-        condition_splice_sigma_adj[i] =
-            condition_splice_sigma[i] / abs_condition_splice_eta;
-    }
-
-    for (size_t i = 0; i < C; ++i) {
-        for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
-
-        }
-    }
-
-
-    // TODO
-
-
-    // we need to reparamaterize the condition_splice_sigmas
-    // and the condition_splice_mus, sample eta, then
-    // un-reparameterize
-
-
-
-
-}
-#endif
 
 
 void Analyze::choose_initial_values()
