@@ -55,11 +55,11 @@ class Analyze
                         const char* filename);
 
         void run(hid_t file_id, bool dryrun);
+        void cleanup();
 
     private:
         void setup_samplers();
         void setup_output(hid_t output_file_id);
-        void cleanup();
         void warmup();
         void sample(bool optimize_state);
         void write_output(size_t sample_num);

@@ -1742,7 +1742,6 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
     setup_samplers();
 
     if (dryrun) {
-        cleanup();
         return;
     }
 
@@ -1922,7 +1921,6 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
     H5Sclose(h5_sample_scaling_mem_dataspace);
 
     Logger::pop_task(sample_task_name);
-    cleanup();
 }
 
 

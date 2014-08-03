@@ -1216,7 +1216,7 @@ static int isolator_analyze(int argc, char* argv[])
 
     hid_t output_file_id = 0;
     if (!dryrun) {
-        hid_t output_file_id =
+        output_file_id =
             H5Fcreate(output_filename, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
         if (output_file_id < 0) {
             Logger::abort("Unable to open %s for writing.", output_filename);
@@ -1286,11 +1286,11 @@ static int isolator_analyze(int argc, char* argv[])
     timer.start();
 
     analyze.run(output_file_id, dryrun);
-
     if (qc_output_file) {
         write_qc_data(qc_output_file, analyze);
         if (qc_output_file != stdout) fclose(qc_output_file);
     }
+    analyze.cleanup();
 
     boost::timer::cpu_times elapsed_time = timer.elapsed();
 
