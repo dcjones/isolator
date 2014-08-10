@@ -1250,9 +1250,8 @@ float FragWeightEstimationThread::transcript_weight(
     }
 
     tw = 0.0;
-
     for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
-        float frag_len_pr = frag_len_p(frag_len);
+        float frag_len_pr = frag_len_p(frag_len) / frag_len_c(tlen);
         tw += frag_len_pr * ws[frag_len];
     }
 

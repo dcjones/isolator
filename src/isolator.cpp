@@ -920,20 +920,20 @@ void write_qc_data(FILE* fout, Analyze& analyze)
                 analyze.qsamplers[i]->num_alignments());
 
         // Strand Specificity
-        fprintf(fout, "  strand_specificity: %0.3f",
+        fprintf(fout, "  strand_specificity: %0.3f\n",
                 (double) analyze.fms[i]->strand_specificity);
 
         // Fragment length distribution
         if (analyze.fms[i]->frag_len_dist) {
             fprintf(fout, "  frag_length_distribution: [");
-            pos_t binsize = 10;
+            pos_t binsize = 1;
             float lastcdf = 0.0;
             pos_t x = 0;
             while (lastcdf < 1.0 - 1e-5) {
                 x += binsize;
                 double cdf = analyze.fms[i]->frag_len_dist->cdf(x);
                 if (x > binsize) fputs(", ", fout);
-                fprintf(fout, "%0.4f", cdf - analyze.fms[i]->frag_len_dist->cdf(x - binsize + 1));
+                fprintf(fout, "%0.8f", cdf - analyze.fms[i]->frag_len_dist->cdf(x - binsize));
                 lastcdf = cdf;
             }
             fputs("]\n", fout);

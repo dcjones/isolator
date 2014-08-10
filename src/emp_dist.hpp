@@ -7,7 +7,6 @@
 #include <climits>
 
 
-/* A smoothed emperical distribution over [0, inf] using parzen windows. */
 class EmpDist
 {
     public:
@@ -26,8 +25,7 @@ class EmpDist
          */
         EmpDist(const unsigned int* vals,
                 const unsigned int* lens,
-                size_t n,
-                float w = 0.1);
+                size_t n);
 
         ~EmpDist();
 
@@ -41,6 +39,8 @@ class EmpDist
         float cdf(unsigned int x) const;
 
     private:
+        float compute_median() const;
+
         /* Unprotected pdf computation.  */
         float eval(unsigned int x) const;
 
@@ -53,9 +53,6 @@ class EmpDist
 
         /* Sum of `lens`. */
         size_t m;
-
-        /* Smoothing coefficient */
-        float w;
 
         /* Precomputed median */
         mutable float med;
