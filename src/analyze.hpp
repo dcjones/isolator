@@ -285,6 +285,8 @@ class Analyze
         std::vector<float> tgroup_row_data;
 
         friend void write_qc_data(FILE* fout, Analyze& analyze);
+        friend void compare_seqbias(Analyze& analyze, TranscriptSet& ts,
+                                    const char* genome_filename);
 };
 
 

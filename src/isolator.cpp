@@ -8,6 +8,7 @@
 #include <boost/accumulators/statistics/variance.hpp>
 #include <boost/foreach.hpp>
 #include <boost/lexical_cast.hpp>
+#include <boost/numeric/ublas/matrix.hpp>
 #include <boost/thread.hpp>
 #include <cstdlib>
 #include <cstring>
@@ -908,8 +909,93 @@ static bool is_sam_file(const char* filename)
 }
 
 
+void compare_seqbias(std::vector<FragmentModel*>& fms,
+                     TranscriptSet& ts, const char* genome_filename,
+                     boost::numeric::ublas::matrix<double>& mean_abs_ratio)
+{
+    std::fill(mean_abs_ratio.data().begin(), mean_abs_ratio.data().end(), 0.0);
+
+    std::vector<Interval> intervals;
+    ts.get_exonic(intervals);
+    std::sort(intervals.begin(), intervals.end());
+
+    faidx_t* genome_file = fai_load(genome_filename);
+    if (!genome_file) {
+        Logger::abort("Can't open FASTA file %s.", genome_filename);
+    }
+
+    SeqName current_seqname;
+    twobitseq current_seq_pos, current_seq_neg;
+    bool have_seq = false;
+
+    pos_t L = fms[0]->sb[0]->getL(),
+          R = fms[0]->sb[0]->getR();
+    pos_t LR = std::max<pos_t>(L, R);
+
+    std::vector<double> bias(fms.size());
+
+    BOOST_FOREACH (Interval& interval, intervals) {
+        if (interval.seqname != current_seqname) {
+            current_seqname = interval.seqname;
+            int seqlen;
+            char* seq = faidx_fetch_seq(genome_file, current_seqname.get().c_str(),
+                                        0, INT_MAX, &seqlen);
+            if (seq) {
+                current_seq_pos = seq;
+                current_seq_neg = current_seq_pos;
+                current_seq_neg.revcomp();
+                have_seq = true;
+            }
+            else {
+                have_seq = false;
+            }
+        }
+
+        if (!have_seq) continue;
+
+        if (interval.start < LR || interval.end >= (pos_t) current_seq_pos.size() - LR) {
+            continue;
+        }
+
+        for (pos_t i = 0; i < interval.length(); ++i) {
+            for (size_t j = 0; j < fms.size(); ++j) {
+                bias[j] = fms[j]->sb[0]->get_bias(current_seq_pos, interval.start);
+            }
+
+            for (size_t j = 0; j < fms.size(); ++j) {
+                for (size_t k = 0; k < fms.size(); ++k) {
+                    mean_abs_ratio(j, k) += bias[j] - bias[k];
+                }
+            }
+
+            for (size_t j = 0; j < fms.size(); ++j) {
+                bias[j] = fms[j]->sb[1] ?
+                    fms[j]->sb[1]->get_bias(current_seq_pos, interval.start) :
+                    1.0;
+            }
+
+            for (size_t j = 0; j < fms.size(); ++j) {
+                for (size_t k = 0; k < fms.size(); ++k) {
+                    mean_abs_ratio(j, k) += bias[j] - bias[k];
+                }
+            }
+        }
+    }
+}
+
+
 void write_qc_data(FILE* fout, Analyze& analyze)
 {
+    boost::numeric::ublas::matrix<double> seqbias_mean_abs_ratio;
+    seqbias_mean_abs_ratio.resize(analyze.fms.size(), analyze.fms.size());
+
+    std::fill(seqbias_mean_abs_ratio.data().begin(), seqbias_mean_abs_ratio.data().end(), 0.0);
+
+    if (analyze.fms[0]->sb[0]) {
+        compare_seqbias(analyze.fms, analyze.transcripts, analyze.genome_filename,
+                        seqbias_mean_abs_ratio);
+    }
+
     for (size_t i = 0; i < analyze.K; ++i) {
         fprintf(fout,
                 "- filename: %s\n"
@@ -961,9 +1047,13 @@ void write_qc_data(FILE* fout, Analyze& analyze)
             fprintf(fout, "  three_prime_bias: %e", analyze.fms[i]->tpbias->p);
         }
 
-        // TODO: Seq bias
-        // How best to show this? KL-divergence or JS-divergence between
-        // foreground and background model?
+        if (analyze.fms[i]->sb[0]) {
+            fprintf(fout, "  seqbias_mean_abs_ratio: [");
+            fprintf(fout, "%0.3f", seqbias_mean_abs_ratio(i, 0));
+            for (size_t j = 1; j < analyze.fms.size(); ++j) {
+                fprintf(fout, ", %0.3f", seqbias_mean_abs_ratio(i, j));
+            }
+        }
     }
 }
 
