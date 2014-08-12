@@ -54,12 +54,12 @@ class Analyze
         void add_sample(const char* condition_name,
                         const char* filename);
 
-        void run(hid_t file_id);
+        void run(hid_t file_id, bool dryrun);
+        void cleanup();
 
     private:
         void setup_samplers();
         void setup_output(hid_t output_file_id);
-        void cleanup();
         void warmup();
         void sample(bool optimize_state);
         void write_output(size_t sample_num);
@@ -283,6 +283,10 @@ class Analyze
 
         // a write buffer for converting doubles to floats before hdf5 output
         std::vector<float> tgroup_row_data;
+
+        friend void write_qc_data(FILE* fout, Analyze& analyze);
+        friend void compare_seqbias(Analyze& analyze, TranscriptSet& ts,
+                                    const char* genome_filename);
 };
 
 

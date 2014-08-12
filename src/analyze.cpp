@@ -1688,7 +1688,7 @@ void Analyze::compute_xs()
 }
 
 
-void Analyze::run(hid_t output_file_id)
+void Analyze::run(hid_t output_file_id, bool dryrun)
 {
     C = condition_index.size();
     Q.resize(K, N);
@@ -1740,6 +1740,11 @@ void Analyze::run(hid_t output_file_id)
     choose_initial_values();
 
     setup_samplers();
+
+    if (dryrun) {
+        return;
+    }
+
     setup_output(output_file_id);
 
     BOOST_FOREACH (Sampler* qsampler, qsamplers) {
@@ -1916,7 +1921,6 @@ void Analyze::run(hid_t output_file_id)
     H5Sclose(h5_sample_scaling_mem_dataspace);
 
     Logger::pop_task(sample_task_name);
-    cleanup();
 }
 
 

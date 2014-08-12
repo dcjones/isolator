@@ -1,5 +1,6 @@
 
 #include <boost/math/special_functions/fpclassify.hpp>
+#include <algorithm>
 
 #include "common.hpp"
 #include "emp_dist.hpp"
@@ -8,7 +9,6 @@
 EmpDist::EmpDist(EmpDist& other)
     : n(other.n)
     , m(other.m)
-    , w(other.w)
     , med(other.med)
     , pdf_memo(other.pdf_memo)
     , cdf_memo(other.cdf_memo)
@@ -21,8 +21,7 @@ EmpDist::EmpDist(EmpDist& other)
 }
 
 
-EmpDist::EmpDist(const unsigned int* vals, const unsigned int* lens,
-                 size_t n, float w)
+EmpDist::EmpDist(const unsigned int* vals, const unsigned int* lens, size_t n)
     : med(NAN)
 {
     /* count number of non-zero observations. */
@@ -45,23 +44,14 @@ EmpDist::EmpDist(const unsigned int* vals, const unsigned int* lens,
     }
 
     this->n = nnz;
-    this->w = w;
+    this->med = compute_median();
 }
 
 
-EmpDist::~EmpDist()
-{
-    delete [] vals;
-    delete [] lens;
-}
-
-
-float EmpDist::median() const
+float EmpDist::compute_median() const
 {
     if (n == 0) return NAN;
-    if (boost::math::isfinite(med)) return med;
 
-    /* Dumb O(n) median computation. */
     size_t i = 0, j = n - 1;
     unsigned int u = lens[0], v = lens[n - 1];
     while (i < j) {
@@ -75,31 +65,26 @@ float EmpDist::median() const
         }
     }
 
-    return med = (float) vals[i];
+    return vals[i];
 }
 
 
-/* A geometric weight function, as in,
- *
- * Wang, M. C., & Van Ryzin, J. (1981). A class of smooth estimators for
- * discrete distributions. Biometrika, 68(1), 301. Biometrika Trust.
- */
-static float wf_geom(unsigned int u, unsigned int v, float w)
+EmpDist::~EmpDist()
 {
-    if (u == v) {
-        return 1.0 - w;
-    }
-    else {
-        float x = abs((float) u - (float) v);
-        return 0.5 * (1.0 - w) * powf(w, x);
-    }
+    delete [] vals;
+    delete [] lens;
+}
+
+
+float EmpDist::median() const
+{
+    if (n == 0) return NAN;
+    else return med;
 }
 
 
 float EmpDist::eval(unsigned int x) const
 {
-    /* An approximation made for efficiency. Assign a probability of 0 to a
-     * value that is greater than any of our observations. */
     if (x > vals[n - 1]) return 0.0;
 
     boost::unordered_map<unsigned int, float>::iterator idx;
@@ -109,36 +94,8 @@ float EmpDist::eval(unsigned int x) const
     }
 
     /* binary search for the nearest item in vals */
-    int a = 0;
-    int b = n - 1;
-    int mid;
-    while (a < b) {
-        mid = (a + b) / 2;
-        if (vals[mid] < x) a = mid + 1;
-        else               b = mid;
-    }
-
-    static const float eps = 1e-6;
-    float ans = 0.0;
-    float y;
-
-    /* walk to the left */
-    for (int i = a - 1; i >= 0; --i) {
-        y = wf_geom(x, vals[i], w) * (float) lens[i];
-        ans += y;
-        if (y < eps) break;
-    }
-
-    /* walk to the right */
-    for (int i = a; i < (int) n; ++i) {
-        y = wf_geom(x, vals[i], w) * (float) lens[i];
-        ans += y;
-        if (y < eps) break;
-    }
-
-    ans /= (float) m;
-
-    if (!boost::math::isfinite(ans)) ans = 0.0;
+    unsigned int i = std::lower_bound(vals, vals + n, x) - vals;
+    float ans = vals[i] == x ? lens[i] / (float) m : 0.0;
 
     pdf_memo.insert(std::pair<unsigned int, double>(x, ans));
     return ans;
@@ -159,18 +116,6 @@ float EmpDist::cdf(unsigned int x) const
     boost::unordered_map<unsigned int, float>::iterator idx;
     idx = cdf_memo.find(x);
     if (idx != cdf_memo.end()) return idx->second;
-
-    /* This is the correct way to do this, but it is O(n^2),
-     * so we approximate by returning the cdf of the unsmoothed distribution .*/
-#if 0
-
-    float ans = 0.0;
-    unsigned int u;
-    for (u = 0; u <= x; ++u) {
-        ans += eval(u);
-    }
-    return ans;
-#endif
 
     float ans = 0.0;
     size_t i;

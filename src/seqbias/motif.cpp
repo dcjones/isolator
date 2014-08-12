@@ -907,7 +907,7 @@ string motif::model_graph(int offset) const
     /* print nodes */
     size_t i, j;
     for (j = 0; j < m; j++) {
-        snprintf(strbuf, sizeof(strbuf), 
+        snprintf(strbuf, sizeof(strbuf),
                  "n%d [label=\"%d\",pos=\"%d,0\",style=\"%s\"];\n",
                  (int) j, (int) j - offset, (int) j * 100,
                  parents[j * m + j] ? "solid" : "dotted");
@@ -951,6 +951,85 @@ double motif::eval(const twobitseq& seq, size_t offset) const
     }
 
     return exp(ll1 - ll0);
+}
+
+
+void motif::eval_foreground_background(const twobitseq& seq, size_t offset,
+                                       double* p0, double* p1) const
+{
+    double ll0 = 0.0;
+    double ll1 = 0.0;
+    kmer K;
+
+    size_t n = P0->nrows();
+    size_t i;
+    for (i = 0; i < n; ++i) {
+        if (nparents != NULL && nparents[i] == 0) continue;
+        if (seq.make_kmer(K, offset, parents + i * m, m) == 0) continue;
+
+        ll0 += (*P0)(i, K);
+        ll1 += (*P1)(i, K);
+    }
+
+    *p0 = ll0;
+    *p1 = ll1;
+}
+
+
+void motif::estimate_js_divergence(const motif& other, double* d0, double* d1,
+                                   size_t num_samples)
+{
+    if (m != other.m) {
+        Logger::abort("Cannot compute the divergence between two motifs over different lengths");
+    }
+
+    // find common positions
+    size_t* positions = new size_t [m];
+    size_t k = 0;
+    for (size_t j = 0; j < m; ++j) {
+        for (size_t i = 0; i < m; ++i) {
+            if (parents[j * m + i] || other.parents[j * m + i]) {
+                positions[k++] = j;
+                break;
+            }
+        }
+    }
+
+    twobitseq seq;
+    seq.resize(m);
+
+    double p0, p1, q0, q1;
+    double p0sum = 0.0, p1sum = 0.0, q0sum = 0.0, q1sum = 0.0;
+    double dpq0 = 0.0, dqp0 = 0.0, dpq1 = 0.0, dqp1 = 0.0;
+
+    for (size_t s = 0; s < num_samples; ++s) {
+        for (size_t l = 0; l < k; ++l) {
+            seq.setnuc(l, rand() % 4);
+        }
+
+        eval_foreground_background(seq, 0, &p0, &p1);
+        other.eval_foreground_background(seq, 0, &q0, &q1);
+
+        double expp0 = exp(p0),
+               expp1 = exp(p1),
+               expq0 = exp(q0),
+               expq1 = exp(q1);
+
+        dpq0 += (p0 - q0) * expp0;
+        dqp0 += (q0 - p0) * expq0;
+        dpq1 += (p1 - q1) * expp1;
+        dqp1 += (q1 - p1) * expq1;
+
+        p0sum += expp0;
+        p1sum += expp1;
+        q0sum += expq0;
+        q1sum += expq1;
+    }
+
+    delete [] positions;
+
+    *d0 = ((dpq0 / p0sum) + (dqp0 / q0sum)) / 2;
+    *d1 = ((dpq1 / p1sum) + (dqp1 / q1sum)) / 2;
 }
 
 

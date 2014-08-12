@@ -790,8 +790,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
             sum_lens += g->second;
         }
 
-        frag_len_dist = new EmpDist(frag_len_vals, frag_len_lens, frag_lens.size(),
-                                    constants::frag_len_dist_smoothing);
+        frag_len_dist = new EmpDist(frag_len_vals, frag_len_lens, frag_lens.size());
 
         delete [] frag_len_vals;
         delete [] frag_len_lens;

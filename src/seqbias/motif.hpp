@@ -49,8 +49,19 @@ class motif
          *  adjusting position labels by the given offset. */
         std::string model_graph(int offset) const;
 
+        /* Estimate the JS divergence between two motifs.
+         *
+         * They motifs must of the same length. The estimation is performed by
+         * sampling over sequences of length 40.
+         */
+        void estimate_js_divergence(const motif& other, double* d0, double* d1,
+                                      size_t num_samples=10000);
+
     private:
         motif();
+
+        void eval_foreground_background(const twobitseq& seq, size_t offset,
+                                        double* p0, double* p1) const;
 
         size_t num_parents(size_t i) const;
         size_t num_params() const;

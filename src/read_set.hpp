@@ -97,6 +97,7 @@ struct AlignmentPair
     AlignmentPair();
     AlignmentPair(const AlignmentPair& other);
 
+    bool operator == (const AlignmentPair& other) const;
     bool operator < (const AlignmentPair& other) const;
 
     bool valid_frag() const;

@@ -8,6 +8,7 @@
 #include <boost/accumulators/statistics/variance.hpp>
 #include <boost/foreach.hpp>
 #include <boost/lexical_cast.hpp>
+#include <boost/numeric/ublas/matrix.hpp>
 #include <boost/thread.hpp>
 #include <cstdlib>
 #include <cstring>
@@ -370,47 +371,6 @@ static int isolator_summarize(int argc, char* argv[])
 
     //Logger::end();
     return EXIT_SUCCESS;
-}
-
-
-static void print_analyze_usage(FILE* fout)
-{
-    fprintf(fout,
-            "Usage: isolator analyze [options] genes.gtf a1.bam[,a2.bam...] [b1.bam[,b2.bam...]]\n\n"
-            "or\n\n"
-            "       isolator analyze [options] genes.gtf experiment-description.yml\n");
-}
-
-static void print_analyze_help(FILE* fout)
-{
-    print_analyze_usage(fout);
-    fprintf(fout,
-        "\nOptions:\n"
-        "-h, --help                Print this help message\n"
-        "-o, --output=FILE         File to write HDF5 output to (default: isolator-output.hdf5)\n"
-        "    --introns             Input consists of a BED file containing introns.\n"
-        "    --exons               Input consists of a BED file containing exons.\n"
-        "-v, --verbose             Print a bunch of information useful mainly for debugging\n"
-        "-g, --genomic-seq=FILE    Correct for sequence bias, given the a the sequence\n"
-        "                          against which the reads are aligned, in FAST format.\n"
-        "-p, --threads=N           number of threads to use.\n"
-        "    --no-gc-correction    disable fragment GC-content correction.\n"
-        "    --no-3p-bias          disable trancript 3' bias correction.\n"
-        "-N, --num-samples         generate this many samples (default: 250)\n"
-        "-B, --burnin              warmup for this many samples before collecting data (default: 10)\n\n"
-        "Model parameters:\n"
-        "    --experiment_tgroup_sigma_alpha\n"
-        "    --experiment_tgroup_sigma_beta\n"
-        "    --experiment_splice_sigma_alpha\n"
-        "    --experiment_splice_sigma_beta\n"
-        "    --condition_tgroup_alpha\n"
-        "    --condition_tgroup_beta_a\n"
-        "    --condition_tgroup_beta_b\n"
-        "    --condition_splice_alpha\n"
-        "    --condition_splice_beta_a\n"
-        "    --condition_splice_beta_b\n"
-        "\n"
-        "See 'isolator help analyze' for more.\n");
 }
 
 
@@ -949,12 +909,217 @@ static bool is_sam_file(const char* filename)
 }
 
 
+void compare_seqbias(std::vector<FragmentModel*>& fms,
+                     TranscriptSet& ts, const char* genome_filename,
+                     boost::numeric::ublas::matrix<double>& mean_abs_ratio)
+{
+    std::fill(mean_abs_ratio.data().begin(), mean_abs_ratio.data().end(), 0.0);
+
+    std::vector<Interval> intervals;
+    ts.get_exonic(intervals);
+    std::sort(intervals.begin(), intervals.end());
+
+    faidx_t* genome_file = fai_load(genome_filename);
+    if (!genome_file) {
+        Logger::abort("Can't open FASTA file %s.", genome_filename);
+    }
+
+    SeqName current_seqname;
+    twobitseq current_seq_pos, current_seq_neg;
+    bool have_seq = false;
+
+    pos_t L = fms[0]->sb[0]->getL(),
+          R = fms[0]->sb[0]->getR();
+    pos_t LR = std::max<pos_t>(L, R);
+
+    std::vector<double> bias(fms.size());
+
+    const size_t max_positions = 100000;
+    size_t num_positions = 0;
+
+    BOOST_FOREACH (Interval& interval, intervals) {
+        if (interval.seqname != current_seqname) {
+            current_seqname = interval.seqname;
+            int seqlen;
+            char* seq = faidx_fetch_seq(genome_file, current_seqname.get().c_str(),
+                                        0, INT_MAX, &seqlen);
+            if (seq) {
+                current_seq_pos = seq;
+                current_seq_neg = current_seq_pos;
+                current_seq_neg.revcomp();
+                have_seq = true;
+            }
+            else {
+                have_seq = false;
+            }
+        }
+
+        if (!have_seq) continue;
+
+        if (interval.start < LR || interval.end >= (pos_t) current_seq_pos.size() - LR) {
+            continue;
+        }
+
+        for (pos_t i = 0; i < interval.length(); ++i) {
+            for (size_t j = 0; j < fms.size(); ++j) {
+                bias[j] = fms[j]->sb[0]->get_bias(current_seq_pos, interval.start);
+            }
+
+            for (size_t j = 0; j < fms.size(); ++j) {
+                for (size_t k = 0; k < fms.size(); ++k) {
+                    mean_abs_ratio(j, k) += abs(log2(bias[j]) - log2(bias[k]));
+                }
+            }
+
+            for (size_t j = 0; j < fms.size(); ++j) {
+                bias[j] = fms[j]->sb[1] ?
+                    fms[j]->sb[1]->get_bias(current_seq_pos, interval.start) :
+                    1.0;
+            }
+
+            for (size_t j = 0; j < fms.size(); ++j) {
+                for (size_t k = 0; k < fms.size(); ++k) {
+                    mean_abs_ratio(j, k) += abs(log2(bias[j]) - log2(bias[k]));
+                }
+            }
+        }
+
+        num_positions += interval.length();
+        if (num_positions >= max_positions) break;
+    }
+
+    BOOST_FOREACH (double& x, mean_abs_ratio.data()) {
+        x /= num_positions;
+    }
+}
+
+
+void write_qc_data(FILE* fout, Analyze& analyze)
+{
+    boost::numeric::ublas::matrix<double> seqbias_mean_abs_ratio;
+    seqbias_mean_abs_ratio.resize(analyze.fms.size(), analyze.fms.size());
+
+    std::fill(seqbias_mean_abs_ratio.data().begin(), seqbias_mean_abs_ratio.data().end(), 0.0);
+
+    if (analyze.fms[0]->sb[0]) {
+        compare_seqbias(analyze.fms, analyze.transcripts, analyze.genome_filename,
+                        seqbias_mean_abs_ratio);
+    }
+
+    for (size_t i = 0; i < analyze.K; ++i) {
+        fprintf(fout,
+                "- filename: %s\n"
+                "  fragments: %lu\n"
+                "  alignments: %lu\n",
+                analyze.filenames[i].c_str(),
+                analyze.qsamplers[i]->num_frags(),
+                analyze.qsamplers[i]->num_alignments());
+
+        // Strand Specificity
+        fprintf(fout, "  strand_specificity: %0.3f\n",
+                (double) analyze.fms[i]->strand_specificity);
+
+        // Fragment length distribution
+        if (analyze.fms[i]->frag_len_dist) {
+            fprintf(fout, "  frag_length_distribution: [");
+            pos_t binsize = 1;
+            float lastcdf = 0.0;
+            pos_t x = 0;
+            while (lastcdf < 1.0 - 1e-5) {
+                x += binsize;
+                double cdf = analyze.fms[i]->frag_len_dist->cdf(x);
+                if (x > binsize) fputs(", ", fout);
+                fprintf(fout, "%0.8f", cdf - analyze.fms[i]->frag_len_dist->cdf(x - binsize));
+                lastcdf = cdf;
+            }
+            fputs("]\n", fout);
+        }
+
+        // GC bias
+        if (analyze.fms[i]->gcbias && constants::gcbias_num_bins > 0) {
+            fprintf(fout, "  gcbias_bins: [");
+            fprintf(fout, "%0.3f", analyze.fms[i]->gcbias->bins[0]);
+            for (size_t j = 1; j < constants::gcbias_num_bins; ++j) {
+                fprintf(fout, ", %0.3f", analyze.fms[i]->gcbias->bins[j]);
+            }
+            fprintf(fout, "]\n");
+
+            fprintf(fout, "  gcbias_bias: [");
+            fprintf(fout, "%0.3f", analyze.fms[i]->gcbias->bin_bias[0]);
+            for (size_t j = 1; j < constants::gcbias_num_bins; ++j) {
+                fprintf(fout, ", %0.3f", analyze.fms[i]->gcbias->bin_bias[j]);
+            }
+            fprintf(fout, "]\n");
+        }
+
+        // 3' bias
+        if (analyze.fms[i]->tpbias) {
+            fprintf(fout, "  three_prime_bias: %e\n", analyze.fms[i]->tpbias->p);
+        }
+
+        if (analyze.fms[i]->sb[0]) {
+            fprintf(fout, "  seqbias_mean_abs_ratio: [");
+            fprintf(fout, "%0.3f", seqbias_mean_abs_ratio(i, 0));
+            for (size_t j = 1; j < analyze.fms.size(); ++j) {
+                fprintf(fout, ", %0.3f", seqbias_mean_abs_ratio(i, j));
+            }
+            fprintf(fout, "]\n");
+        }
+    }
+}
+
+
+static void print_analyze_usage(FILE* fout)
+{
+    fprintf(fout,
+            "Usage: isolator analyze [options] genes.gtf a1.bam[,a2.bam...] [b1.bam[,b2.bam...]]\n\n"
+            "or\n\n"
+            "       isolator analyze [options] genes.gtf experiment-description.yml\n");
+}
+
+static void print_analyze_help(FILE* fout)
+{
+    print_analyze_usage(fout);
+    fprintf(fout,
+        "\nOptions:\n"
+        "-h, --help                Print this help message\n"
+        "-o, --output=FILE         File to write HDF5 output to (default: isolator-output.hdf5)\n"
+        "    --introns             Input consists of a BED file containing introns.\n"
+        "    --exons               Input consists of a BED file containing exons.\n"
+        "-v, --verbose             Print a bunch of information useful mainly for debugging\n"
+        "-g, --genomic-seq=FILE    Correct for sequence bias, given the a the sequence\n"
+        "                          against which the reads are aligned, in FAST format.\n"
+        "-n, --dry-run             initialize the sampler, but do not generate samples or output.\n"
+        "-Q, --qc=FILE             print quality control information to the given file\n"
+        "-p, --threads=N           number of threads to use.\n"
+        "    --no-gc-correction    disable fragment GC-content correction.\n"
+        "    --no-3p-bias          disable trancript 3' bias correction.\n"
+        "-N, --num-samples         generate this many samples (default: 250)\n"
+        "-B, --burnin              warmup for this many samples before collecting data (default: 10)\n\n"
+        "Model parameters:\n"
+        "    --experiment_tgroup_sigma_alpha\n"
+        "    --experiment_tgroup_sigma_beta\n"
+        "    --experiment_splice_sigma_alpha\n"
+        "    --experiment_splice_sigma_beta\n"
+        "    --condition_tgroup_alpha\n"
+        "    --condition_tgroup_beta_a\n"
+        "    --condition_tgroup_beta_b\n"
+        "    --condition_splice_alpha\n"
+        "    --condition_splice_beta_a\n"
+        "    --condition_splice_beta_b\n"
+        "\n"
+        "See 'isolator help analyze' for more.\n");
+}
+
+
 static int isolator_analyze(int argc, char* argv[])
 {
     static struct option long_options[] =
     {
         {"help",                 no_argument,       NULL, 'h'},
         {"output",               required_argument, NULL, 'o'},
+        {"qc",                   required_argument, NULL, 'Q'},
+        {"dry-run",              no_argument,       NULL, 'n'},
         {"seed",                 required_argument, NULL, 's'},
         {"introns",              no_argument,       NULL, 0},
         {"exons",                no_argument,       NULL, 0},
@@ -995,6 +1160,8 @@ static int isolator_analyze(int argc, char* argv[])
     bool use_introns = false;
     bool use_exons = false;
     unsigned int rng_seed = 0xaca430b9;
+    bool dryrun = false;
+    const char* qc_filename = NULL;
 
     // model parameter defaults
     double experiment_tgroup_sigma_alpha = 2.0,
@@ -1026,6 +1193,14 @@ static int isolator_analyze(int argc, char* argv[])
 
             case 'o':
                 output_filename = optarg;
+                break;
+
+            case 'n':
+                dryrun = true;
+                break;
+
+            case 'Q':
+                qc_filename = optarg;
                 break;
 
             case 's':
@@ -1140,15 +1315,31 @@ static int isolator_analyze(int argc, char* argv[])
         ts.read_gtf(annotation_filename, tss_cluster_dist);
     }
 
-    hid_t output_file_id = H5Fcreate(output_filename, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-    if (output_file_id < 0) {
-        Logger::abort("Unable to open %s for writing.", output_filename);
+    hid_t output_file_id = 0;
+    if (!dryrun) {
+        output_file_id =
+            H5Fcreate(output_filename, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+        if (output_file_id < 0) {
+            Logger::abort("Unable to open %s for writing.", output_filename);
+        }
+
+        // write metadata
+        write_gene_features(output_file_id, ts);
     }
 
-    // write metadata
-    write_gene_features(output_file_id, ts);
+    FILE* qc_output_file = NULL;
+    if (qc_filename) {
+        if (strcmp(qc_filename, "-") == 0) {
+            qc_output_file = stdout;
+        }
+        else {
+            qc_output_file = fopen(qc_filename, "w");
+            if (!qc_output_file) {
+                Logger::abort("Unable to open %s for writing.", qc_filename);
+            }
+        }
+    }
 
-    // TODO: write rng seed to metadata
     IsolatorMetadata metadata;
 
     bool has_experiment_description = false;
@@ -1195,7 +1386,12 @@ static int isolator_analyze(int argc, char* argv[])
     boost::timer::cpu_timer timer;
     timer.start();
 
-    analyze.run(output_file_id);
+    analyze.run(output_file_id, dryrun);
+    if (qc_output_file) {
+        write_qc_data(qc_output_file, analyze);
+        if (qc_output_file != stdout) fclose(qc_output_file);
+    }
+    analyze.cleanup();
 
     boost::timer::cpu_times elapsed_time = timer.elapsed();
 
@@ -1219,7 +1415,9 @@ static int isolator_analyze(int argc, char* argv[])
     strftime(time_string, 200, "%a, %d %b %Y %T %z", &timestruct);
     metadata.date = time_string;
 
-    write_metadata(output_file_id, metadata);
+    if (!dryrun) {
+        write_metadata(output_file_id, metadata);
+    }
     Logger::info("Finished. Have a nice day!");
     Logger::end();
 

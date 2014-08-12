@@ -86,8 +86,8 @@ bool Alignment::operator < (const Alignment& other) const
     if      (start  != other.start)  return start < other.start;
     else if (end    != other.end)    return end < other.end;
     else if (strand != other.strand) return strand < other.strand;
-    else if (mapq   != other.mapq)   return mapq < other.mapq;
-    else if (mismatch_count != other.mismatch_count) return mismatch_count < other.mismatch_count;
+    //else if (mapq   != other.mapq)   return mapq < other.mapq;
+    //else if (mismatch_count != other.mismatch_count) return mismatch_count < other.mismatch_count;
     else if (cigar_len != other.cigar_len) return cigar_len < other.cigar_len;
     else {
         return memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t)) < 0;
@@ -100,7 +100,7 @@ bool Alignment::operator == (const Alignment& other) const
     return start     == other.start &&
            end       == other.end &&
            strand    == other.strand &&
-           mapq      == other.mapq &&
+           //mapq      == other.mapq &&
            cigar_len == other.cigar_len &&
            memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t)) == 0;
 }
@@ -242,6 +242,19 @@ AlignmentPair::AlignmentPair(const AlignmentPair& other)
 }
 
 
+bool AlignmentPair::operator == (const AlignmentPair& other) const
+{
+    if (mate1 == other.mate2 ||
+        (mate1 != NULL && other.mate1 != NULL && *mate1 == *other.mate1)) {
+
+        return mate2 == other.mate2 ||
+            (mate2 != NULL && other.mate2 != NULL && *mate2 == *other.mate2);
+
+    }
+    else return false;
+}
+
+
 bool AlignmentPair::operator < (const AlignmentPair& other) const
 {
     if (mate1 == other.mate1 ||
@@ -252,7 +265,7 @@ bool AlignmentPair::operator < (const AlignmentPair& other) const
         else                          return *mate2 < *other.mate2;
     }
     else {
-        if (mate1 == NULL)            return other.mate1 != NULL;
+        if (mate1 == NULL)            return true;
         else if (other.mate1 == NULL) return false;
         else                          return *mate1 < *other.mate1;
     }
