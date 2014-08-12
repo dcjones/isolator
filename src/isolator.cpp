@@ -934,6 +934,9 @@ void compare_seqbias(std::vector<FragmentModel*>& fms,
 
     std::vector<double> bias(fms.size());
 
+    const size_t max_positions = 100000;
+    size_t num_positions = 0;
+
     BOOST_FOREACH (Interval& interval, intervals) {
         if (interval.seqname != current_seqname) {
             current_seqname = interval.seqname;
@@ -964,7 +967,7 @@ void compare_seqbias(std::vector<FragmentModel*>& fms,
 
             for (size_t j = 0; j < fms.size(); ++j) {
                 for (size_t k = 0; k < fms.size(); ++k) {
-                    mean_abs_ratio(j, k) += bias[j] - bias[k];
+                    mean_abs_ratio(j, k) += abs(log2(bias[j]) - log2(bias[k]));
                 }
             }
 
@@ -976,10 +979,17 @@ void compare_seqbias(std::vector<FragmentModel*>& fms,
 
             for (size_t j = 0; j < fms.size(); ++j) {
                 for (size_t k = 0; k < fms.size(); ++k) {
-                    mean_abs_ratio(j, k) += bias[j] - bias[k];
+                    mean_abs_ratio(j, k) += abs(log2(bias[j]) - log2(bias[k]));
                 }
             }
         }
+
+        num_positions += interval.length();
+        if (num_positions >= max_positions) break;
+    }
+
+    BOOST_FOREACH (double& x, mean_abs_ratio.data()) {
+        x /= num_positions;
     }
 }
 
@@ -1044,7 +1054,7 @@ void write_qc_data(FILE* fout, Analyze& analyze)
 
         // 3' bias
         if (analyze.fms[i]->tpbias) {
-            fprintf(fout, "  three_prime_bias: %e", analyze.fms[i]->tpbias->p);
+            fprintf(fout, "  three_prime_bias: %e\n", analyze.fms[i]->tpbias->p);
         }
 
         if (analyze.fms[i]->sb[0]) {
@@ -1053,6 +1063,7 @@ void write_qc_data(FILE* fout, Analyze& analyze)
             for (size_t j = 1; j < analyze.fms.size(); ++j) {
                 fprintf(fout, ", %0.3f", seqbias_mean_abs_ratio(i, j));
             }
+            fprintf(fout, "]\n");
         }
     }
 }
