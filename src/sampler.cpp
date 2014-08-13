@@ -1294,12 +1294,12 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
     if (a.mate1 && a.mate2) {
         pos_t offset1 = t.get_offset(a.mate1->strand == strand_pos ?
                                      a.mate1->start : a.mate1->end);
-        if (offset1 < 0 && offset1 >= tlen) return 0.0;
+        if (offset1 < 0 || offset1 >= tlen) return 0.0;
         w *= seqbias[a.mate1->strand == t.strand ? 0 : 1][offset1];
 
         pos_t offset2 = t.get_offset(a.mate2->strand == strand_pos ?
                                      a.mate2->start : a.mate2->end);
-        if (offset2 < 0 && offset2 >= tlen) return 0.0;
+        if (offset2 < 0 || offset2 >= tlen) return 0.0;
         w *= seqbias[a.mate2->strand == t.strand ? 0 : 1][offset2];
 
         pos_t offset = t.get_offset(
