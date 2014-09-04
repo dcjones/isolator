@@ -1285,10 +1285,10 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
 
         frag_len = std::min(max_frag_len, (pos_t) round(fm.frag_len_med()));
     }
-    else if (frag_len > tlen) {
+
+    if (frag_len > tlen) {
         return 0.0;
     }
-
 
     float w = 1.0;
     if (a.mate1 && a.mate2) {
