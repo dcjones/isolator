@@ -612,7 +612,8 @@ void FragmentModel::estimate(TranscriptSet& ts,
         const char* fa_fn,
         bool use_gc_correction,
         bool use_3p_correction,
-        bool tabulate_bias)
+        bool tabulate_bias,
+        std::set<std::string> bias_training_seqnames)
 {
     Queue<FragmentModelInterval*> q(constants::max_estimate_queue_size);
 
@@ -657,6 +658,10 @@ void FragmentModel::estimate(TranscriptSet& ts,
     std::vector<FragmentModelInterval*> seqbias_intervals;
     if (fa_fn) {
         for (interval = exonic.begin(); interval != exonic.end(); ++interval) {
+            if (!bias_training_seqnames.empty() &&
+                bias_training_seqnames.find(interval->seqname.get()) != bias_training_seqnames.end()) {
+                continue;
+            }
             seqbias_intervals.push_back(new FragmentModelInterval(
                 *interval,
                 FragmentModelInterval::EXONIC));

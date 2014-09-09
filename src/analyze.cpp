@@ -1081,6 +1081,7 @@ Analyze::Analyze(unsigned int rng_seed,
                  bool run_gc_correction,
                  bool run_3p_correction,
                  bool collect_qc_data,
+                 std::set<std::string> bias_training_seqnames,
                  double experiment_tgroup_sigma_alpha,
                  double experiment_tgroup_sigma_beta,
                  double experiment_splice_sigma_alpha,
@@ -1097,6 +1098,7 @@ Analyze::Analyze(unsigned int rng_seed,
     , genome_filename(genome_filename)
     , run_gc_correction(run_gc_correction)
     , run_3p_correction(run_3p_correction)
+    , bias_training_seqnames(bias_training_seqnames)
     , collect_qc_data(collect_qc_data)
     , K(0)
     , C(0)
@@ -1203,6 +1205,7 @@ class SamplerInitThread
                           bool run_gc_correction,
                           bool run_3p_correction,
                           bool collect_qc_data,
+                          std::set<std::string> bias_training_seqnames,
                           std::vector<Sampler*>& samplers,
                           Queue<int>& indexes)
             : filenames(filenames)
@@ -1212,6 +1215,7 @@ class SamplerInitThread
             , run_gc_correction(run_gc_correction)
             , run_3p_correction(run_3p_correction)
             , collect_qc_data(collect_qc_data)
+            , bias_training_seqnames(bias_training_seqnames)
             , samplers(samplers)
             , indexes(indexes)
             , rng_seed(rng_seed)
@@ -1227,7 +1231,8 @@ class SamplerInitThread
 
                 fms[index] = new FragmentModel();
                 fms[index]->estimate(transcripts, filenames[index].c_str(), fa_fn,
-                                     run_gc_correction, run_3p_correction, collect_qc_data);
+                                     run_gc_correction, run_3p_correction, collect_qc_data,
+                                     bias_training_seqnames);
 
                 samplers[index] = new Sampler(rng_seed,
                                               filenames[index].c_str(), fa_fn,
@@ -1256,6 +1261,7 @@ class SamplerInitThread
         bool run_gc_correction;
         bool run_3p_correction;
         bool collect_qc_data;
+        std::set<std::string> bias_training_seqnames;
 
         std::vector<Sampler*>& samplers;
 
@@ -1346,7 +1352,8 @@ void Analyze::setup_samplers()
     for (unsigned int i = 0; i < constants::num_threads; ++i) {
         threads[i] = new SamplerInitThread(rng_seed, filenames, genome_filename,
                                            transcripts, fms, run_gc_correction,
-                                           collect_qc_data, run_3p_correction,
+                                           run_3p_correction, collect_qc_data,
+                                           bias_training_seqnames,
                                            qsamplers, indexes);
         threads[i]->start();
     }

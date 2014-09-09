@@ -1134,6 +1134,9 @@ static void print_analyze_help(FILE* fout)
         "-p, --threads=N           number of threads to use.\n"
         "    --no-gc-correction    disable fragment GC-content correction.\n"
         "    --no-3p-bias          disable trancript 3' bias correction.\n"
+        "    --bias-training-seqs=FILE   a filename containing names (one per line) of sequences\n"
+        "                                to use to train sequence and GC bias models. By default\n"
+        "                                all sequences are used.\n"
         "-N, --num-samples         generate this many samples (default: 250)\n"
         "-B, --burnin              warmup for this many samples before collecting data (default: 10)\n\n"
         "Model parameters:\n"
@@ -1166,6 +1169,7 @@ static int isolator_analyze(int argc, char* argv[])
         {"verbose",              no_argument,       NULL, 'v'},
         {"genomic-seq",          required_argument, NULL, 'g'},
         {"threads",              required_argument, NULL, 'p'},
+        {"bias-training-seqs",   required_argument, NULL, 0},
         {"no-gc-correction",     no_argument,       NULL, 0},
         {"no-3p-correction",     no_argument,       NULL, 0},
         {"num-samples",          required_argument, NULL, 'N'},
@@ -1202,6 +1206,7 @@ static int isolator_analyze(int argc, char* argv[])
     unsigned int rng_seed = 0xaca430b9;
     bool dryrun = false;
     const char* qc_filename = NULL;
+    std::set<std::string> bias_training_seqnames;
 
     // model parameter defaults
     double experiment_tgroup_sigma_alpha = 2.0,
@@ -1268,7 +1273,7 @@ static int isolator_analyze(int argc, char* argv[])
                 break;
 
             case 0:
-                longopt_name = long_options[optidx].name;
+                longopt_name = std::string(long_options[optidx].name);
 
                 if (longopt_name == "no-gc-correction") {
                     run_gc_correction = false;
@@ -1314,6 +1319,18 @@ static int isolator_analyze(int argc, char* argv[])
                 }
                 else if (longopt_name == "condition_splice_beta_b") {
                     condition_splice_beta_b = strtod(optarg, NULL);
+                }
+                else if (longopt_name == "bias-training-seqs") {
+                    FILE* seqnames_input = fopen(optarg, "r");
+                    char buf[1024];
+                    if (!seqnames_input) {
+                        while (fgets(buf, sizeof(buf), seqnames_input)) {
+                            buf[strlen(buf) - 1] = '\0';
+                            bias_training_seqnames.insert(std::string(buf));
+                        }
+                    }
+
+                    fclose(seqnames_input);
                 }
                 break;
 
@@ -1406,6 +1423,7 @@ static int isolator_analyze(int argc, char* argv[])
     Analyze analyze(rng_seed, burnin, num_samples, ts, fa_fn,
                     run_gc_correction, run_3p_correction,
                     qc_output_file != NULL,
+                    bias_training_seqnames,
                     experiment_tgroup_sigma_alpha,
                     experiment_tgroup_sigma_beta,
                     experiment_splice_sigma_alpha,

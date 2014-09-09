@@ -39,6 +39,7 @@ class Analyze
                 bool run_gc_correction,
                 bool run_3p_correction,
                 bool collect_qc_data,
+                std::set<std::string> bias_training_seqnames,
                 double experiment_tgroup_sigma_alpha,
                 double experiment_tgroup_sigma_beta,
                 double experiment_splice_sigma_alpha,
@@ -91,6 +92,10 @@ class Analyze
 
         // True if 3' bias should be corrected
         bool run_3p_correction;
+
+        // If non-empty, contains names of sequence to which bias training
+        // should be restricted.
+        std::set<std::string> bias_training_seqnames;
 
         // True if extra extra QC data should be collected
         bool collect_qc_data;
