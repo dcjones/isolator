@@ -611,7 +611,8 @@ void FragmentModel::estimate(TranscriptSet& ts,
         const char* bam_fn,
         const char* fa_fn,
         bool use_gc_correction,
-        bool use_3p_correction)
+        bool use_3p_correction,
+        bool tabulate_bias)
 {
     Queue<FragmentModelInterval*> q(constants::max_estimate_queue_size);
 
@@ -698,16 +699,21 @@ void FragmentModel::estimate(TranscriptSet& ts,
                                  std::string(bam_fn) +
                                  std::string(")");
 
+        sb_tabulation[0].order = 1;
         sb[0] = new sequencing_bias(fa_fn, *seqbias_sense_pos,
                                     constants::seqbias_num_reads,
                                     constants::seqbias_left_pos,
                                     constants::seqbias_right_pos,
-                                    task_name0.c_str());
+                                    task_name0.c_str(),
+                                    tabulate_bias ? &sb_tabulation[0] : NULL);
+
+        sb_tabulation[1].order = 1;
         sb[1] = new sequencing_bias(fa_fn, *seqbias_antisense_pos,
                                     constants::seqbias_num_reads,
                                     constants::seqbias_left_pos,
                                     constants::seqbias_right_pos,
-                                    task_name1.c_str());
+                                    task_name1.c_str(),
+                                    tabulate_bias ? &sb_tabulation[1] : NULL);
     }
     else sb[0] = sb[1] = NULL;
 

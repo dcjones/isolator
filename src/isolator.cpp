@@ -994,6 +994,34 @@ void compare_seqbias(std::vector<FragmentModel*>& fms,
 }
 
 
+void write_seqbias_model(FILE* fout, SeqbiasTabulation& tabulation)
+{
+    size_t k = tabulation.order;
+    size_t four_to_k = 1 << (2 * tabulation.order);
+
+    char* kmerbuf = new char[k+1];
+
+    fprintf(fout, "    bias:\n");
+    for (size_t i = 0; i < tabulation.bias->nrows(); ++i) {
+        fprintf(fout, "      \"%ld\":\n", (pos_t) i - tabulation.offset);
+        for (kmer x = 0; x < four_to_k; ++x) {
+            num_to_nuc(kmerbuf, x, k);
+            fprintf(fout, "        \"%s\": %f\n",
+                    kmerbuf, (*tabulation.bias)(i, x));
+        }
+    }
+
+    fprintf(fout, "    divergence:\n");
+    for (size_t i = 0; i < tabulation.bias->nrows(); ++i) {
+        fprintf(fout, "      \"%ld\": %f\n",
+                (pos_t) i - tabulation.offset,
+                tabulation.divergence[i]);
+    }
+
+    delete [] kmerbuf;
+}
+
+
 void write_qc_data(FILE* fout, Analyze& analyze)
 {
     boost::numeric::ublas::matrix<double> seqbias_mean_abs_ratio;
@@ -1057,6 +1085,18 @@ void write_qc_data(FILE* fout, Analyze& analyze)
             fprintf(fout, "  three_prime_bias: %e\n", analyze.fms[i]->tpbias->p);
         }
 
+        // seqbias tabulation
+        if (analyze.fms[i]->sb[0]) {
+            fprintf(fout, "  sense_seqbias:\n");
+            write_seqbias_model(fout, analyze.fms[i]->sb_tabulation[0]);
+        }
+
+        if (analyze.fms[i]->sb[1]) {
+            fprintf(fout, "  antisense_seqbias:\n");
+            write_seqbias_model(fout, analyze.fms[i]->sb_tabulation[0]);
+        }
+
+        // seqbias pairwise comparisons
         if (analyze.fms[i]->sb[0]) {
             fprintf(fout, "  seqbias_mean_abs_ratio: [");
             fprintf(fout, "%0.3f", seqbias_mean_abs_ratio(i, 0));
@@ -1365,6 +1405,7 @@ static int isolator_analyze(int argc, char* argv[])
 
     Analyze analyze(rng_seed, burnin, num_samples, ts, fa_fn,
                     run_gc_correction, run_3p_correction,
+                    qc_output_file != NULL,
                     experiment_tgroup_sigma_alpha,
                     experiment_tgroup_sigma_beta,
                     experiment_splice_sigma_alpha,

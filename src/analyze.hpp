@@ -38,6 +38,7 @@ class Analyze
                 const char* genome_filename,
                 bool run_gc_correction,
                 bool run_3p_correction,
+                bool collect_qc_data,
                 double experiment_tgroup_sigma_alpha,
                 double experiment_tgroup_sigma_beta,
                 double experiment_splice_sigma_alpha,
@@ -90,6 +91,9 @@ class Analyze
 
         // True if 3' bias should be corrected
         bool run_3p_correction;
+
+        // True if extra extra QC data should be collected
+        bool collect_qc_data;
 
         // file names for the BAM/SAM file corresponding to each
         std::vector<std::string> filenames;

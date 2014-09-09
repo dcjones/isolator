@@ -16,6 +16,28 @@
 #include "motif.hpp"
 #include "samtools/faidx.h"
 
+
+/** A representation of tabulated sequence bias. */
+struct SeqbiasTabulation
+{
+    SeqbiasTabulation(unsigned int order=1)
+        : order(order), offset(0), bias(NULL)
+    {
+
+    }
+
+    ~SeqbiasTabulation()
+    {
+        delete bias;
+    }
+
+    unsigned int order;
+    pos_t offset;
+    kmer_matrix* bias;
+    std::vector<double> divergence;
+};
+
+
 /** A representation of sequencing bias for a particular dataset.
  */
 class sequencing_bias
@@ -23,19 +45,24 @@ class sequencing_bias
     public:
         /* Train a new model.
          *
-         * \param ref_fn    File name of an indexed FASTA file.
-         * \param T         Positions of reads
-         * \param max_reads How many reads (at most) to use.
-         * \param L         How many left positions to consider.
-         * \param R         How many right positions to consider.
-         * \param complexity_penalty Force sparser models by making this number
-         *                           larger.
+         * Args:
+         *   ref_fn: File name of an indexed FASTA file.
+         *   T: Positions of reads
+         *   max_reads:  How many reads (at most) to use.
+         *   L: How many left positions to consider.
+         *   R: How many right positions to consider.
+         *   task_name: Logger task_name
+         *   tabulation: If non-null, tabulate bias and store in this structure.
+         *               The 'order' field of this structure should be
+         *               initialized, e.g. to 1.
+         *   complexity_penalty: Force sparser models by making this number larger.
          */
         sequencing_bias(const char* ref_fn,
                         PosTable& T,
                         size_t max_reads,
                         pos_t L, pos_t R,
                         const char* task_name,
+                        SeqbiasTabulation* tabulation,
                         double complexity_penalty = 1.0);
 
         ~sequencing_bias();
@@ -58,6 +85,7 @@ class sequencing_bias
                    size_t max_reads,
                    pos_t L, pos_t R,
                    const char* task_name,
+                   SeqbiasTabulation* tabulation,
                    double complexity_penalty);
 
         /* left and right sequence context */
@@ -74,17 +102,6 @@ class sequencing_bias
         rng_t rng;
         boost::random::uniform_int_distribution<pos_t> random_uniform_int;
 };
-
-
-/** Tabulate the bias in a given dataset, optionally correcting for bias using
- *  the given model. */
-kmer_matrix tabulate_bias(double* kl,
-                          pos_t L, pos_t R, int k,
-                          const char* ref_fn,
-                          const char* reads_fn,
-                          bool mate1 = true,
-                          bool mate2 = true,
-                          const char* model_fn = NULL);
 
 
 #endif

@@ -148,12 +148,13 @@ sequencing_bias::sequencing_bias(const char* ref_fn,
                                  size_t max_reads,
                                  pos_t L, pos_t R,
                                  const char* task_name,
+                                 SeqbiasTabulation* tabulation,
                                  double complexity_penalty)
     : ref_f(NULL)
     , M(NULL)
 {
     build(ref_fn, T, max_reads, L, R,
-          task_name,
+          task_name, tabulation,
           complexity_penalty);
 }
 
@@ -177,6 +178,7 @@ void sequencing_bias::build(const char* ref_fn,
                             size_t max_reads,
                             pos_t L, pos_t R,
                             const char* task_name,
+                            SeqbiasTabulation* tabulation,
                             double complexity_penalty)
 {
     Logger::push_task(task_name);
@@ -211,6 +213,13 @@ void sequencing_bias::build(const char* ref_fn,
 
     std::deque<twobitseq*> foreground_seqs;
     std::deque<twobitseq*> background_seqs;
+
+    if (tabulation) {
+        tabulation->offset = L;
+        tabulation->bias = new kmer_matrix(L + R + 1, tabulation->order);
+        tabulation->bias->set_all(0.0);
+        tabulation->divergence.resize(L + R + 1);
+    }
 
     /* background sampling */
     int bg_samples = 1; // make this many samples for each read
@@ -263,8 +272,16 @@ void sequencing_bias::build(const char* ref_fn,
 
         if (strchr(local_seq, 'n') != NULL) continue;
 
-        foreground_seqs.push_back(new twobitseq(local_seq));
+        twobitseq* tbs = new twobitseq(local_seq);
+        foreground_seqs.push_back(tbs);
 
+        if (tabulation) {
+            kmer K;
+            for (pos_t pos = (tabulation->order-1); pos < (tabulation->order-1) + L + 1 + R; ++pos) {
+                K = tbs->get_kmer(tabulation->order, pos);
+                (*tabulation->bias)(pos - (tabulation->order-1), K) += 1;
+            }
+        }
 
         /* add a background sequence */
         /* adjust the current read position randomly, and sample */
@@ -290,6 +307,44 @@ void sequencing_bias::build(const char* ref_fn,
         }
     }
 
+    // estimate JS divergence
+    if (tabulation) {
+        // estimate a background distribution by averaging across the entire
+        // window
+        int four_to_k = 1 << (2 * tabulation->order);
+        double* bg = new double[four_to_k];
+        memset(bg, 0, four_to_k * sizeof(double));
+        for (pos_t pos = 0; pos < L + 1 + R; ++pos) {
+            for (kmer K = 0; K < (kmer) four_to_k; ++K) {
+                bg[K] += (*tabulation->bias)(pos, K);
+            }
+        }
+
+        tabulation->bias->make_distribution();
+
+        double z = 0.0;
+        for (kmer K = 0; K < (kmer) four_to_k; ++K) z += bg[K];
+        for (kmer K = 0; K < (kmer) four_to_k; ++K) bg[K] /= z;
+
+        std::fill(tabulation->divergence.begin(), tabulation->divergence.end(), 0.0);
+
+        for (pos_t pos = 0; pos < L + 1 + R; ++pos) {
+            tabulation->divergence[pos] = 0.0;
+            for (kmer K = 0; K < (kmer) four_to_k; ++K) {
+                if ((*tabulation->bias)(pos, K) > 0.0) {
+                    tabulation->divergence[pos] +=
+                        (*tabulation->bias)(pos, K) * (log2((*tabulation->bias)(pos, K)) - log2(bg[K]));
+                }
+
+                if (bg[K] > 0.0) {
+                    tabulation->divergence[pos] +=
+                        bg[K] * (log2(bg[K]) - log2((*tabulation->bias)(pos, K)));
+                }
+            }
+        }
+
+        delete [] bg;
+    }
 
     size_t max_parents  = 4;
     size_t max_distance = 10;

@@ -101,7 +101,8 @@ class FragmentModel
         FragmentModel();
         ~FragmentModel();
         void estimate(TranscriptSet& ts, const char* bam_fn, const char* fa_fn,
-                      bool use_gc_correction, bool use_3p_correction);
+                      bool use_gc_correction, bool use_3p_correction,
+                      bool tabulate_seqbias);
 
         /* Fragment length probability ,cdf, and median using a fallback when no
          * emperical distribution is available. */
@@ -124,6 +125,9 @@ class FragmentModel
         /* A model of sequence bias. */
         sequencing_bias* sb[2];
 
+        /* Tabulations of sequence bias. */
+        SeqbiasTabulation sb_tabulation[2];
+
         /* A model of fragment GC bias. */
         GCBias* gcbias;
 
@@ -132,6 +136,7 @@ class FragmentModel
 
         /* Distribution over fragment lengths. */
         EmpDist* frag_len_dist;
+
 };
 
 
