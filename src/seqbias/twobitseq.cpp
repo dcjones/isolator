@@ -283,6 +283,7 @@ void twobitseq::copy(const twobitseq& src, pos_t src_start, pos_t dest_start, po
         }
         else {
             setnuc(dest_start++, 0);
+            src_start++;
         }
     }
 }

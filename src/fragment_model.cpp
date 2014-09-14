@@ -659,7 +659,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     if (fa_fn) {
         for (interval = exonic.begin(); interval != exonic.end(); ++interval) {
             if (!bias_training_seqnames.empty() &&
-                bias_training_seqnames.find(interval->seqname.get()) != bias_training_seqnames.end()) {
+                bias_training_seqnames.find(interval->seqname.get()) == bias_training_seqnames.end()) {
                 continue;
             }
             seqbias_intervals.push_back(new FragmentModelInterval(

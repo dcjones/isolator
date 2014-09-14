@@ -115,16 +115,9 @@ void Transcript::get_sequence(twobitseq& dest, const twobitseq& src,
                               pos_t lpad, pos_t rpad) const
 {
     const pos_t len = exonic_length();
-
     dest.resize(len + lpad + rpad);
     pos_t off = 0;
-
     pos_t tstart = begin()->start;
-    while (tstart - lpad < 0) {
-        dest.setnuc(off, 0);
-        --lpad;
-        ++off;
-    }
 
     dest.copy(src, tstart - lpad, off, lpad);
     off += lpad;

@@ -1093,7 +1093,7 @@ void write_qc_data(FILE* fout, Analyze& analyze)
 
         if (analyze.fms[i]->sb[1]) {
             fprintf(fout, "  antisense_seqbias:\n");
-            write_seqbias_model(fout, analyze.fms[i]->sb_tabulation[0]);
+            write_seqbias_model(fout, analyze.fms[i]->sb_tabulation[1]);
         }
 
         // seqbias pairwise comparisons
@@ -1324,12 +1324,12 @@ static int isolator_analyze(int argc, char* argv[])
                     FILE* seqnames_input = fopen(optarg, "r");
                     char buf[1024];
                     if (!seqnames_input) {
-                        while (fgets(buf, sizeof(buf), seqnames_input)) {
-                            buf[strlen(buf) - 1] = '\0';
-                            bias_training_seqnames.insert(std::string(buf));
-                        }
+                        Logger::abort("Unable to open %s for reading.", optarg);
                     }
-
+                    while (fgets(buf, sizeof(buf), seqnames_input)) {
+                        buf[strlen(buf) - 1] = '\0';
+                        bias_training_seqnames.insert(std::string(buf));
+                    }
                     fclose(seqnames_input);
                 }
                 break;
