@@ -1544,7 +1544,9 @@ void Analyze::setup_output(hid_t file_id)
 
         // splicing parameters
         chunk_dims[1] = spliced_tgroup_indexes.size();
-        H5Pset_chunk(dataset_create_property, 2, chunk_dims);
+        if (!spliced_tgroup_indexes.empty()) {
+            H5Pset_chunk(dataset_create_property, 2, chunk_dims);
+        }
 
         h5_splice_param_type = H5Tvlen_create(H5T_NATIVE_FLOAT);
         if (h5_splice_param_type < 0) {
@@ -1592,7 +1594,9 @@ void Analyze::setup_output(hid_t file_id)
 
         // splicing
         chunk_dims[2] = spliced_tgroup_indexes.size();
-        H5Pset_chunk(dataset_create_property, 3, chunk_dims);
+        if (!spliced_tgroup_indexes.empty()) {
+            H5Pset_chunk(dataset_create_property, 3, chunk_dims);
+        }
 
         dims[2] = spliced_tgroup_indexes.size();
         h5_condition_splice_mu_dataspace = H5Screate_simple(3, dims, NULL);
@@ -1603,7 +1607,9 @@ void Analyze::setup_output(hid_t file_id)
                                dataset_create_property, H5P_DEFAULT);
 
         chunk_dims[1] = spliced_tgroup_indexes.size();
-        H5Pset_chunk(dataset_create_property, 2, chunk_dims);
+        if (!spliced_tgroup_indexes.empty()) {
+            H5Pset_chunk(dataset_create_property, 2, chunk_dims);
+        }
 
         dims[1] = spliced_tgroup_indexes.size();
         h5_condition_splice_sigma_dataspace = H5Screate_simple(2, dims, NULL);
@@ -1611,7 +1617,8 @@ void Analyze::setup_output(hid_t file_id)
         h5_condition_splice_sigma_dataset =
             H5Dcreate2_checked(file_id, "/condition/splice_sigma", h5_splice_param_type,
                                h5_condition_splice_sigma_dataspace, H5P_DEFAULT,
-                               dataset_create_property, H5P_DEFAULT);
+                               dims[1] > 0 ? dataset_create_property : H5P_DEFAULT,
+                               H5P_DEFAULT);
 
         H5Pclose(dataset_create_property);
     }
@@ -2036,7 +2043,7 @@ void Analyze::sample(bool optimize_state)
         gamma_beta_sampler->sample(
                 rng, condition_splice_beta, condition_splice_alpha,
                 condition_splice_beta_a, condition_splice_beta_b,
-                &condition_splice_sigma_work.at(0),
+                condition_splice_sigma_work.empty() ? NULL : &condition_splice_sigma_work.at(0),
                 condition_splice_sigma_work.size());
     assert_finite(condition_splice_beta);
 
@@ -2050,7 +2057,8 @@ void Analyze::sample(bool optimize_state)
     }
 
     experiment_splice_sigma = gamma_normal_sigma_sampler->sample(
-            rng, experiment_splice_sigma, &experiment_splice_sigma_work.at(0),
+            rng, experiment_splice_sigma,
+            experiment_splice_sigma_work.empty() ? NULL : &experiment_splice_sigma_work.at(0),
             experiment_splice_sigma_work.size(),
             experiment_splice_sigma_alpha, experiment_splice_sigma_beta);
 
@@ -2062,7 +2070,8 @@ void Analyze::sample(bool optimize_state)
     }
 
     experiment_tgroup_sigma = gamma_normal_sigma_sampler->sample(
-            rng, experiment_tgroup_sigma, &experiment_tgroup_sigma_work.at(0),
+            rng, experiment_tgroup_sigma,
+            experiment_tgroup_sigma_work.empty() ? NULL : &experiment_tgroup_sigma_work.at(0),
             experiment_tgroup_sigma_work.size(), experiment_tgroup_sigma_alpha,
             experiment_tgroup_sigma_beta);
 

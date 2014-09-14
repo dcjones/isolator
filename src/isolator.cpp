@@ -534,9 +534,12 @@ static void write_gene_features(hid_t file_id, TranscriptSet& ts)
     hid_t feature_dataspace = H5Screate_simple_checked(1, dims, NULL);
 
     hid_t dataset_create_property = H5Pcreate(H5P_DATASET_CREATE);
-    H5Pset_layout(dataset_create_property, H5D_CHUNKED);
-    H5Pset_chunk(dataset_create_property, 1, dims);
-    H5Pset_deflate(dataset_create_property, 7);
+
+    if (dims[0] > 0) {
+        H5Pset_layout(dataset_create_property, H5D_CHUNKED);
+        H5Pset_chunk(dataset_create_property, 1, dims);
+        H5Pset_deflate(dataset_create_property, 7);
+    }
 
     // write sequence names
     hid_t seqname_id = H5Dcreate2_checked(file_id, "/features/seqname",
@@ -599,8 +602,10 @@ static void write_gene_features(hid_t file_id, TranscriptSet& ts)
                                        H5P_DEFAULT, dataset_create_property,
                                        H5P_DEFAULT);
 
-    H5Dwrite_checked(type_id, H5T_NATIVE_UINT, H5S_ALL, H5S_ALL,
-                     H5P_DEFAULT, &feature_type.at(0));
+    if (!feature_type.empty()) {
+        H5Dwrite_checked(type_id, H5T_NATIVE_UINT, H5S_ALL, H5S_ALL,
+                         H5P_DEFAULT, &feature_type.at(0));
+    }
     H5Dclose(type_id);
 
     // write strands
