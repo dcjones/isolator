@@ -1144,7 +1144,6 @@ void FragWeightEstimationThread::transcript_sequence_bias(
         }
         std::reverse(seqbias[0], seqbias[0] + tlen);
     }
-
 }
 
 
@@ -1158,7 +1157,7 @@ void FragWeightEstimationThread::transcript_gc_bias(
     tlen = t.exonic_length();
     pos_t L = constants::seqbias_left_pos;
     unsigned int gc_count = 0;
-    for (pos_t pos = 0; pos <= tlen; ++pos) {
+    for (pos_t pos = 0; pos < tlen; ++pos) {
         if (tseq0.isgc(pos + L)) ++gc_count;
         if (pos >= frag_len) {
             if (tseq0.isgc(pos - frag_len + L)) --gc_count;
@@ -2964,7 +2963,9 @@ Sampler::~Sampler()
     }
     delete [] component_transcripts;
     delete [] component_num_transcripts;
+    delete [] multiread_alignments;
     delete [] multiread_alignment_pool;
+    delete [] multiread_num_alignments;
     delete [] frag_counts;
     delete [] frag_count_sums;
     delete [] frag_probs;

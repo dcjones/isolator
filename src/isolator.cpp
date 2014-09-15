@@ -900,17 +900,21 @@ static void parse_command_line_experiment_description(
 
 static bool is_sam_file(const char* filename)
 {
+    bool ans = false;
     samfile_t* sam_file = samopen(filename, "rb", NULL);
     if (!sam_file || !sam_file->header || sam_file->header->n_targets == 0) {
         if (sam_file) samclose(sam_file);
 
         sam_file = samopen(filename, "r", NULL);
         if (!sam_file || !sam_file->header || sam_file->header->n_targets == 0) {
-            return false;
+            ans = false;
         }
-        else return true;
+        else ans = true;
     }
-    else return true;
+    else ans = true;
+
+    if (sam_file) samclose(sam_file);
+    return ans;
 }
 
 

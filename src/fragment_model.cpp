@@ -603,6 +603,7 @@ FragmentModel::~FragmentModel()
     delete sb[0];
     delete sb[1];
     delete gcbias;
+    delete tpbias;
     delete frag_len_dist;
 }
 

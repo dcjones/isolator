@@ -63,8 +63,7 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
     std::vector<ReadPos>::iterator i;
     for (i = foreground_positions.begin(); i != foreground_positions.end(); ++i) {
         if (i->seqname != curr_seqname) {
-            if (seq) free(seq);
-
+            free(seq);
             seq = faidx_fetch_seq(ref_file, i->seqname.get().c_str(), 0, INT_MAX, &seqlen);
             Logger::debug("read sequence %s.", i->seqname.get().c_str());
 
@@ -76,14 +75,20 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
                 tbseq = seq;
                 tbseqrc = tbseq;
                 tbseqrc.revcomp();
+
             }
 
             curr_seqname = i->seqname;
+
         }
 
-        if (seq == NULL) continue;
+        if (seq == NULL || (pos_t) tbseq.size() < median_frag_len) continue;
 
         if (i->count > 16 || i->count < 3) continue;
+
+        if (i->end >= (pos_t) tbseq.size()) {
+            fprintf(stderr, "here!\n");
+        }
 
         // sample background position
         boost::random::uniform_int_distribution<pos_t> random_uniform(
@@ -99,6 +104,7 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
             if (i->pos >= i->start && i->pos + median_frag_len - 1 <= i->end) {
                 float sb = seqbias[0]->get_bias(tbseq, i->pos - L) *
                            seqbias[1]->get_bias(tbseqrc, seqlen - i->pos - 1 - L);
+
                 foreground_gc.push_back(
                     WeightedGC((float) gc_count(seq + i->pos, median_frag_len) / median_frag_len,
                                1.0 / sb));
@@ -152,16 +158,16 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
     size_t j_fore = 0, j_back = 0;
     for (size_t i = 0; i < constants::gcbias_num_bins; ++i) {
     	double fore_weight = 0.0;
-    	while (j_fore < foreground_gc.size() && foreground_gc[j_fore].first < bins[i]) {
-    		++j_fore;
+        while (j_fore < foreground_gc.size() && foreground_gc[j_fore].first < bins[i]) {
             fore_weight += foreground_gc[j_fore].second;
-    	}
+            ++j_fore;
+        }
         fore_weight = fore_weight / fore_total_weight;
 
         double back_weight = 0.0;
-    	while (j_back < background_gc.size() && background_gc[j_back].first < bins[i]) {
-            ++j_back;
+        while (j_back < background_gc.size() && background_gc[j_back].first < bins[i]) {
             back_weight += background_gc[j_back].second;
+            ++j_back;
         }
         back_weight = back_weight / back_total_weight;
 

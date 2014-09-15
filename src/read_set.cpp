@@ -650,6 +650,8 @@ void ReadSet::make_unique_read_counts(ReadSet::UniqueReadCounts& counts)
         }
         else j->second += 1;
     }
+
+    hattrie_iter_free(i);
 }
 
 

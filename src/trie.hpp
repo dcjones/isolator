@@ -105,7 +105,15 @@ class TrieMap
 
         ~TrieMap()
         {
+            hattrie_iter_t* it = hattrie_iter_begin(t, false);
+            while (!hattrie_iter_finished(it)) {
+                delete *reinterpret_cast<T**>(hattrie_iter_val(it));
+                hattrie_iter_next(it);
+            }
+
+            hattrie_iter_free(it);
             hattrie_free(t);
+
         }
 
         bool has(const char* key)
