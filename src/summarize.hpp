@@ -116,6 +116,9 @@ class Summarize
                 boost::numeric::ublas::matrix<float>* upper,
                 double credible_interval, bool unnormalized);
 
+        // output is indexed by: condition, gene, sample
+        void condition_transcript_expression(boost::multi_array<float, 3>& output);
+
         void read_condition_tgroup_mean(unsigned int condition,
                                         boost::numeric::ublas::matrix<float>& data);
 
@@ -158,6 +161,10 @@ class Summarize
 
         // gene_id indexed by tid
         std::vector<GeneID> gene_ids;
+
+        // map a gid to a list of tids
+        std::map<GeneID, std::vector<size_t> > gid_to_tids;
+        std::map<GeneID, GeneName> gid_to_gene_name;
 
         // tgroup indexed by tid
         std::vector<unsigned int> tgroup;

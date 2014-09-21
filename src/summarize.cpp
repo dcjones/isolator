@@ -91,6 +91,11 @@ Summarize::Summarize(const char* filename)
     delete [] string_data;
     H5Tclose(datatype);
 
+    for (size_t i = 0; i < N; ++i) {
+        gid_to_tids[gene_ids[i]].push_back(i);
+        gid_to_gene_name[gene_ids[i]] = gene_names[i];
+    }
+
     // read tgroups
     dataset = H5Dopen2_checked(h5_file, "/tgroup", H5P_DEFAULT);
 
@@ -443,12 +448,7 @@ void Summarize::point_ci_gene_expression(
     matrix<float> Qi(num_samples, N);
     std::vector<float> work(num_samples);
 
-    std::map<std::string, std::vector<size_t> > gid_to_tids;
     typedef std::pair<std::string, std::vector<size_t> > item_t;
-    for (size_t i = 0; i < N; ++i) {
-        gid_to_tids[gene_ids[i]].push_back(i);
-    }
-
     for (size_t i = 0; i < K; ++i) {
         file_dataspace_start[1] = i;
 
@@ -574,14 +574,6 @@ void Summarize::gene_expression(FILE* output, double credible_interval,
                                 bool unnormalized)
 {
     bool print_credible_interval = !isnan(credible_interval);
-
-    std::map<GeneID, std::vector<size_t> > gid_to_tids;
-    std::map<GeneID, GeneName> gid_to_gene_name;
-    typedef std::pair<GeneID, std::vector<size_t> > item_t;
-    for (size_t i = 0; i < N; ++i) {
-        gid_to_tids[gene_ids[i]].push_back(i);
-        gid_to_gene_name[gene_ids[i]] = gene_names[i];
-    }
     size_t num_genes = gid_to_tids.size();
 
     matrix<float> point(K, num_genes);
@@ -616,6 +608,7 @@ void Summarize::gene_expression(FILE* output, double credible_interval,
     fputc('\n', output);
 
     size_t i = 0;
+    typedef std::pair<GeneID, std::vector<size_t> > item_t;
     BOOST_FOREACH (const item_t& gid_tids, gid_to_tids) {
         const GeneID& gene_id = gid_tids.first;
         const std::vector<size_t>& tids = gid_tids.second;
@@ -1582,6 +1575,43 @@ void Summarize::differential_feature_splicing(FILE* output,
 void Summarize::differential_gene_expression(FILE* output, double credible_interval,
                                              double effect_size)
 {
+    if (isnan(effect_size)) {
+        effect_size = 1.0;
+    }
+    bool print_credible_interval = !isnan(credible_interval);
+
+    double lower_quantile = 0.5 - credible_interval/2;
+    double upper_quantile = 0.5 + credible_interval/2;
+
+    fprintf(output,
+            "gene_name\tgene_id\ttranscript_ids\tcondition_a\tcondition_b\t"
+            "down_pr\tup_pr\tmedian_log2_fold_change");
+    if (print_credible_interval) {
+        fprintf(output, "\tlower_log2_fold_change\tupper_log2_fold_change");
+    }
+    fputc('\n', output);
+
+
+    size_t num_genes = gid_to_tids.size();
+    matrix<float> point_estimate(K, num_genes);
+
+
+    // TODO: I think we should write a `condition_gene_expression` function
+    // to summarize the results of `condition_transcript_expression`.
+
+    // Is it sufficient to just compute the fold change between the lower and
+    // upper estimate and vice versa, or do I need to fold-change every sample?
+    if (print_credible_interval) {
+
+    }
+
+
+    for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
+        for (unsigned int condition_b = condition_a + 1; condition_b < C; ++condition_b) {
+
+        }
+    }
+
     // TODO: Do this in the morning.
 }
 
@@ -1589,7 +1619,109 @@ void Summarize::differential_gene_expression(FILE* output, double credible_inter
 void Summarize::differential_transcript_expression(FILE* output, double credible_interval,
                                                    double effect_size)
 {
-    // TODO: Do this in the morning.
+    if (isnan(effect_size)) {
+        effect_size = 1.0;
+    }
+    bool print_credible_interval = !isnan(credible_interval);
+
+    double lower_quantile = 0.5 - credible_interval/2;
+    double upper_quantile = 0.5 + credible_interval/2;
+
+    fprintf(output,
+            "gene_name\tgene_id\ttranscript_id\tcondition_a\tcondition_b\t"
+            "down_pr\tup_pr\tmedian_log2_fold_change");
+    if (print_credible_interval) {
+        fprintf(output, "\tlower_log2_fold_change\tupper_log2_fold_change");
+    }
+    fputc('\n', output);
+
+    boost::multi_array<float, 3> expr_data(boost::extents[num_samples][C][N]);
+    condition_transcript_expression(expr_data);
+    std::vector<double> work(num_samples);
+
+    for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
+        for (unsigned int condition_b = condition_a + 1; condition_b < C; ++condition_b) {
+            for (unsigned int i = 0; i < N; ++i) {
+                double down_pr = 0, up_pr = 0;
+                for (unsigned int j = 0; j < num_samples; ++j) {
+                    work[j] = log2(expr_data[j][condition_a][i] /
+                                   expr_data[j][condition_b][i]);
+                    if (work[j] >= effect_size) {
+                        up_pr += 1;
+                    }
+                    else if (work[j] <= -effect_size) {
+                        down_pr += 1;
+                    }
+                }
+                up_pr /= num_samples;
+                down_pr /= num_samples;
+                std::sort(work.begin(), work.end());
+
+                fprintf(output, "%s\t%s\t%s\t%s\t%s\t%0.3f\t%0.3f\t%e",
+                        gene_names[i].get().c_str(),
+                        gene_ids[i].get().c_str(),
+                        transcript_ids[i].get().c_str(),
+                        condition_names[condition_a].c_str(),
+                        condition_names[condition_b].c_str(),
+                        down_pr, up_pr, work[num_samples/2]);
+                if (print_credible_interval) {
+                    fprintf(output, "\t%e\t%e",
+                            work[lround((num_samples - 1) * lower_quantile)],
+                            work[lround((num_samples - 1) * upper_quantile)]);
+                }
+                fputc('\n', output);
+            }
+        }
+    }
+}
+
+
+// output indexed by sample number, condition, transcript
+void Summarize::condition_transcript_expression(boost::multi_array<float, 3>& output)
+{
+    // indexed by: spliced tgroup, sample number, condition, within tgroup tid
+    std::vector<boost::multi_array<float, 3> > splicing_data(C);
+    condition_splicing(splicing_data);
+
+    // indexed by: sample number, condition, tgroup
+    boost::multi_array<float, 3> tgroup_mean_data;
+    read_tgroup_mean(tgroup_mean_data);
+
+    tgroup_mean_data.begin();
+
+    for (size_t i = 0; i < num_samples; ++i) {
+        for (size_t j = 0; j < C; ++j) {
+            for (size_t k = 0; k < T; ++k) {
+                tgroup_mean_data[i][j][k] = exp(tgroup_mean_data[i][j][k]);
+            }
+        }
+    }
+
+    // fill in alternatively spliced transcripts
+    for (unsigned int stg = 0; spliced_tgroup_indexes.size(); ++stg) {
+        unsigned int tg = spliced_tgroup_indexes[stg];
+        for (unsigned int k = 0; k < tgroup_tids[tg].size(); ++k) {
+            for (size_t i = 0; i < num_samples; ++i) {
+                for (size_t j = 0; j < C; ++j) {
+                    output[i][j][k] =
+                        tgroup_mean_data[i][j][tg] *
+                        splicing_data[stg][i][j][k];
+                }
+            }
+        }
+    }
+
+    // fill in transcripts that are not alternatively spliced
+    for (size_t k = 0; k < N; ++k) {
+        unsigned int tg = tgroup[k];
+        if (tgroup_tids[tg].size() != 1) continue;
+
+        for (size_t i = 0; i < num_samples; ++i) {
+            for (size_t j = 0; j < C; ++j) {
+                output[i][j][k] = tgroup_mean_data[i][j][tg];
+            }
+        }
+    }
 }
 
 
