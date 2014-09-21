@@ -1620,8 +1620,8 @@ void Summarize::differential_gene_expression(FILE* output, double credible_inter
                 std::sort(work.begin(), work.end());
 
                 fprintf(output, "%s\t%s\t",
-                        gene_id.get().c_str(),
-                        gid_to_gene_name[gene_id].get().c_str());
+                        gid_to_gene_name[gene_id].get().c_str(),
+                        gene_id.get().c_str());
 
                 unsigned int l = 0;
                 BOOST_FOREACH (unsigned int tid, gid_to_tids[gene_id]) {
@@ -1715,7 +1715,7 @@ void Summarize::differential_transcript_expression(FILE* output, double credible
 void Summarize::condition_transcript_expression(boost::multi_array<float, 3>& output)
 {
     // indexed by: spliced tgroup, sample number, condition, within tgroup tid
-    std::vector<boost::multi_array<float, 3> > splicing_data(C);
+    std::vector<boost::multi_array<float, 3> > splicing_data(spliced_tgroup_indexes.size());
     condition_splicing(splicing_data);
 
     // indexed by: sample number, condition, tgroup
@@ -1733,7 +1733,7 @@ void Summarize::condition_transcript_expression(boost::multi_array<float, 3>& ou
     }
 
     // fill in alternatively spliced transcripts
-    for (unsigned int stg = 0; spliced_tgroup_indexes.size(); ++stg) {
+    for (unsigned int stg = 0; stg < spliced_tgroup_indexes.size(); ++stg) {
         unsigned int tg = spliced_tgroup_indexes[stg];
         for (unsigned int k = 0; k < tgroup_tids[tg].size(); ++k) {
             for (size_t i = 0; i < num_samples; ++i) {
