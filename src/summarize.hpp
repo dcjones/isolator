@@ -118,6 +118,7 @@ class Summarize
 
         // output is indexed by: condition, gene, sample
         void condition_transcript_expression(boost::multi_array<float, 3>& output);
+        void condition_gene_expression(boost::multi_array<float, 3>& output);
 
         void read_condition_tgroup_mean(unsigned int condition,
                                         boost::numeric::ublas::matrix<float>& data);

@@ -1592,27 +1592,62 @@ void Summarize::differential_gene_expression(FILE* output, double credible_inter
     fputc('\n', output);
 
 
+    typedef std::pair<GeneID, GeneName> item_t;
     size_t num_genes = gid_to_tids.size();
-    matrix<float> point_estimate(K, num_genes);
-
-
-    // TODO: I think we should write a `condition_gene_expression` function
-    // to summarize the results of `condition_transcript_expression`.
-
-    // Is it sufficient to just compute the fold change between the lower and
-    // upper estimate and vice versa, or do I need to fold-change every sample?
-    if (print_credible_interval) {
-
-    }
-
+    boost::multi_array<float, 3> expr_data(boost::extents[num_samples][C][num_genes]);
+    condition_gene_expression(expr_data);
+    std::vector<double> work(num_samples);
 
     for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
         for (unsigned int condition_b = condition_a + 1; condition_b < C; ++condition_b) {
+            size_t i = 0;
+            BOOST_FOREACH (item_t item, gid_to_gene_name) {
+                GeneID gene_id = item.first;
+                double down_pr = 0, up_pr = 0;
 
+                for (unsigned int j = 0; j < num_samples; ++j) {
+                    work[j] = log2(expr_data[j][condition_a][i] /
+                                   expr_data[j][condition_b][i]);
+                    if (work[j] >= effect_size) {
+                        up_pr += 1;
+                    }
+                    else if (work[j] <= -effect_size) {
+                        down_pr += 1;
+                    }
+                }
+                up_pr /= num_samples;
+                down_pr /= num_samples;
+                std::sort(work.begin(), work.end());
+
+                fprintf(output, "%s\t%s\t",
+                        gene_id.get().c_str(),
+                        gid_to_gene_name[gene_id].get().c_str());
+
+                unsigned int l = 0;
+                BOOST_FOREACH (unsigned int tid, gid_to_tids[gene_id]) {
+                    if (l > 0) {
+                        fputc(',', output);
+                    }
+                    fputs(transcript_ids[tid].get().c_str(), output);
+                    ++l;
+                }
+
+                fprintf(output, "\t%s\t%s\t%0.3f\t%0.3f\t%e",
+                        condition_names[condition_a].c_str(),
+                        condition_names[condition_b].c_str(),
+                        down_pr, up_pr, work[num_samples/2]);
+
+                if (print_credible_interval) {
+                    fprintf(output, "\t%e\t%e",
+                            work[lround((num_samples - 1) * lower_quantile)],
+                            work[lround((num_samples - 1) * upper_quantile)]);
+                }
+                fputc('\n', output);
+
+                ++i;
+            }
         }
     }
-
-    // TODO: Do this in the morning.
 }
 
 
@@ -1676,7 +1711,7 @@ void Summarize::differential_transcript_expression(FILE* output, double credible
 }
 
 
-// output indexed by sample number, condition, transcript
+// output indexed by sample number, condition, tid
 void Summarize::condition_transcript_expression(boost::multi_array<float, 3>& output)
 {
     // indexed by: spliced tgroup, sample number, condition, within tgroup tid
@@ -1719,6 +1754,29 @@ void Summarize::condition_transcript_expression(boost::multi_array<float, 3>& ou
         for (size_t i = 0; i < num_samples; ++i) {
             for (size_t j = 0; j < C; ++j) {
                 output[i][j][k] = tgroup_mean_data[i][j][tg];
+            }
+        }
+    }
+}
+
+
+// output index by sample number, condition, gid
+void Summarize::condition_gene_expression(boost::multi_array<float, 3>& output)
+{
+    boost::multi_array<float, 3> transcript_expr_data(boost::extents[num_samples][C][N]);
+    condition_transcript_expression(transcript_expr_data);
+
+    typedef std::pair<GeneID, GeneName> item_t;
+    for (size_t i = 0; i < num_samples; ++i) {
+        for (size_t j = 0; j < C; ++j) {
+            size_t k = 0;
+            BOOST_FOREACH (item_t item, gid_to_gene_name) {
+                GeneID gene_id = item.first;
+                output[i][j][k] = 0.0;
+                BOOST_FOREACH (size_t l, gid_to_tids[gene_id]) {
+                    output[i][j][k] += transcript_expr_data[i][j][l];
+                }
+                ++k;
             }
         }
     }
