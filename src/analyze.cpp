@@ -229,6 +229,50 @@ class NormalSigmaSampler
 
 
 
+class GammaStudentTSigmaSampler : public Shredder
+{
+    public:
+        GammaStudentTSigmaSampler()
+            : Shredder(1e-8, 1e5, 1e-5)
+        {
+        }
+
+        double sample(rng_t& rng, double sigma0, double nu, const double* xs, size_t n,
+                      double prior_alpha, double prior_beta)
+        {
+            this->nu = nu;
+            this->prior_alpha = prior_alpha;
+            this->prior_beta = prior_beta;
+            this->xs = xs;
+            this->n = n;
+            return Shredder::sample(rng, sigma0);
+        }
+
+    private:
+        double nu, prior_alpha, prior_beta;
+        const double* xs;
+        size_t n;
+
+        StudentsTLogPdf likelihood_logpdf;
+        GammaLogPdf prior_logpdf;
+
+    protected:
+        double f(double sigma, double& d)
+        {
+            d = 0.0;
+            double fx = 0.0;
+
+            d += likelihood_logpdf.df_dsigma(nu, 0.0, sigma, xs, n);
+            fx += likelihood_logpdf.f(nu, 0.0, sigma, xs, n);
+
+            d += prior_logpdf.df_dx(prior_alpha, prior_beta, &sigma, 1);
+            fx += prior_logpdf.f(prior_alpha, prior_beta, &sigma, 1);
+
+            return fx;
+        }
+};
+
+
 class GammaNormalSigmaSampler : public Shredder
 {
     public:
@@ -1139,6 +1183,7 @@ Analyze::Analyze(unsigned int rng_seed,
     gamma_beta_sampler = new GammaBetaSampler();
     invgamma_beta_sampler = new BetaSampler();
     gamma_normal_sigma_sampler = new GammaNormalSigmaSampler();
+    gamma_studentt_sigma_sampler = new GammaStudentTSigmaSampler();
 
     tgroup_tids = transcripts.tgroup_tids();
 
@@ -1173,6 +1218,7 @@ Analyze::~Analyze()
     delete gamma_beta_sampler;
     delete invgamma_beta_sampler;
     delete gamma_normal_sigma_sampler;
+    delete gamma_studentt_sigma_sampler;
 }
 
 
@@ -2031,7 +2077,7 @@ void Analyze::sample(bool optimize_state)
                 rng, condition_tgroup_beta, condition_tgroup_alpha,
                 condition_tgroup_beta_a, condition_tgroup_beta_b,
                 &condition_tgroup_sigma.at(0), T);
-    assert_finite(condition_tgroup_alpha);
+    assert_finite(condition_tgroup_beta);
 
     for (size_t i = 0, j = 0; j < condition_splice_sigma.size(); ++j) {
         for (size_t k = 0; k < condition_splice_sigma[j].size(); ++k) {
@@ -2069,8 +2115,8 @@ void Analyze::sample(bool optimize_state)
         }
     }
 
-    experiment_tgroup_sigma = gamma_normal_sigma_sampler->sample(
-            rng, experiment_tgroup_sigma,
+    experiment_tgroup_sigma = gamma_studentt_sigma_sampler->sample(
+            rng, experiment_tgroup_sigma, experiment_tgroup_nu,
             experiment_tgroup_sigma_work.empty() ? NULL : &experiment_tgroup_sigma_work.at(0),
             experiment_tgroup_sigma_work.size(), experiment_tgroup_sigma_alpha,
             experiment_tgroup_sigma_beta);

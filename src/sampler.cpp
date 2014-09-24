@@ -2228,7 +2228,6 @@ float AbundanceSamplerThread::compute_component_probability(unsigned int c, floa
                            1.0, cmixc);
 
     if (S.use_priors) {
-
         // prior
         BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
             double x = S.tgroupmix[tgroup] * cmixc;

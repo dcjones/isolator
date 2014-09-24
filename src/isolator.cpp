@@ -1228,15 +1228,15 @@ static int isolator_analyze(int argc, char* argv[])
     std::set<std::string> bias_training_seqnames;
 
     // model parameter defaults
-    double experiment_tgroup_sigma_alpha = 2.0,
-           experiment_tgroup_sigma_beta = 0.5,
+    double experiment_tgroup_sigma_alpha = 1.0,
+           experiment_tgroup_sigma_beta = 1.0,
 
            experiment_splice_sigma_alpha = 5.0,
-           experiment_splice_sigma_beta = 0.1,
+           experiment_splice_sigma_beta = 10.0,
 
            condition_tgroup_alpha = 3.0,
-           condition_tgroup_beta_a = 3.0,
-           condition_tgroup_beta_b = 1000.0,
+           condition_tgroup_beta_a = 5.0,
+           condition_tgroup_beta_b = 0.01,
 
            condition_splice_alpha = 3.0,
            condition_splice_beta_a = 3.0,

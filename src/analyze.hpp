@@ -15,7 +15,6 @@
 #include "sampler.hpp"
 #include "transcripts.hpp"
 
-
 class SamplerTickThread;
 class ConditionTgroupMuSigmaSamplerThread;
 class ExperimentTgroupMuSigmaSamplerThread;
@@ -23,6 +22,7 @@ class GammaBetaSampler;
 class AlphaSampler;
 class BetaSampler;
 class GammaNormalSigmaSampler;
+class GammaStudentTSigmaSampler;
 class ConditionSpliceMuSigmaEtaSamplerThread;
 class ExperimentSpliceMuSigmaSamplerThread;
 typedef std::pair<int, int> IdxRange;
@@ -119,6 +119,7 @@ class Analyze
         GammaBetaSampler* gamma_beta_sampler;
         BetaSampler* invgamma_beta_sampler;
         GammaNormalSigmaSampler* gamma_normal_sigma_sampler;
+        GammaStudentTSigmaSampler* gamma_studentt_sigma_sampler;
         std::vector<ConditionSpliceMuSigmaEtaSamplerThread*> splice_mu_sigma_sampler_threads;
         std::vector<ExperimentSpliceMuSigmaSamplerThread*>
             experiment_splice_mu_sigma_sampler_threads;
