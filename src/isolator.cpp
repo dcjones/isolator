@@ -1212,7 +1212,7 @@ static int isolator_analyze(int argc, char* argv[])
     };
 
     Logger::level logger_level = Logger::INFO;
-    unsigned int burnin = 10;
+    unsigned int burnin = 50;
     unsigned int num_samples = 250;
     pos_t tss_cluster_dist = 150;
     bool run_gc_correction = true;

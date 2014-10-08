@@ -1894,12 +1894,7 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
     warmup();
 
     const char* optimize_task_name = "Optimizing";
-    Logger::push_task(optimize_task_name, burnin + constants::num_opt_rounds);
-
-    for (size_t i = 0; i < burnin; ++i) {
-        sample(false);
-        Logger::get_task(optimize_task_name).inc();
-    }
+    Logger::push_task(optimize_task_name, constants::num_opt_rounds);
 
     for (size_t i = 0; i < constants::num_opt_rounds; ++i) {
         sample(true);
@@ -1926,7 +1921,12 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
     }
 
     const char* sample_task_name = "Sampling";
-    Logger::push_task(sample_task_name, num_samples);
+    Logger::push_task(sample_task_name, num_samples + burnin);
+
+    for (size_t i = 0; i < burnin; ++i) {
+        sample(false);
+        Logger::get_task(sample_task_name).inc();
+    }
 
     for (size_t i = 1; i < num_samples; ++i) {
         sample(false);
