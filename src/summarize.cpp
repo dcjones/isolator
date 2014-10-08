@@ -401,8 +401,9 @@ void Summarize::point_ci_transcript_expression(
 
         for (size_t j = 0; j < N; ++j) {
             matrix_column<matrix<float> > col(Qi, j);
-            (*point)(i, j) = col[0];
             std::sort(col.begin(), col.end());
+
+            (*point)(i, j) = col[col.size() / 2];
 
             if (lower) {
                 (*lower)(i, j) = col[lround((col.size() - 1) * lower_quantile)];
@@ -481,10 +482,10 @@ void Summarize::point_ci_gene_expression(
                 work[k] = std::max<float>(constants::min_expr, work[k]);
             }
 
-            // maximum posterior is stored as the first sample
-            (*point)(i, j) = work[0];
-
             std::sort(work.begin(), work.end());
+
+            (*point)(i, j) = work[work.size() / 2];
+
             if (lower) {
                 (*lower)(i, j) = work[lround((num_samples - 1) * lower_quantile)];
                 if ((*point)(i, j) < (*lower)(i, j)) (*lower)(i, j) = (*point)(i, j);
@@ -1214,6 +1215,10 @@ std::vector<float> Summarize::transcript_experiment_splicing(const char* transcr
     size_t stg = 0;
     for (; stg < spliced_tgroup_indexes.size(); ++stg) {
         if (spliced_tgroup_indexes[stg] == tg) break;
+    }
+
+    if (stg == spliced_tgroup_indexes.size()) {
+        Logger::abort("%s is not alternatively spliced.", transcript_id);
     }
 
     size_t idx = 0;
