@@ -19,7 +19,6 @@
 #include "samtools/samtools_extra.h"
 #include "shredder.hpp"
 
-
 extern "C" {
 #include "samtools/khash.h"
 KHASH_MAP_INIT_STR(s, int)
@@ -1606,7 +1605,7 @@ class InterTgroupSampler : public Shredder
 
                 // derivative of jacobian
                 d -= 1/x;
-                d -= 1/(1-x);
+                d -= 1/(x-1);
             }
 
             return lp0 - lpf01 +
@@ -3024,8 +3023,6 @@ void Sampler::start()
     for (size_t i = 0; i < constants::num_threads; ++i) {
         abundance_threads[i]->start();
     }
-
-
 }
 
 
