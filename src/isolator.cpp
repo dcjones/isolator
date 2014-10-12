@@ -1224,6 +1224,7 @@ static int isolator_analyze(int argc, char* argv[])
     bool use_exons = false;
     unsigned int rng_seed = 0xaca430b9;
     bool dryrun = false;
+    bool use_tss = false;
     const char* qc_filename = NULL;
     std::set<std::string> bias_training_seqnames;
 
@@ -1299,6 +1300,9 @@ static int isolator_analyze(int argc, char* argv[])
                 }
                 else if (longopt_name == "no-3p-correction") {
                     run_3p_correction = false;
+                }
+                else if (longopt_name == "use-tss") {
+                    use_tss = true;
                 }
                 else if (longopt_name == "tss-cluster-distance") {
                     tss_cluster_dist = strtod(optarg, NULL);
@@ -1388,7 +1392,7 @@ static int isolator_analyze(int argc, char* argv[])
         Logger::abort("Reading exons from BED files is not yet supported.");
     }
     else {
-        ts.read_gtf(annotation_filename, tss_cluster_dist);
+        ts.read_gtf(annotation_filename, tss_cluster_dist, use_tss);
     }
 
     hid_t output_file_id = 0;

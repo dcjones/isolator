@@ -287,6 +287,7 @@ std::vector<std::vector<unsigned int> > TranscriptSet::tgroup_tids() const
 
 
 void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
+                             bool use_tss,
                              const char* feature, const char* tid_attr,
                              const char* gid_attr)
 {
@@ -403,36 +404,36 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
     // assign tgroups
 
     // TODO: we should add an option to assign tgroups according te gene_ids.
-#if 0
-    std::sort(sorted_transcripts.begin(), sorted_transcripts.end(),
-              TranscriptCmpGeneId());
+
     unsigned int next_tgroup = 0;
-    for (size_t i = 0; i < sorted_transcripts.size(); ++i) {
-        if (i > 0 && sorted_transcripts[i].gene_id == sorted_transcripts[i-1].gene_id) {
-            sorted_transcripts[i].tgroup = sorted_transcripts[i-1].tgroup;
-        }
-        else {
-            sorted_transcripts[i].tgroup = next_tgroup++;
+    if (use_tss) {
+        std::sort(sorted_transcripts.begin(), sorted_transcripts.end(),
+                  TranscriptCmpTSS());
+        for (size_t i = 0; i < sorted_transcripts.size(); ++i) {
+            if (i > 0 &&
+                sorted_transcripts[i].seqname == sorted_transcripts[i-1].seqname &&
+                sorted_transcripts[i].strand  == sorted_transcripts[i-1].strand &&
+                sorted_transcripts[i].exonic_length() > tss_cluster_distance &&
+                sorted_transcripts[i-1].exonic_length() > tss_cluster_distance &&
+                labs(sorted_transcripts[i].tss_position() -
+                     sorted_transcripts[i-1].tss_position()) <= tss_cluster_distance) {
+                sorted_transcripts[i].tgroup = sorted_transcripts[i-1].tgroup;
+            }
+            else {
+                sorted_transcripts[i].tgroup = next_tgroup++;
+            }
         }
     }
-    _num_tgroups = next_tgroup;
-#endif
-
-    std::sort(sorted_transcripts.begin(), sorted_transcripts.end(),
-              TranscriptCmpTSS());
-    unsigned int next_tgroup = 0;
-    for (size_t i = 0; i < sorted_transcripts.size(); ++i) {
-        if (i > 0 &&
-            sorted_transcripts[i].seqname == sorted_transcripts[i-1].seqname &&
-            sorted_transcripts[i].strand  == sorted_transcripts[i-1].strand &&
-            sorted_transcripts[i].exonic_length() > tss_cluster_distance &&
-            sorted_transcripts[i-1].exonic_length() > tss_cluster_distance &&
-            labs(sorted_transcripts[i].tss_position() -
-                 sorted_transcripts[i-1].tss_position()) <= tss_cluster_distance) {
-            sorted_transcripts[i].tgroup = sorted_transcripts[i-1].tgroup;
-        }
-        else {
-            sorted_transcripts[i].tgroup = next_tgroup++;
+    else {
+        std::sort(sorted_transcripts.begin(), sorted_transcripts.end(),
+                  TranscriptCmpGeneId());
+        for (size_t i = 0; i < sorted_transcripts.size(); ++i) {
+            if (i > 0 && sorted_transcripts[i].gene_id == sorted_transcripts[i-1].gene_id) {
+                sorted_transcripts[i].tgroup = sorted_transcripts[i-1].tgroup;
+            }
+            else {
+                sorted_transcripts[i].tgroup = next_tgroup++;
+            }
         }
     }
     _num_tgroups = next_tgroup;

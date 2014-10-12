@@ -164,8 +164,12 @@ class TranscriptSet
          *
          * Args:
          *   f: A file, opened for reading, containg GTF data.
+         *   tgroup_max_tss_dist: distance used to cluster transcripts by TSS
+         *                        if use_tss is true.
+         *   use_tss: If true define tgroups by tss, otherwise by gene_id.
          */
         void read_gtf(const char* filename, pos_t tgroup_max_tss_dist,
+                      bool use_tss,
                       const char* feature="exon",
                       const char* tid_attr="transcript_id",
                       const char* gid_attr="gene_id");
