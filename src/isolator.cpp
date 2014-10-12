@@ -217,6 +217,8 @@ static void print_summarize_strategies(FILE* fout)
            "  transcript-expression\n"
            "  transcript-splicing\n"
            "  gene-expression\n"
+           "  condition-transcript-expression\n"
+           "  condition-gene-expression\n"
            "  differential-gene-expression\n"
            "  differential-transcript-expression\n"
            "  differential-transcription\n"
@@ -340,6 +342,12 @@ static int isolator_summarize(int argc, char* argv[])
     else if (strcmp(strategy, "gene-expression") == 0) {
         summarize.gene_expression(out_file, credible_interval,
                                   unnormalized);
+    }
+    else if (strcmp(strategy, "condition-transcript-expression") == 0) {
+        summarize.condition_transcript_expression(out_file, credible_interval);
+    }
+    else if (strcmp(strategy, "condition-gene-expression") == 0) {
+        summarize.condition_gene_expression(out_file, credible_interval);
     }
     else if (strcmp(strategy, "differential-transcription") == 0) {
         minimum_effect_size = log2(minimum_effect_size);

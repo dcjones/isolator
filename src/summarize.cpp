@@ -1716,6 +1716,54 @@ void Summarize::differential_transcript_expression(FILE* output, double credible
 }
 
 
+void Summarize::condition_transcript_expression(FILE* output,
+                                                double credible_interval)
+{
+    bool print_credible_interval = !isnan(credible_interval);
+
+    double lower_quantile = 0.5 - credible_interval/2;
+    double upper_quantile = 0.5 + credible_interval/2;
+
+    fprintf(output, "gene_name\tgene_id\ttranscript_id");
+    for (unsigned int i = 0; i < C; ++i) {
+        fprintf(output, "\t%s_adjusted_tpm",
+                metadata.sample_conditions[i].c_str());
+        if (credible_interval) {
+            fprintf(output,
+                    "\t%s_adjusted_tpm_lower\t%s_adjusted_tpm_upper",
+                    metadata.sample_conditions[i].c_str(),
+                    metadata.sample_conditions[i].c_str());
+        }
+    }
+    fputc('\n', output);
+
+    boost::multi_array<float, 3> expr_data(boost::extents[num_samples][C][N]);
+    condition_transcript_expression(expr_data);
+    std::vector<double> work(num_samples);
+
+    for (unsigned int i = 0; i < N; ++i) {
+        fprintf(output, "%s\t%s\t%s",
+                gene_names[i].get().c_str(),
+                gene_ids[i].get().c_str(),
+                transcript_ids[i].get().c_str());
+
+        for (unsigned int j = 0; j < C; ++j) {
+            for (unsigned int k = 0; k < num_samples; ++k) {
+                work[k] = expr_data[k][j][i];
+            }
+            std::sort(work.begin(), work.end());
+            fprintf(output, "\t%e", work[num_samples / 2]);
+            if (print_credible_interval) {
+                fprintf(output, "\t%e\t%e",
+                        work[lround((num_samples - 1) * lower_quantile)],
+                        work[lround((num_samples - 1) * upper_quantile)]);
+            }
+        }
+        fputc('\n', output);
+    }
+}
+
+
 // output indexed by sample number, condition, tid
 void Summarize::condition_transcript_expression(boost::multi_array<float, 3>& output)
 {
@@ -1761,6 +1809,66 @@ void Summarize::condition_transcript_expression(boost::multi_array<float, 3>& ou
                 output[i][j][k] = tgroup_mean_data[i][j][tg];
             }
         }
+    }
+}
+
+
+void Summarize::condition_gene_expression(FILE* output,
+                                          double credible_interval)
+{
+    bool print_credible_interval = !isnan(credible_interval);
+
+    double lower_quantile = 0.5 - credible_interval/2;
+    double upper_quantile = 0.5 + credible_interval/2;
+
+    fprintf(output, "gene_name\tgene_id\ttranscript_ids");
+    for (unsigned int i = 0; i < C; ++i) {
+        fprintf(output, "\t%s_adjusted_tpm",
+                metadata.sample_conditions[i].c_str());
+        if (credible_interval) {
+            fprintf(output,
+                    "\t%s_adjusted_tpm_lower\t%s_adjusted_tpm_upper",
+                    metadata.sample_conditions[i].c_str(),
+                    metadata.sample_conditions[i].c_str());
+        }
+    }
+    fputc('\n', output);
+
+    size_t num_genes = gid_to_tids.size();
+    boost::multi_array<float, 3> expr_data(boost::extents[num_samples][C][num_genes]);
+    condition_gene_expression(expr_data);
+    std::vector<double> work(num_samples);
+
+    unsigned int i = 0;
+    typedef std::pair<GeneID, GeneName> item_t;
+    BOOST_FOREACH (item_t item, gid_to_gene_name) {
+        GeneID gene_id = item.first;
+        fprintf(output, "%s\t%s\t",
+                gid_to_gene_name[gene_id].get().c_str(),
+                gene_id.get().c_str());
+
+        unsigned int l = 0;
+        BOOST_FOREACH (unsigned int tid, gid_to_tids[gene_id]) {
+            if (l > 0) {
+                fputc(',', output);
+            }
+            fputs(transcript_ids[tid].get().c_str(), output);
+            ++l;
+        }
+
+        for (unsigned int j = 0; j < C; ++j) {
+            for (unsigned int k = 0; k < num_samples; ++k) {
+                work[k] = expr_data[k][j][i];
+            }
+            std::sort(work.begin(), work.end());
+            fprintf(output, "\t%e", work[num_samples / 2]);
+            if (print_credible_interval) {
+                fprintf(output, "\t%e\t%e",
+                        work[lround((num_samples - 1) * lower_quantile)],
+                        work[lround((num_samples - 1) * upper_quantile)]);
+            }
+        }
+        fputc('\n', output);
     }
 }
 

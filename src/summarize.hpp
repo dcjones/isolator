@@ -68,10 +68,14 @@ class Summarize
                                            double credible_interval,
                                            double effect_size);
 
+        void condition_gene_expression(FILE* output, double credible_interval);
+
+        void condition_transcript_expression(FILE* output,
+                                             double credible_interval);
+
         void condition_splicing(FILE* output, double credible_interval);
 
         void condition_splicing_sigma(FILE* output, double credible_interval);
-
 
         void experiment_splicing(FILE* output, double credible_interval);
 
