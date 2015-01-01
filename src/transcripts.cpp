@@ -440,36 +440,39 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
 
     // optionally extend the ends of transcripts before inserting them into the
     // set
-    BOOST_FOREACH (Transcript& t, sorted_transcripts) {
-        /* Extend each transcript 3' and 5' end by some fixed ammount. */
-        pos_t u, v;
-        Transcript::iterator e1 = t.begin();
-        u = e1->start;
-        v = e1->end;
-        if (t.strand == strand_pos) {
-            u = std::max<pos_t>(0, u - constants::transcript_5p_extension);
-        }
-        else {
-            u = std::max<pos_t>(0, u - constants::transcript_3p_extension);
-        }
-        t.erase(e1);
-        t.insert(Exon(u, v));
-        t.min_start = u;
+    if (constants::transcript_5p_extension != 0 ||
+        constants::transcript_3p_extension != 0) {
+        BOOST_FOREACH (Transcript& t, sorted_transcripts) {
+            /* Extend each transcript 3' and 5' end by some fixed ammount. */
+            pos_t u, v;
+            Transcript::iterator e1 = t.begin();
+            u = e1->start;
+            v = e1->end;
+            if (t.strand == strand_pos) {
+                u = std::max<pos_t>(0, u - constants::transcript_5p_extension);
+            }
+            else {
+                u = std::max<pos_t>(0, u - constants::transcript_3p_extension);
+            }
+            t.erase(e1);
+            t.insert(Exon(u, v));
+            t.min_start = u;
 
-        Transcript::reverse_iterator e2 = t.rbegin();
-        u = e2->start;
-        v = e2->end;
-        if (t.strand == strand_pos) {
-            v += constants::transcript_3p_extension;
-        }
-        else {
-            v += constants::transcript_5p_extension;
-        }
-        t.erase(--e2.base());
-        t.insert(Exon(u, v));
-        t.max_end = v;
+            Transcript::reverse_iterator e2 = t.rbegin();
+            u = e2->start;
+            v = e2->end;
+            if (t.strand == strand_pos) {
+                v += constants::transcript_3p_extension;
+            }
+            else {
+                v += constants::transcript_5p_extension;
+            }
+            t.erase(--e2.base());
+            t.insert(Exon(u, v));
+            t.max_end = v;
 
-        transcripts.insert(t);
+            transcripts.insert(t);
+        }
     }
 
     Logger::pop_task(task_name);
