@@ -19,7 +19,6 @@
 using namespace boost::numeric::ublas;
 using namespace boost::accumulators;
 
-
 static void assert_finite(double x)
 {
     if (!boost::math::isfinite(x)) {
@@ -672,6 +671,10 @@ class ConditionSpliceMuSigmaEtaSamplerThread
                                 unadj_mu[i] * condition_splice_eta[j][k] +
                                 sample_mu[i];
                         }
+
+                        // reset eta to 1.0 after each sample, to avoid
+                        // very large or small numbers on subsequent samples.
+                        condition_splice_eta[j][k] = 1.0;
                     }
 
                     // sample mu

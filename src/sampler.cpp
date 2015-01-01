@@ -19,6 +19,7 @@
 #include "samtools/samtools_extra.h"
 #include "shredder.hpp"
 
+
 extern "C" {
 #include "samtools/khash.h"
 KHASH_MAP_INIT_STR(s, int)
@@ -790,6 +791,7 @@ class FragWeightEstimationThread
         {
             seqbias[0] = seqbias[1] = NULL;
             posbias = NULL;
+            tpbias = NULL;
             if (fm.frag_len_dist) {
                 frag_len_dist = new EmpDist(*fm.frag_len_dist);
             }
@@ -900,6 +902,7 @@ class FragWeightEstimationThread
 
         // fragment gc bias and 3' bias
         float* posbias;
+        float* tpbias;
         size_t posbias_size;
 
         /* Exonic length of the transcript whos bias is stored in seqbias. */
@@ -1199,11 +1202,29 @@ float FragWeightEstimationThread::transcript_weight(
 
     if ((size_t) tlen > posbias_size) {
         afree(posbias);
+        afree(tpbias);
         posbias = reinterpret_cast<float*>(aalloc(tlen * sizeof(float)));
+        tpbias = reinterpret_cast<float*>(aalloc(tlen * sizeof(float)));
         posbias_size = tlen;
     }
 
     pos_t tlen = t.exonic_length();
+
+    {
+        double omp = 1.0 - fm.tpbias->p;
+        double c = 1.0;
+        if (t.strand == strand_pos) {
+            for (pos_t pos = tlen - 1; pos >= 0; --pos) {
+                c *= omp;
+                tpbias[pos] = c;
+            }
+        } else {
+            for (pos_t pos = 0; pos < tlen; ++pos) {
+                c *= omp;
+                tpbias[pos] = c;
+            }
+        }
+    }
 
     /* Set ws[k] to be the the number of fragmens of length k, weighted by
      * sequence bias. */
@@ -1218,9 +1239,8 @@ float FragWeightEstimationThread::transcript_weight(
             continue;
         }
 
-        std::fill(posbias, posbias + tlen, 1.0);
+        memcpy(posbias, tpbias, tlen * sizeof(float));
         transcript_gc_bias(locus, t, frag_len);
-        transcript_tp_bias(t, frag_len);
 
         /* TODO: The following logic assumes the library type is FR. We need
          * seperate cases to properly handle other library types, that
@@ -1799,13 +1819,22 @@ class InterTranscriptSampler
             if (direction < 0) {
                 x_bound_lower = lower_limit;
                 x_bound_upper = x0;
+                if (f(0.0, d) > slice_height) {
+                    return 0.0;
+                }
             }
             else {
                 x_bound_lower = x0;
                 x_bound_upper = upper_limit;
+                if (f(1.0, d) > slice_height) {
+                    return 1.0;
+                }
             }
 
+            int slice_edge_search_count = 0;
+
             while (fabs(lp) > lp_eps && fabs(x_bound_upper - x_bound_lower) > x_eps) {
+                ++slice_edge_search_count;
                 double x1 = x - lp / d;
                 if (fabs(d) < d_eps || !boost::math::isfinite(x1)) {
                     x1 = (x_bound_lower + x_bound_upper) / 2;

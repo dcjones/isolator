@@ -125,10 +125,18 @@ double Shredder::find_slice_edge(double x0, double slice_height,
     if (direction < 0) {
         x_bound_lower = lower_limit;
         x_bound_upper = x0;
+        double fx = f(lower_limit, d);
+        if (boost::math::isfinite(fx) && fx >= slice_height) {
+            return lower_limit;
+        }
     }
     else {
         x_bound_lower = x0;
         x_bound_upper = upper_limit;
+        double fx = f(upper_limit, d);
+        if (boost::math::isfinite(fx) && fx >= slice_height) {
+            return upper_limit;
+        }
     }
 
     while (fabs(lp) > lp_eps && fabs(x_bound_upper - x_bound_lower) > tolerance) {
