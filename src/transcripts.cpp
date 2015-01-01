@@ -476,6 +476,8 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
     }
     else {
         BOOST_FOREACH (Transcript& t, sorted_transcripts) {
+            t.min_start = t.begin()->start;
+            t.max_end   = t.rbegin()->end;
             transcripts.insert(t);
         }
     }
