@@ -1728,7 +1728,7 @@ void Summarize::condition_transcript_expression(FILE* output,
     for (unsigned int i = 0; i < C; ++i) {
         fprintf(output, "\t%s_adjusted_tpm",
                 metadata.sample_conditions[i].c_str());
-        if (credible_interval) {
+        if (print_credible_interval) {
             fprintf(output,
                     "\t%s_adjusted_tpm_lower\t%s_adjusted_tpm_upper",
                     metadata.sample_conditions[i].c_str(),
@@ -1752,11 +1752,11 @@ void Summarize::condition_transcript_expression(FILE* output,
                 work[k] = expr_data[k][j][i];
             }
             std::sort(work.begin(), work.end());
-            fprintf(output, "\t%e", work[num_samples / 2]);
+            fprintf(output, "\t%e", 1e6 * work[num_samples / 2]);
             if (print_credible_interval) {
                 fprintf(output, "\t%e\t%e",
-                        work[lround((num_samples - 1) * lower_quantile)],
-                        work[lround((num_samples - 1) * upper_quantile)]);
+                        1e6 * work[lround((num_samples - 1) * lower_quantile)],
+                        1e6 * work[lround((num_samples - 1) * upper_quantile)]);
             }
         }
         fputc('\n', output);
@@ -1806,7 +1806,7 @@ void Summarize::condition_transcript_expression(boost::multi_array<float, 3>& ou
 
         for (size_t i = 0; i < num_samples; ++i) {
             for (size_t j = 0; j < C; ++j) {
-                output[i][j][k] = tgroup_mean_data[i][j][tg];
+                output[i][j][tgroup_tids[tg][k]] = tgroup_mean_data[i][j][tg];
             }
         }
     }
@@ -1825,7 +1825,7 @@ void Summarize::condition_gene_expression(FILE* output,
     for (unsigned int i = 0; i < C; ++i) {
         fprintf(output, "\t%s_adjusted_tpm",
                 metadata.sample_conditions[i].c_str());
-        if (credible_interval) {
+        if (print_credible_interval) {
             fprintf(output,
                     "\t%s_adjusted_tpm_lower\t%s_adjusted_tpm_upper",
                     metadata.sample_conditions[i].c_str(),
@@ -1861,14 +1861,15 @@ void Summarize::condition_gene_expression(FILE* output,
                 work[k] = expr_data[k][j][i];
             }
             std::sort(work.begin(), work.end());
-            fprintf(output, "\t%e", work[num_samples / 2]);
+            fprintf(output, "\t%e", 1e6 * work[num_samples / 2]);
             if (print_credible_interval) {
                 fprintf(output, "\t%e\t%e",
-                        work[lround((num_samples - 1) * lower_quantile)],
-                        work[lround((num_samples - 1) * upper_quantile)]);
+                        1e6 * work[lround((num_samples - 1) * lower_quantile)],
+                        1e6 * work[lround((num_samples - 1) * upper_quantile)]);
             }
         }
         fputc('\n', output);
+        ++i;
     }
 }
 
