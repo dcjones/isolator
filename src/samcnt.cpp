@@ -221,7 +221,7 @@ int main(int argc, char* argv[])
     const char* gtf_filename = argv[optind+1];
 
     TranscriptSet transcripts;
-    transcripts.read_gtf(gtf_filename, 0, feature, tid_attr, gid_attr);
+    transcripts.read_gtf(gtf_filename, 0, false, feature, tid_attr, gid_attr);
 
     // Make one pass over the reads to count how many alignments each has.
 
