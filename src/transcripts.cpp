@@ -474,6 +474,11 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
             transcripts.insert(t);
         }
     }
+    else {
+        BOOST_FOREACH (Transcript& t, sorted_transcripts) {
+            transcripts.insert(t);
+        }
+    }
 
     Logger::pop_task(task_name);
 }
