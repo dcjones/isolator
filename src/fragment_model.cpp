@@ -26,125 +26,19 @@ static void supress_khash_unused_function_warnings()
 }
 
 
-AlnCountTrie::AlnCountTrie()
-{
-    t = hattrie_create();
-}
-
-
-AlnCountTrie::~AlnCountTrie()
-{
-    hattrie_free(t);
-}
-
-
-void AlnCountTrie::inc_mate1(const char* id)
-{
-    unsigned long* val = hattrie_get(t, id, strlen(id));
-    unsigned long cnt = ((*val & 0xffff) + 1) & 0xffff;
-    *val = (*val & 0xffff0000) | cnt;
-}
-
-
-void AlnCountTrie::inc_mate2(const char* id)
-{
-    unsigned long* val = hattrie_get(t, id, strlen(id));
-    unsigned long cnt = ((*val >> 16) + 1) & 0xffff;
-    *val = (cnt << 16) | (*val & 0xffff);
-}
-
-
-MateCount AlnCountTrie::get(const char* id) const
-{
-    unsigned long* val = hattrie_tryget(t, id, strlen(id));
-    return val == NULL ? MateCount(0, 0) :
-                         MateCount(*val & 0xffff, (*val >> 16) & 0xffff);
-}
-
-
-void AlnCountTrie::set(const char* id, const MateCount& count)
-{
-    unsigned long* val = hattrie_get(t, id, strlen(id));
-    *val = (count.first & 0xffff) | ((count.second & 0xffff) << 16);
-}
-
-
-bool AlnCountTrie::has(const char* id) const
-{
-    return hattrie_tryget(t, id, strlen(id)) != NULL;
-}
-
-
-size_t AlnCountTrie::size() const
-{
-    return hattrie_size(t);
-}
-
-
-AlnCountTrieIterator::AlnCountTrieIterator()
-    : it(NULL)
-{
-
-}
-
-
-AlnCountTrieIterator::AlnCountTrieIterator(const AlnCountTrie& t)
-{
-    it = hattrie_iter_begin(t.t, false);
-    if (!hattrie_iter_finished(it)) {
-        x.first = hattrie_iter_key(it, NULL);
-        unsigned long* val = hattrie_iter_val(it);
-        x.second.first  = *val & 0xffff;
-        x.second.second = (*val >> 16) & 0xffff;
-    }
-}
-
-
-AlnCountTrieIterator::~AlnCountTrieIterator()
-{
-    hattrie_iter_free(it);
-}
-
-
-void AlnCountTrieIterator::increment()
-{
-    hattrie_iter_next(it);
-    if (!hattrie_iter_finished(it)) {
-        x.first = hattrie_iter_key(it, NULL);
-        unsigned long* val = hattrie_iter_val(it);
-        x.second.first  = *val & 0xffff;
-        x.second.second = (*val >> 16) & 0xffff;
-    }
-}
-
-
-bool AlnCountTrieIterator::equal(const AlnCountTrieIterator& other) const
-{
-    if (it == NULL || hattrie_iter_finished(it)) {
-        return other.it == NULL || hattrie_iter_finished(other.it);
-    }
-    else if (other.it == NULL || hattrie_iter_finished(other.it)) {
-        return false;
-    }
-    else return hattrie_iter_equal(it, other.it);
-}
-
-
-const std::pair<const char*, MateCount>& AlnCountTrieIterator::dereference() const
-{
-    return x;
-}
-
-
 AlnIndex::AlnIndex()
 {
     t = hattrie_create();
+    keybuf_size = 64;
+    keybuf = reinterpret_cast<char*>(malloc(keybuf_size * sizeof(char)));
+    if (!keybuf) Logger::error("Out of memory");
 }
 
 
 AlnIndex::~AlnIndex()
 {
     hattrie_free(t);
+    free(keybuf);
 }
 
 
@@ -160,22 +54,40 @@ void AlnIndex::clear()
 }
 
 
-void AlnIndex::add(const char* key)
+size_t AlnIndex::makekey(const char* key, uint16_t alnnum)
+{
+    size_t len = strlen(key);
+    if (len + 2 > keybuf_size) {
+        keybuf_size = len + 2;
+        keybuf = reinterpret_cast<char*>(realloc(keybuf, keybuf_size * sizeof(char)));
+        if (!keybuf) Logger::error("Out of memory");
+    }
+
+    memcpy(keybuf, key, len);
+    memcpy(keybuf + len, &alnnum, 2);
+
+    return len + 2;
+}
+
+
+void AlnIndex::add(const char* key, uint16_t alnnum)
 {
     boost::lock_guard<boost::mutex> lock(mut);
 
-    value_t* val = hattrie_get(t, key, strlen(key));
+    size_t len = makekey(key, alnnum);
+    value_t* val = hattrie_get(t, keybuf, len);
     if (*val == 0) {
         *val = 1 + hattrie_size(t);
     }
 }
 
 
-int AlnIndex::get(const char* key)
+long AlnIndex::get(const char* key, uint16_t alnnum)
 {
     boost::lock_guard<boost::mutex> lock(mut);
 
-    value_t* val = hattrie_tryget(t, key, strlen(key));
+    size_t len = makekey(key, alnnum);
+    value_t* val = hattrie_tryget(t, keybuf, len);
     if (val == NULL) return -1;
     else {
         return *val - 1;;
@@ -271,7 +183,7 @@ struct FragmentModelIntervalPtrCmp
 
 
 void sam_scan(std::vector<FragmentModelInterval*>& intervals,
-              AlnCountTrie& T,
+              AlnIndex& alnindex,
               Queue<FragmentModelInterval*>& q,
               std::vector<FragmentModelInterval*>& seqbias_intervals,
               PosTable& seqbias_sense_pos,
@@ -336,6 +248,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
     bam1_t* b = bam_init1();
     int32_t last_tid = -1;
     int32_t last_pos = -1;
+    uint16_t alnnum;
     while (samread(bam_f, b) >= 0) {
         ++read_num;
 
@@ -349,6 +262,8 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
 
         if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
 
+        // TODO: if the read has a huge number of alignments, skip it.
+
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
             Logger::abort(
@@ -359,13 +274,10 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
         last_tid = b->core.tid;
         last_pos = b->core.pos;
 
-        /* Count numbers of alignments by read. */
-        if (b->core.flag & BAM_FREAD2) {
-            T.inc_mate2(bam1_qname(b));
-        }
-        else if (b->core.flag & BAM_FREAD1) {
-            T.inc_mate1(bam1_qname(b));
-        }
+        const uint8_t* aux = bam_aux_get(b, "HI");
+        alnnum = aux ? (uint16_t) bam_aux2i(aux) : 0;
+        alnindex.add(bam1_qname(b), alnnum);
+        // TODO: warn if there are no HI tags
 
         // Process seqbias intervals
         while (sbi != seqbias_intervals.end() && (*sbi)->tid < b->core.tid) ++sbi;
@@ -675,7 +587,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
         threads.back()->start();
     }
 
-    AlnCountTrie* alncnt = new AlnCountTrie();
     PosTable* seqbias_sense_pos = new PosTable();
     PosTable* seqbias_antisense_pos = new PosTable();
     PosTable* gcbias_pos = new PosTable();
@@ -684,7 +595,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
                             std::string(bam_fn) +
                             std::string(")");
 
-    sam_scan(intervals, *alncnt, q,
+    sam_scan(intervals, alnindex, q,
              seqbias_intervals, *seqbias_sense_pos, *seqbias_antisense_pos,
              *gcbias_pos, bam_fn, task_name.c_str());
 
@@ -726,22 +637,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     delete seqbias_sense_pos;
     delete seqbias_antisense_pos;
 
-    // Index multireads
-    unsigned long total_reads = alncnt->size();
-    for (AlnCountTrieIterator i(*alncnt); i != AlnCountTrieIterator(); ++i) {
-        if (i->second.first > constants::max_alignments ||
-            i->second.second > constants::max_alignments) {
-            blacklist.add(i->first);
-        }
-        else if (i->second.first > 1 || i->second.second > 1) {
-            multireads.add(i->first);
-        }
-    }
-    delete alncnt;
-
-    Logger::debug("Reads: %lu, %0.1f%% with multiple alignments",
-                  total_reads,
-                  100.0 * (double) multireads.size() / (double) total_reads);
+    Logger::debug("Indexed %lu reads", alnindex.size());
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         q.push(NULL);
@@ -750,7 +646,6 @@ void FragmentModel::estimate(TranscriptSet& ts,
     for (size_t i = 0; i < constants::num_threads; ++i) {
         threads[i]->join();
     }
-
 
     /* Collect strand specificity statistics. */
     unsigned long strand_bias[2] = {0, 0};

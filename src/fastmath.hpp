@@ -38,6 +38,14 @@ extern void (*acopy)(void* dest, const void* src, size_t n);
 extern float (*dotlog)(const float* xs, const float* ys, const size_t n);
 
 
+/* Sum of logorithms of xs.
+ *
+ * That is,
+ *  log(xs[0]) + ... + log(xs[n - 1])
+ */
+extern float (*sumlog)(const float* xs, const size_t n);
+
+
 /* Dot product of xs and log(c * ys).
  * That is,
  *  xs[0] * log(c * ys[0]) + ... + xs[n - 1] * log(c * ys[n - 1])
@@ -68,7 +76,7 @@ extern void (*asxpy)(float* xs, const float* ys, const float c,
  *
  * for 0 <= i < n.
  */
-extern float (*asxtydsz)(const float* xs, const float* ys, const float* zs,
+extern float (*asxtydsz)(const float* ys, const float* zs,
                          const unsigned int* idx, const unsigned int off,
                          const size_t n);
 

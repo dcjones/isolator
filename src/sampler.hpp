@@ -38,30 +38,6 @@ struct ComponentBlock
 };
 
 
-// Unit of work used in the multiread sampler.
-struct MultireadBlock
-{
-    MultireadBlock()
-        : u(INT_MAX)
-        , v(INT_MAX)
-        , rng(NULL)
-    {
-    }
-
-    MultireadBlock(unsigned int u, unsigned int v, rng_t& rng)
-        : u(u), v(v), rng(&rng)
-    {
-    }
-
-    bool is_end_of_queue() const
-    {
-        return u == INT_MAX;
-    }
-
-    unsigned int u, v;
-    rng_t* rng;
-};
-
 
 /* This is the sampler, Isolator's warp-core, so to speak.
  */
@@ -124,12 +100,6 @@ class Sampler
         unsigned long num_alignments() const;
 
     private:
-        // Clear multiread assignments.
-        void clear_multireads();
-
-        // Run a single multiread sampler round.
-        void sample_multireads();
-
         // Run a single tmix/cmix round.
         void sample_abundance();
 
@@ -137,20 +107,11 @@ class Sampler
          * tmix. */
         void init_frag_probs();
 
-        // Zero the count of each multiread alignment
-        void init_multireads();
-
         // Recompute frag_count_sums
         void update_frag_count_sums();
 
         TranscriptSet& ts;
         FragmentModel& fm;
-
-        // Multiread sampling
-        std::vector<MultireadSamplerThread*> multiread_threads;
-        Queue<MultireadBlock> multiread_queue;
-        Queue<int> multiread_notify_queue;
-        std::vector<rng_t> multiread_rng_pool;
 
         // Abundance sampling
         std::vector<AbundanceSamplerThread*> abundance_threads;
@@ -203,34 +164,6 @@ class Sampler
         /* Number of transcripts in each component. */
         unsigned int* component_num_transcripts;
         unsigned int** component_transcripts;
-
-        /* frag_counts[i][j] holds the number of occurances of the jth fragment
-         * in component i. */
-        float** frag_counts;
-
-        /* Number of multireads. */
-        unsigned int num_multireads;
-
-        /* Number of alignments for each multiread. */
-        unsigned int* multiread_num_alignments;
-
-        /* A single multiread alignment. */
-        struct MultireadAlignment
-        {
-            unsigned int component;
-            unsigned int frag;
-            float align_pr;
-        };
-
-        /* A flat array of all the multiread alignments */
-        MultireadAlignment* multiread_alignment_pool;
-
-        /* Pointers into multiread_alignment_poll for each multiread. */
-        MultireadAlignment** multiread_alignments;
-
-        /* Row sums of frag_counts, used to compute gradients when optimizing
-         * over component mixtures. */
-        float* frag_count_sums;
 
         /* Total number of fragments beign considered  */
         double total_frag_count;

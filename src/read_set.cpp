@@ -9,6 +9,7 @@ Alignment::Alignment()
     , cigar_len(0)
     , cigar(NULL)
     , strand(strand_na)
+    , alnnum(0)
     , mapq(255)
     , mismatch_count(0)
 {
@@ -20,6 +21,7 @@ Alignment::Alignment(const Alignment& a)
     start     = a.start;
     end       = a.end;
     strand    = a.strand;
+    alnnum    = a.alnnum;
     mapq      = a.mapq;
     mismatch_count = a.mismatch_count;
     cigar_len = a.cigar_len;
@@ -41,6 +43,9 @@ Alignment::Alignment(const bam1_t* b)
         mismatch_count = std::min<unsigned int>(255, bam_aux2i(s));
     }
     else mismatch_count = 0;
+
+    s = bam_aux_get(b, "HI");
+    alnnum = s ? (uint16_t) bam_aux2i(s) : 0;
 
     cigar_len = b->core.n_cigar;
     cigar     = new uint32_t [b->core.n_cigar];
@@ -67,6 +72,11 @@ bool Alignment::operator == (const bam1_t* b) const
         mismatch_count = std::min<unsigned int>(255, bam_aux2i(s));
     }
 
+    uint16_t alnnum = 0;
+    s = bam_aux_get(b, "HI");
+    if (s) alnnum = (uint16_t) bam_aux2i(s);
+    if (this->alnnum != alnnum) return false;
+
     if (this->mismatch_count != mismatch_count) return false;
 
     if (this->cigar_len != b->core.n_cigar) return false;
@@ -86,6 +96,7 @@ bool Alignment::operator < (const Alignment& other) const
     if      (start  != other.start)  return start < other.start;
     else if (end    != other.end)    return end < other.end;
     else if (strand != other.strand) return strand < other.strand;
+    else if (alnnum != other.alnnum) return alnnum < other.alnnum;
     //else if (mapq   != other.mapq)   return mapq < other.mapq;
     //else if (mismatch_count != other.mismatch_count) return mismatch_count < other.mismatch_count;
     else if (cigar_len != other.cigar_len) return cigar_len < other.cigar_len;
@@ -100,6 +111,7 @@ bool Alignment::operator == (const Alignment& other) const
     return start     == other.start &&
            end       == other.end &&
            strand    == other.strand &&
+           alnnum    == other.alnnum &&
            //mapq      == other.mapq &&
            cigar_len == other.cigar_len &&
            memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t)) == 0;
@@ -275,6 +287,7 @@ bool AlignmentPair::operator < (const AlignmentPair& other) const
 bool AlignmentPair::valid_frag() const
 {
     if (mate1 == NULL || mate2 == NULL) return true;
+    if (mate1->alnnum != mate2->alnnum) return false;
 
     switch (constants::libtype) {
         case constants::LIBTYPE_FR:

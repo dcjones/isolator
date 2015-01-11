@@ -123,6 +123,39 @@ static __m256 log2_avx(__m256 x)
 }
 
 
+float sumlog_avx(const float* xs, const size_t n)
+{
+    union {
+        __m256 v;
+        float f[8];
+    } ans;
+    ans.v = _mm256_setzero_ps();
+
+    __m256 xv;
+    size_t i;
+    for (i = 0; i + 8 <= n; i += 8) {
+        xv = _mm256_load_ps(xs + i);
+        ans.v = _mm256_add_ps(ans.v, log2_avx(xv));
+    }
+
+    float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3] +
+                 ans.f[4] + ans.f[5] + ans.f[6] + ans.f[7];
+
+    /* handle any overhang */
+    switch (n % 8) {
+        case 7: fans += fastlog2(xs[i]); ++i;
+        case 6: fans += fastlog2(xs[i]); ++i;
+        case 5: fans += fastlog2(xs[i]); ++i;
+        case 4: fans += fastlog2(xs[i]); ++i;
+        case 3: fans += fastlog2(xs[i]); ++i;
+        case 2: fans += fastlog2(xs[i]); ++i;
+        case 1: fans += fastlog2(xs[i]);
+    }
+
+    return fans;
+}
+
+
 float dotlog_avx(const float* xs, const float* ys, const size_t n)
 {
     union {
@@ -275,14 +308,14 @@ void asxpy_avx(float* xs, const float* ys, const float c,
 }
 
 
-float asxtydsz_avx(const float* xs, const float* ys, const float* zs,
+float asxtydsz_avx(const float* ys, const float* zs,
                    const unsigned int* idx, const unsigned int off,
                    const size_t n)
 {
     union {
         __m256 v;
         float f[8];
-    } ans, x, z;
+    } ans, z;
     ans.v = _mm256_setzero_ps();
 
     union {
@@ -302,16 +335,6 @@ float asxtydsz_avx(const float* xs, const float* ys, const float* zs,
         i1.a = _mm_load_si128((__m128i*)(idx + i + 4));
         i1.a = _mm_sub_epi32(i1.a, voff);
 
-        /* load from xs */
-        x.f[0] = xs[i0.b[0]];
-        x.f[1] = xs[i0.b[1]];
-        x.f[2] = xs[i0.b[2]];
-        x.f[3] = xs[i0.b[3]];
-        x.f[4] = xs[i1.b[0]];
-        x.f[5] = xs[i1.b[1]];
-        x.f[6] = xs[i1.b[2]];
-        x.f[7] = xs[i1.b[3]];
-
         /* load from zs */
         z.f[0] = zs[i0.b[0]];
         z.f[1] = zs[i0.b[1]];
@@ -322,7 +345,7 @@ float asxtydsz_avx(const float* xs, const float* ys, const float* zs,
         z.f[6] = zs[i1.b[2]];
         z.f[7] = zs[i1.b[3]];
 
-        ans.v = _mm256_add_ps(ans.v, _mm256_div_ps(_mm256_mul_ps(x.v, y), z.v));
+        ans.v = _mm256_add_ps(ans.v, _mm256_div_ps(y, z.v));
     }
 
     float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3] +
@@ -331,13 +354,13 @@ float asxtydsz_avx(const float* xs, const float* ys, const float* zs,
 
     /* handle overhang */
     switch (n % 8) {
-        case 7: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
-        case 6: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
-        case 5: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
-        case 4: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
-        case 3: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
-        case 2: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
-        case 1: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off];
+        case 7: fans += ys[i] / zs[idx[i] - off]; ++i;
+        case 6: fans += ys[i] / zs[idx[i] - off]; ++i;
+        case 5: fans += ys[i] / zs[idx[i] - off]; ++i;
+        case 4: fans += ys[i] / zs[idx[i] - off]; ++i;
+        case 3: fans += ys[i] / zs[idx[i] - off]; ++i;
+        case 2: fans += ys[i] / zs[idx[i] - off]; ++i;
+        case 1: fans += ys[i] / zs[idx[i] - off];
     }
 
     return fans;
