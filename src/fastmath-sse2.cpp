@@ -116,6 +116,37 @@ __m128 log2_sse2(__m128 x)
 __m128 log2_sse4(__m128 x);
 
 
+
+float sumlog_sse(const float* xs, const size_t n)
+{
+    __m128 xv;
+    union ans_t
+    {
+        __m128  v;
+        float   f[4];
+    } ans;
+    ans.v = _mm_setzero_ps();
+
+    size_t i;
+    for (i = 0; i < n / 4; ++i) {
+        xv = _mm_load_ps(xs + 4 * i);
+        ans.v = _mm_add_ps(ans.v, log2_sse(xv));
+    }
+
+    float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3];
+
+    /* handle any overhang */
+    i *= 4;
+    switch (n % 4) {
+        case 3: fans += fastlog2(xs[i]); ++i;
+        case 2: fans += fastlog2(xs[i]); ++i;
+        case 1: fans += fastlog2(xs[i]);
+    }
+
+    return fans;
+}
+
+
 float dotlog_sse(const float* xs, const float* ys, const size_t n)
 {
     __m128 xv, yv;
@@ -239,14 +270,14 @@ void asxpy_sse(float* xs, const float* ys, const float c,
 }
 
 
-float asxtydsz_sse(const float* xs, const float* ys, const float* zs,
+float asxtydsz_sse(const float* ys, const float* zs,
                    const unsigned int* idx, const unsigned int off,
                    const size_t n)
 {
     union {
         __m128 v;
         float f[4];
-    } ans, x, z;
+    } ans, z;
     ans.v = _mm_setzero_ps();
 
     union {
@@ -263,17 +294,12 @@ float asxtydsz_sse(const float* xs, const float* ys, const float* zs,
         i0.a = _mm_load_si128((__m128i*)(idx + i));
         i0.a = _mm_sub_epi32(i0.a, voff);
 
-        x.f[0] = xs[i0.b[0]];
-        x.f[1] = xs[i0.b[1]];
-        x.f[2] = xs[i0.b[2]];
-        x.f[3] = xs[i0.b[3]];
-
         z.f[0] = zs[i0.b[0]];
         z.f[1] = zs[i0.b[1]];
         z.f[2] = zs[i0.b[2]];
         z.f[3] = zs[i0.b[3]];
 
-        ans.v = _mm_add_ps(ans.v, _mm_div_ps(_mm_mul_ps(x.v, y), z.v));
+        ans.v = _mm_add_ps(ans.v, _mm_div_ps(y, z.v));
     }
 
     float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3];
@@ -281,9 +307,9 @@ float asxtydsz_sse(const float* xs, const float* ys, const float* zs,
     /* handle overhang */
     i = 4 * (n / 4);
     switch (n % 4) {
-        case 3: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
-        case 2: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off]; ++i;
-        case 1: fans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off];
+        case 3: fans += ys[i] / zs[idx[i] - off]; ++i;
+        case 2: fans += ys[i] / zs[idx[i] - off]; ++i;
+        case 1: fans += ys[i] / zs[idx[i] - off];
     }
 
     return fans;

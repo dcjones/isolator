@@ -11,12 +11,13 @@
 void* (*aalloc)(size_t n) = NULL;
 void (*afree)(void*) = NULL;
 void (*acopy)(void* dest, const void* src, size_t n) = NULL;
+float (*sumlog)(const float* xs, const size_t n) = NULL;
 float (*dotlog)(const float* xs, const float* ys, const size_t n) = NULL;
 float (*dotlogc)(const float* xs, const float* ys, const size_t n, const float c) = NULL;
 void (*asxpy)(float* xs, const float* ys, const float c,
               const unsigned int* idx, const unsigned int off,
               const size_t n) = NULL;
-float (*asxtydsz)(const float* xs, const float* ys, const float* zs,
+float (*asxtydsz)(const float* ys, const float* zs,
                   const unsigned int* idx, const unsigned int off,
                   const size_t n) = NULL;
 float (*dot)(const float* xs, const float* ys, const float* zs, size_t n);
@@ -65,6 +66,7 @@ void fastmath_init()
         aalloc   = aalloc_avx;
         afree    = afree_avx;
         acopy    = acopy_avx;
+        sumlog   = sumlog_avx;
         dotlog   = dotlog_avx;
         dotlogc  = dotlogc_avx;
         asxpy    = asxpy_avx;
@@ -76,6 +78,7 @@ void fastmath_init()
         aalloc   = aalloc_sse;
         afree    = afree_sse;
         acopy    = acopy_sse;
+        sumlog   = sumlog_sse;
         dotlog   = dotlog_sse;
         dotlogc  = dotlogc_sse;
         asxpy    = asxpy_sse;
@@ -93,6 +96,7 @@ void fastmath_init()
         aalloc   = aalloc_vanilla;
         afree    = afree_vanilla;
         acopy    = acopy_vanilla;
+        sumlog   = sumlog_vanilla;
         dotlog   = dotlog_vanilla;
         dotlogc  = dotlogc_vanilla;
         asxpy    = asxpy_vanilla;

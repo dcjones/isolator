@@ -131,10 +131,14 @@ void Transcript::get_sequence(twobitseq& dest, const twobitseq& src,
 }
 
 
-pos_t Transcript::get_offset(pos_t pos) const
+pos_t Transcript::get_offset(pos_t pos, pos_t clipleft, pos_t clipright) const
 {
+    clipleft = std::max<pos_t>(constants::max_intron_overlap, clipleft);
+    clipright = std::max<pos_t>(constants::max_intron_overlap, clipright);
+
     pos_t offset = 0;
-    for (const_iterator exon = begin(); exon != end(); ++exon) {
+    pos_t lastend = 0;
+    for (const_iterator exon = begin(); exon != end(); ) {
         if (pos > exon->end) {
             offset += exon->end - exon->start + 1;
         }
@@ -143,8 +147,20 @@ pos_t Transcript::get_offset(pos_t pos) const
         }
         // position does not overlap an exon
         else {
-            return -1;
+            pos_t intron_overlap_left = pos - lastend;
+            pos_t intron_overlap_right = exon->start - pos;
+
+            if (clipleft >= intron_overlap_left) {
+                pos = exon->start + intron_overlap_left - 1;
+                continue;
+            }
+            else if (clipright >= intron_overlap_right) {
+                return offset - intron_overlap_right;
+            }
+            else return -1;
         }
+        lastend = exon->end;
+        ++exon;
     }
 
     return -1;
@@ -402,8 +418,6 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
     }
 
     // assign tgroups
-
-    // TODO: we should add an option to assign tgroups according te gene_ids.
 
     unsigned int next_tgroup = 0;
     if (use_tss) {

@@ -30,8 +30,8 @@ struct Alignment
     uint16_t  cigar_len;
     uint32_t* cigar;
     uint8_t   strand;
-    uint8_t   mapq;
-    uint8_t   mismatch_count;
+    uint16_t  alnnum;
+    float     misaligned_pr;
 };
 
 
@@ -120,6 +120,9 @@ struct AlignmentPair
 
     const Alignment* mate1;
     const Alignment* mate2;
+
+    // Return the amount of soft-clipping on the ends of the fragment
+    std::pair<pos_t, pos_t> flanks_soft_clipping() const;
 };
 
 

@@ -82,31 +82,6 @@ void assert_finite(double x)
 }
 
 
-struct MultireadFrag
-{
-    MultireadFrag(unsigned int multiread_num,
-                  unsigned int frag_idx,
-                  float align_pr)
-        : multiread_num(multiread_num)
-        , frag_idx(frag_idx)
-        , align_pr(align_pr)
-    {
-    }
-
-    unsigned int multiread_num;
-    unsigned int frag_idx;
-    float align_pr;
-
-    bool operator < (const MultireadFrag& other) const
-    {
-        if (multiread_num != other.multiread_num) {
-            return multiread_num < other.multiread_num;
-        }
-        else return frag_idx < other.frag_idx;
-    }
-};
-
-
 /* A (fragment indx, count) pair. */
 typedef std::pair<unsigned int, unsigned int> FragIdxCount;
 
@@ -464,66 +439,6 @@ class WeightMatrixIterator :
 };
 
 
-/* A trivial class to serve unique indices to multile threads. */
-class Indexer
-{
-    public:
-        Indexer(unsigned int first = 0)
-            : next(first)
-        {
-        }
-
-        unsigned int get()
-        {
-            boost::lock_guard<boost::mutex> lock(mut);
-            return next++;
-        }
-
-        unsigned int count()
-        {
-            return next;
-        }
-
-    private:
-        boost::mutex mut;
-        unsigned int next;
-};
-
-
-struct MultireadEntry
-{
-    MultireadEntry(unsigned int multiread_num,
-                   unsigned int alignment_num,
-                   unsigned int transcript_idx,
-                   float frag_weight,
-                   float align_pr)
-        : multiread_num(multiread_num)
-        , alignment_num(alignment_num)
-        , transcript_idx(transcript_idx)
-        , frag_weight(frag_weight)
-        , align_pr(align_pr)
-    {}
-
-
-    bool operator < (const MultireadEntry& other) const
-    {
-        if (multiread_num != other.multiread_num) {
-            return multiread_num < other.multiread_num;
-        }
-        else if (alignment_num != other.alignment_num) {
-            return alignment_num < other.alignment_num;
-        }
-        else return transcript_idx < other.transcript_idx;
-    }
-
-    unsigned int multiread_num;
-    unsigned int alignment_num;
-    unsigned int transcript_idx;
-    float frag_weight;
-    float align_pr;
-};
-
-
 /* Thread safe vector, allowing multiple threads to write.
  * In particular: modification through push_back and reserve_extra are safe. */
 template <typename T>
@@ -770,20 +685,12 @@ class FragWeightEstimationThread
     public:
         FragWeightEstimationThread(
                 FragmentModel& fm,
-                Indexer& read_indexer,
                 WeightMatrix& weight_matrix,
-                TSVec<FragIdxCount>& frag_counts,
-                TSVec<MultireadFrag>& multiread_frags,
                 double* transcript_weights,
-                double* transcript_gc,
                 Queue<SamplerInitInterval*>& q)
             : weight_matrix(weight_matrix)
-            , frag_counts(frag_counts)
-            , multiread_frags(multiread_frags)
             , transcript_weights(transcript_weights)
-            , transcript_gc(transcript_gc)
             , fm(fm)
-            , read_indexer(read_indexer)
             , q(q)
             , thread(NULL)
             , seqbias_size(0)
@@ -881,13 +788,9 @@ class FragWeightEstimationThread
                 const AlignmentPair& a);
 
         WeightMatrix& weight_matrix;
-        TSVec<FragIdxCount>& frag_counts;
-        TSVec<MultireadFrag>& multiread_frags;
         double* transcript_weights;
-        double* transcript_gc;
 
         FragmentModel& fm;
-        Indexer& read_indexer;
         Queue<SamplerInitInterval*>& q;
         boost::thread* thread;
 
@@ -922,81 +825,15 @@ class FragWeightEstimationThread
 
 void FragWeightEstimationThread::process_locus(SamplerInitInterval* locus)
 {
-    /* A map of fragments onto sequential indices. */
-    typedef std::map<AlignmentPair, FragIdxCount> Frags;
-    Frags frag_idx;
-
-    /* The set of fragments within this locus that have no compatible
-     * transcripts. */
-    typedef std::set<AlignmentPair> FragSet;
-    FragSet excluded_frags;
-
-    /* The set of reads with multiple alignment. */
-    typedef std::set<std::pair<unsigned int, AlignedRead*> > MultireadSet;
-    MultireadSet multiread_set;
-
-    /* Collapse identical reads, filter out those that don't overlap any
-     * transcript. */
+    // look up fragment indexes in advance to reduce contention on fm.alnindex
+    std::vector<long> frag_indexes;
     for (ReadSetIterator r(locus->rs); r != ReadSetIterator(); ++r) {
-        if (fm.blacklist.get(r->first) >= 0) continue;
-
-        int multiread_num = fm.multireads.get(r->first);
-        if (multiread_num >= 0) {
-            multiread_set.insert(std::make_pair((unsigned int) multiread_num,
-                                                r->second));
-            continue;
-        }
-
-        AlignedReadIterator a(*r->second);
-        if (a == AlignedReadIterator()) continue;
-
-        if (excluded_frags.find(*a) != excluded_frags.end()) continue;
-
-        Frags::iterator f = frag_idx.find(*a);
-        if (f != frag_idx.end()) {
-            f->second.second++;
-            continue;
-        }
-
-        bool has_compatible_transcript = false;
-        for (TranscriptSetLocus::iterator t = locus->ts.begin();
-                t != locus->ts.end(); ++t) {
-            if (a->frag_len(*t) >= 0) {
-                has_compatible_transcript = true;
-                break;
-            }
-        }
-
-        if (has_compatible_transcript) {
-            FragIdxCount& f = frag_idx[*a];
-            /* we assign a read index later so we can have indexes roughly
-             * ordered by position. */
-            f.first = 0;
-            f.second = 1;
-        }
-        else {
-            excluded_frags.insert(*a);
-        }
-
-        /* This is not a multiread, so there must be at most one alignment. */
-        assert(++a == AlignedReadIterator());
+        frag_indexes.push_back(fm.alnindex.get(r->first));
     }
 
-    /* Asign indexes */
-    for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
-        f->second.first = read_indexer.get();
-    }
-
-    for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
-        /* fragment with count == 1 are implicit */
-        if (f->second.second > 1) {
-            frag_counts.push_back(f->second);
-        }
-    }
-
-    std::vector<MultireadEntry> multiread_entries;
     for (TranscriptSetLocus::iterator t = locus->ts.begin();
-            t != locus->ts.end(); ++t) {
+         t != locus->ts.end(); ++t) {
+
 
         pos_t L = constants::seqbias_left_pos, R = constants::seqbias_right_pos;
         if (locus->seq) {
@@ -1008,101 +845,18 @@ void FragWeightEstimationThread::process_locus(SamplerInitInterval* locus)
         transcript_sequence_bias(*locus, *t);
         transcript_weights[t->id] = transcript_weight(*locus, *t);
 
-        /* If a transcript is very unlikely to have been sequenced at all,
-         * ignore it. Otherwise quite a few outliers will be generated in which
-         * the annotated transcript is much shorter that what is actually being
-         * transcribed. */
-        if (transcript_weights[t->id] < constants::min_transcript_weight) {
-            continue;
-        }
-
-        for (MultireadSet::iterator r = multiread_set.begin();
-             r != multiread_set.end(); ++r) {
-            unsigned int alignment_num = 0;
-            for (AlignedReadIterator a(*r->second); a != AlignedReadIterator();
-                    ++a, ++alignment_num) {
+        unsigned int i = 0;
+        for (ReadSetIterator r(locus->rs); r != ReadSetIterator(); ++r) {
+            float maxw = 0.0;
+            for (AlignedReadIterator a(*r->second); a != AlignedReadIterator(); ++a) {
                 float w = fragment_weight(*t, *a);
-                if (w > 0.0) {
-                    double align_pr = 1.0;
-
-                    // TODO: we really need to do a better job of this shit
-                    if (a->mate1) {
-                        align_pr *= pow(0.01, a->mate1->mismatch_count);
-                        //align_pr *= 1.0 - pow(10.0, -0.1 * a->mate1->mapq);
-                    }
-
-                    if (a->mate2) {
-                        align_pr *= pow(0.01, a->mate2->mismatch_count);
-                        //align_pr *= 1.0 - pow(10.0, -0.1 * a->mate2->mapq);
-                    }
-
-                    // avoid numerical issues
-                    align_pr = std::max<double>(align_pr, 1e-6);
-
-                    multiread_entries.push_back(
-                            MultireadEntry(r->first, alignment_num, t->id, w, align_pr));
-                }
+                maxw = std::max<float>(maxw, w);
             }
-        }
-
-        for (Frags::iterator f = frag_idx.begin(); f != frag_idx.end(); ++f) {
-            float w = fragment_weight(*t, f->first);
-
-            if (w > 0.0) {
-                weight_matrix.push(t->id, f->second.first, w);
+            long idx = frag_indexes[i];
+            if (maxw > 0.0) {
+                weight_matrix.push(t->id, idx, maxw);
             }
-        }
-    }
-
-    /* Process multiread entries into weight matrix entries */
-    std::sort(multiread_entries.begin(), multiread_entries.end());
-    for (std::vector<MultireadEntry>::iterator k, j, i = multiread_entries.begin();
-            i != multiread_entries.end(); i = k) {
-        k = i + 1;
-        while (k != multiread_entries.end() &&
-               i->multiread_num == k->multiread_num &&
-               i->alignment_num == k->alignment_num) {
-            ++k;
-        }
-
-        float sum_weight = 0.0;
-        float sum_align_pr = 0.0;
-        for (j = i; j != k; ++j) {
-            sum_weight += j->frag_weight;
-            sum_align_pr += j->align_pr;
-        }
-        if (sum_weight == 0.0 || sum_align_pr == 0.0) {
-            continue;
-        }
-
-        unsigned int frag_idx = read_indexer.get();
-        multiread_frags.push_back(MultireadFrag(
-                    i->multiread_num, frag_idx, sum_align_pr));
-
-        /* Sum weight of alignments on the same transcript. */
-        float w = 0.0;
-        std::vector<MultireadEntry>::iterator j0;
-
-        double align_pr_sum = 0.0;
-        for (j0 = j = i; j != k; ++j) {
-            if (j->transcript_idx != j0->transcript_idx) {
-                if (w > 0.0) {
-                    weight_matrix.push(j0->transcript_idx, frag_idx,
-                            w / align_pr_sum);
-                }
-                j0 = j;
-                w = 0.0;
-                align_pr_sum = 0.0;
-            }
-
-            if (j->frag_weight > 0.0) {
-                w += j->frag_weight;
-                align_pr_sum += 1.0;
-            }
-        }
-        if (w > 0.0) {
-            weight_matrix.push(j0->transcript_idx, frag_idx,
-                    w / align_pr_sum);
+            ++i;
         }
     }
 }
@@ -1125,12 +879,10 @@ void FragWeightEstimationThread::transcript_sequence_bias(
     std::fill(seqbias[1], seqbias[1] + tlen, 1.0);
 
     if (fm.sb[1] == NULL || locus.seq == NULL){
-        transcript_gc[t.id] = 0.5;
         return;
     }
 
     pos_t L = constants::seqbias_left_pos;
-    transcript_gc[t.id] = tseq0.gc_count(L, L + tlen - 1) / (double) tlen;
 
     if (t.strand == strand_pos) {
         for (pos_t pos = 0; pos < tlen; ++pos) {
@@ -1240,6 +992,7 @@ float FragWeightEstimationThread::transcript_weight(
         }
 
         memcpy(posbias, tpbias, tlen * sizeof(float));
+
         transcript_gc_bias(locus, t, frag_len);
 
         /* TODO: The following logic assumes the library type is FR. We need
@@ -1286,6 +1039,7 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
 {
     pos_t frag_len = a.frag_len(t);
     pos_t L = constants::seqbias_left_pos;
+    std::pair<pos_t, pos_t> clipping = a.flanks_soft_clipping();
 
     if (frag_len < 0) {
         return 0.0;
@@ -1309,30 +1063,49 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
     }
 
     float w = 1.0;
+    pos_t start_offset = 0, end_offset = 0;
     if (a.mate1 && a.mate2) {
-        pos_t offset1 = t.get_offset(a.mate1->strand == strand_pos ?
-                                     a.mate1->start : a.mate1->end);
+        pos_t offset1, offset2;
+        if (a.mate1->strand == strand_pos) {
+            offset1 = t.get_offset(a.mate1->start, clipping.first, 0);
+            offset2 = t.get_offset(a.mate2->end, 0, clipping.second);
+            start_offset = offset1;
+            end_offset = offset2;
+        }
+        else {
+            offset1 = t.get_offset(a.mate1->end, 0, clipping.second);
+            offset2 = t.get_offset(a.mate2->start, clipping.first, 0);
+            start_offset = offset2;
+            end_offset = offset1;
+        }
+
         if (offset1 < 0 || offset1 >= tlen) return 0.0;
         w *= seqbias[a.mate1->strand == t.strand ? 0 : 1][offset1];
 
-        pos_t offset2 = t.get_offset(a.mate2->strand == strand_pos ?
-                                     a.mate2->start : a.mate2->end);
         if (offset2 < 0 || offset2 >= tlen) return 0.0;
         w *= seqbias[a.mate2->strand == t.strand ? 0 : 1][offset2];
 
-        pos_t offset = t.get_offset(
-                std::min<pos_t>(a.mate1->start, a.mate2->start));
         if (fm.gcbias) {
             float gc = tseq0.gc_count(
-                    L + offset, L + offset + frag_len - 1) / (float) frag_len;
+                    L + start_offset, L + end_offset) / (float) frag_len;
             w *= fm.gcbias->get_bias(gc / frag_len);
         }
 
     }
     else {
         if (a.mate1) {
-            pos_t offset = t.get_offset(a.mate1->strand == strand_pos ?
-                                        a.mate1->start : a.mate1->end);
+            pos_t offset;
+            if (a.mate1->strand == strand_pos) {
+                offset = t.get_offset(a.mate1->start, clipping.first, 0);
+                start_offset = offset;
+                end_offset = std::min<pos_t>(tlen - 1, offset + frag_len - 1);
+            }
+            else {
+                offset = t.get_offset(a.mate1->end, 0, clipping.second);
+                start_offset = std::max<pos_t>(0, offset - frag_len + 1);
+                end_offset = offset;
+            }
+
             if (offset < 0 || offset >= tlen) return 0.0;
             w *= seqbias[a.mate1->strand == t.strand ? 0 : 1][offset];
 
@@ -1348,8 +1121,18 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
         }
 
         if (a.mate2) {
-            pos_t offset = t.get_offset(a.mate2->strand == strand_pos ?
-                                        a.mate2->start : a.mate2->end);
+            pos_t offset;
+            if (a.mate2->strand == strand_pos) {
+                offset = t.get_offset(a.mate2->start, clipping.first, 0);
+                start_offset = offset;
+                end_offset = std::min<pos_t>(tlen - 1, offset + frag_len - 1);
+            }
+            else {
+                offset = t.get_offset(a.mate2->end, 0, clipping.second);
+                start_offset = std::max<pos_t>(0, offset - frag_len + 1);
+                end_offset = offset;
+            }
+
             if (offset < 0 || offset >= tlen) return 0.0;
             w *= seqbias[a.mate2->strand == t.strand ? 0 : 1][offset];
             assert_finite(w);
@@ -1367,37 +1150,16 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
         }
     }
 
+    if (a.mate1) w *= 1.0 - a.mate1->misaligned_pr;
+    if (a.mate2) w *= 1.0 - a.mate2->misaligned_pr;
+
     // 3' bias
     if (t.strand == strand_pos && fm.tpbias && fm.tpbias->p != 0.0) {
-        pos_t tpos;
-        if (a.mate1 && a.mate1->strand == 0) {
-            tpos = t.get_offset(a.mate1->start);
-        }
-        else if (a.mate2 && a.mate2->strand == 0) {
-            tpos = t.get_offset(a.mate2->start);
-        }
-        else {
-            const Alignment* mate = a.mate1 ? a.mate1 : a.mate2;
-            tpos = std::max<pos_t>(0, t.get_offset(mate->end) - frag_len);
-        }
-        assert(0 <= tpos && tpos < tlen);
-        w *= fm.tpbias->get_bias(tlen - tpos - 1);
+        w *= fm.tpbias->get_bias(tlen - start_offset - 1);
         assert_finite(w);
     }
     else if (t.strand == strand_neg && fm.tpbias && fm.tpbias->p != 0.0) {
-        pos_t tpos;
-        if (a.mate1 && a.mate1->strand == 1) {
-            tpos = t.get_offset(a.mate1->end);
-        }
-        else if (a.mate2 && a.mate2->strand == 1) {
-            tpos = t.get_offset(a.mate2->end);
-        }
-        else {
-            const Alignment* mate = a.mate1 ? a.mate1 : a.mate2;
-            tpos = std::min<pos_t>(tlen - 1, t.get_offset(mate->start) + frag_len);
-        }
-        assert(0 <= tpos && tpos < tlen);
-        w *= fm.tpbias->get_bias(tpos);
+        w *= fm.tpbias->get_bias(end_offset);
         assert_finite(w);
     }
 
@@ -1417,11 +1179,20 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
     }
     frag_len_pr /= frag_len_c(tlen);
 
-    if (ws[frag_len] == 0.0 || frag_len_pr * w < constants::min_frag_weight) {
+    if (frag_len_pr * w < constants::min_frag_weight) {
         return 0.0;
     }
 
-    w = frag_len_pr * w / ws[frag_len];
+    // Most pressing matter is to figure out why raising tw to 0.75 improves
+    // things. If I can understand that, maybe I can do something principled and
+    // get even better results.
+    //
+    // This seems like it should have the same effect as 3' bias correction, but
+    // it has the opposite effect. When correcting for 3' bias, we should be
+    // dividing by a decaying function of the unadjusted tw.
+
+    //w = frag_len_pr * w / pow(tw, 0.75);
+    w = 1.0 / pow(tw, 0.75);
 
     if (!boost::math::isfinite(w)) {
         Logger::abort("Non-finite fragment weight computed. %e",
@@ -1513,14 +1284,14 @@ class InterTgroupSampler : public Shredder
             f0 &= 0xfffffff8;
 
             this->x0 = x0;
-            this->lpf01 = dotlog(S.frag_counts[c] + f0, S.frag_probs[c] + f0, f1 - f0) / M_LOG2E;
+            this->lpf01 = sumlog(S.frag_probs[c] + f0, f1 - f0) / M_LOG2E;
             this->c = c;
             this->u = u;
             this->v = v;
             this->f0 = f0;
             this->f1 = f1;
             this->tgroupmix_uv = S.tgroupmix[u] + S.tgroupmix[v];
-            this->lp0 = dotlog(S.frag_counts[c], S.frag_probs[c], component_size) / M_LOG2E;
+            this->lp0 = sumlog(S.frag_probs[c], component_size) / M_LOG2E;
 
             prior_lp0 = 0.0;
             if (S.use_priors) {
@@ -1587,7 +1358,7 @@ class InterTgroupSampler : public Shredder
                 const unsigned int frag_offset = S.component_frag[c];
                 const unsigned int* idxs = S.weight_matrix->idxs[tid];
 
-                d += z * asxtydsz(S.frag_counts[c], S.weight_matrix->rows[tid],
+                d += z * asxtydsz(S.weight_matrix->rows[tid],
                                   S.frag_probs_prop[c], idxs, frag_offset, rowlen);
             }
 
@@ -1599,7 +1370,7 @@ class InterTgroupSampler : public Shredder
                 const unsigned int frag_offset = S.component_frag[c];
                 const unsigned int* idxs = S.weight_matrix->idxs[tid];
 
-                d -= z * asxtydsz(S.frag_counts[c], S.weight_matrix->rows[tid],
+                d -= z * asxtydsz(S.weight_matrix->rows[tid],
                                   S.frag_probs_prop[c], idxs, frag_offset, rowlen);
             }
 
@@ -1629,7 +1400,7 @@ class InterTgroupSampler : public Shredder
             }
 
             return lp0 - lpf01 +
-                   dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0) / M_LOG2E +
+                   sumlog(S.frag_probs_prop[c] + f0, f1 - f0) / M_LOG2E +
                    prior_lp_delta;
         }
 
@@ -1674,7 +1445,7 @@ class InterTranscriptSampler
             nlopt_set_max_objective(opt, intertranscriptsampler_nlopt_objective,
                                     reinterpret_cast<void*>(this));
 
-            nlopt_set_ftol_abs(opt, 1e-2);
+            nlopt_set_ftol_abs(opt, 1e-7);
         }
 
         ~InterTranscriptSampler()
@@ -1687,7 +1458,9 @@ class InterTranscriptSampler
             prepare_sample_optimize(u, v);
             double x0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
             if (lower_limit >= upper_limit) return x0;
-            return sample(x0);
+            double x = sample(x0);
+
+            return x;
         }
 
 
@@ -1732,7 +1505,7 @@ class InterTranscriptSampler
             assert(tgroup == S.transcript_tgroup[v]);
 
             component_size = S.component_frag[c + 1] - S.component_frag[c];
-            lp0 = dotlog(S.frag_counts[c], S.frag_probs[c], component_size) / M_LOG2E;
+            lp0 = sumlog(S.frag_probs[c], component_size) / M_LOG2E;
 
             wtgroupmix0 = 0.0;
             prior_lp0 = 0.0;
@@ -1775,7 +1548,7 @@ class InterTranscriptSampler
             // Round f0 down to the nearst 32-byte boundry so we can use avx/sse.
             f0 &= 0xfffffff8;
 
-            lpf01 = dotlog(S.frag_counts[c] + f0, S.frag_probs[c] + f0, f1 - f0) / M_LOG2E;
+            lpf01 = sumlog(S.frag_probs[c] + f0, f1 - f0) / M_LOG2E;
             assert_finite(lpf01);
         }
 
@@ -1785,6 +1558,7 @@ class InterTranscriptSampler
             prepare_sample_optimize(u, v);
             double x0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
             if (lower_limit >= upper_limit) return x0;
+
             return optimize(x0);
         }
 
@@ -1969,11 +1743,11 @@ class InterTranscriptSampler
                   S.weight_matrix->rowlens[v]);
 
             d = 0.0;
-            d += asxtydsz(S.frag_counts[c], S.weight_matrix->rows[u], S.frag_probs_prop[c],
+            d += asxtydsz(S.weight_matrix->rows[u], S.frag_probs_prop[c],
                           S.weight_matrix->idxs[u], S.component_frag[c],
                           S.weight_matrix->rowlens[u]);
 
-            d -= asxtydsz(S.frag_counts[c], S.weight_matrix->rows[v], S.frag_probs_prop[c],
+            d -= asxtydsz(S.weight_matrix->rows[v], S.frag_probs_prop[c],
                           S.weight_matrix->idxs[v], S.component_frag[c],
                           S.weight_matrix->rowlens[v]);
 
@@ -2013,7 +1787,7 @@ class InterTranscriptSampler
             }
 
             return lp0 - lpf01 +
-                   dotlog(S.frag_counts[c] + f0, S.frag_probs_prop[c] + f0, f1 - f0) / M_LOG2E +
+                   sumlog(S.frag_probs_prop[c] + f0, f1 - f0) / M_LOG2E +
                    prior_lp_delta;
         }
 
@@ -2251,7 +2025,7 @@ float AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 
 float AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
 {
-    float lp = gamma_lnpdf(S.frag_count_sums[c] +
+    float lp = gamma_lnpdf((S.component_frag[c + 1] - S.component_frag[c]) +
                            constants::tmix_prior_prec,
                            1.0, cmixc);
 
@@ -2377,11 +2151,6 @@ void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u,
         // if fragment probabilities are just slightly negative, adjust to
         // avoid NaNs.
         if (S.frag_probs[c][i] < 0) S.frag_probs[c][i] = 0.0;
-
-        if (S.frag_counts[c][i] > 0 &&
-            (S.frag_probs[c][i] <= 0 || !boost::math::isfinite(S.frag_probs[c][i]))) {
-            Logger::abort("Non-positive fragment probability while doing inter tgroup sampling.");
-        }
     }
 }
 
@@ -2454,11 +2223,6 @@ void AbundanceSamplerThread::sample_inter_transcript(unsigned int u, unsigned in
         // if fragment probabilities are just slightly negative, adjust to
         // avoid NaNs.
         if (S.frag_probs[c][i] < 0) S.frag_probs[c][i] = 0.0;
-
-        if (S.frag_counts[c][i] > 0 &&
-            (S.frag_probs[c][i] <= 0 || !boost::math::isfinite(S.frag_probs[c][i]))) {
-            Logger::abort("Non-positive fragment probability while doing inter transcript sampling.");
-        }
     }
 
     S.tgroup_tmix[u] = tmixu / S.tgroupmix[tgroup];
@@ -2523,7 +2287,7 @@ void AbundanceSamplerThread::optimize_component(unsigned int c)
     }
 
     this->c = c;
-    double x0 = S.frag_count_sums[c] +
+    double x0 = (S.component_frag[c + 1] - S.component_frag[c]) +
                 constants::tmix_prior_prec * S.component_num_transcripts[c];
 
     double maxf;
@@ -2539,119 +2303,6 @@ void AbundanceSamplerThread::optimize_component(unsigned int c)
 }
 
 
-class MultireadSamplerThread
-{
-    public:
-        MultireadSamplerThread(Sampler& S,
-                Queue<MultireadBlock>& q,
-                Queue<int>& notify_queue)
-            : hillclimb(false)
-            , S(S)
-            , q(q)
-            , notify_queue(notify_queue)
-            , thread(NULL)
-    {
-    }
-
-        ~MultireadSamplerThread()
-        {
-            if (thread) delete thread;
-        }
-
-        void run()
-        {
-            MultireadBlock block;
-            while (true) {
-                block = q.pop();
-                if (block.is_end_of_queue()) break;
-                rng = block.rng;
-                for (; block.u < block.v; ++block.u) {
-                    float sumprob = 0.0;
-                    unsigned int k = S.multiread_num_alignments[block.u];
-
-                    for (unsigned int i = 0; i < k; ++i) {
-
-                        unsigned int c = S.multiread_alignments[block.u][i].component;
-                        unsigned int f = S.multiread_alignments[block.u][i].frag;
-                        float align_pr = S.multiread_alignments[block.u][i].align_pr;
-                        S.frag_counts[c][f - S.component_frag[c]] = 0;
-                        sumprob += align_pr *
-                                   S.cmix[c] *
-                                   S.frag_probs[c][f - S.component_frag[c]];
-                        //sumprob += align_pr;
-                    }
-
-                    //if (hillclimb) {
-                    if (true) {
-                        for (unsigned int i = 0; i < k; ++i) {
-                            unsigned int c = S.multiread_alignments[block.u][i].component;
-                            unsigned int f = S.multiread_alignments[block.u][i].frag;
-                            float align_pr = S.multiread_alignments[block.u][i].align_pr;
-                            S.frag_counts[c][f - S.component_frag[c]] =
-                                (align_pr * S.cmix[c] * S.frag_probs[c][f - S.component_frag[c]]) / sumprob;
-                        }
-                    }
-                    else {
-                        float r = sumprob * random_uniform_01(*rng);
-                        unsigned int i;
-                        for (i = 0; i < k; ++i) {
-                            unsigned int c = S.multiread_alignments[block.u][i].component;
-                            unsigned int f = S.multiread_alignments[block.u][i].frag;
-                            float align_pr = S.multiread_alignments[block.u][i].align_pr;
-
-                            float p = align_pr *
-                                      S.cmix[c] *
-                                      S.frag_probs[c][f - S.component_frag[c]];
-
-                            //float p = align_pr;
-
-                            if (r <= p) {
-                                break;
-                            }
-                            else {
-                                r -= p;
-                            }
-                        }
-
-                        i = std::min(i, k - 1);
-
-                        unsigned int c = S.multiread_alignments[block.u][i].component;
-                        unsigned int f = S.multiread_alignments[block.u][i].frag;
-
-                        S.frag_counts[c][f - S.component_frag[c]] = 1;
-                    }
-                }
-
-                notify_queue.push(1);
-            }
-        }
-
-        void start()
-        {
-            if (thread != NULL) return;
-            thread = new boost::thread(boost::bind(&MultireadSamplerThread::run, this));
-        }
-
-        void join()
-        {
-            thread->join();
-            delete thread;
-            thread = NULL;
-        }
-
-        /* When true, optimize probability rather than sample. */
-        bool hillclimb;
-
-    private:
-        Sampler& S;
-        Queue<MultireadBlock>& q;
-        Queue<int>& notify_queue;
-        boost::thread* thread;
-        rng_t* rng;
-        boost::random::uniform_01<double> random_uniform_01;
-};
-
-
 Sampler::Sampler(unsigned int rng_seed,
                  const char* bam_fn, const char* fa_fn,
                  TranscriptSet& ts, FragmentModel& fm,
@@ -2664,9 +2315,6 @@ Sampler::Sampler(unsigned int rng_seed,
      * processed. */
     Queue<SamplerInitInterval*> q(100);
 
-    /* Assign matrix indices to reads. */
-    Indexer read_indexer;
-
     /* Collect intervals */
     std::vector<SamplerInitInterval*> intervals;
     for (TranscriptSetLocusIterator i(ts); i != TranscriptSetLocusIterator(); ++i) {
@@ -2675,21 +2323,14 @@ Sampler::Sampler(unsigned int rng_seed,
 
     weight_matrix = new WeightMatrix(ts.size());
     transcript_weights = new double [ts.size()];
-    transcript_gc = new double [ts.size()];
-    TSVec<FragIdxCount> nz_frag_counts;
-    TSVec<MultireadFrag> multiread_frags;
     tgroup_scaling.resize(ts.num_tgroups());
 
     std::vector<FragWeightEstimationThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
         threads.push_back(new FragWeightEstimationThread(
                     fm,
-                    read_indexer,
                     *weight_matrix,
-                    nz_frag_counts,
-                    multiread_frags,
                     transcript_weights,
-                    transcript_gc,
                     q));
         threads.back()->start();
     }
@@ -2706,7 +2347,7 @@ Sampler::Sampler(unsigned int rng_seed,
     for (size_t i = 0; i < constants::num_threads; ++i) threads[i]->join();
 
     /* Free a little space. */
-    fm.multireads.clear();
+    fm.alnindex.clear();
     for (size_t i = 0; i < constants::num_threads; ++i) delete threads[i];
 
     size_t oldncol;
@@ -2714,19 +2355,6 @@ Sampler::Sampler(unsigned int rng_seed,
     Logger::debug("Weight-matrix dimensions: %lu x %lu",
             (unsigned long) weight_matrix->nrow,
             (unsigned long) weight_matrix->ncol);
-
-    /* Update frag_count indexes */
-    for (TSVec<FragIdxCount>::iterator i = nz_frag_counts.begin();
-            i != nz_frag_counts.end(); ++i) {
-        i->first = i->first < oldncol ? idxmap[i->first] : UINT_MAX;
-    }
-
-    /* Update multiread fragment indexes */
-    for (TSVec<MultireadFrag>::iterator i = multiread_frags.begin();
-            i != multiread_frags.end(); ++i) {
-        i->frag_idx = i->frag_idx < oldncol ? idxmap[i->frag_idx] : UINT_MAX;
-    }
-
     delete [] idxmap;
 
     /* Find connected components. */
@@ -2802,6 +2430,7 @@ Sampler::Sampler(unsigned int rng_seed,
         component_transcripts[c][component_num_transcripts[c]++] = i;
     }
 
+    // TODO: why is this necessary??
     /* Now, reorder columns by component. */
     unsigned int* idxord = new unsigned int [weight_matrix->ncol];
     for (size_t i = 0; i < weight_matrix->ncol; ++i) idxord[i] = i;
@@ -2813,22 +2442,12 @@ Sampler::Sampler(unsigned int rng_seed,
     std::sort(ds, ds + weight_matrix->ncol);
     weight_matrix->reorder_columns(idxmap);
 
-    /* Update frag_count indexes */
-    for (TSVec<FragIdxCount>::iterator i = nz_frag_counts.begin();
-            i != nz_frag_counts.end(); ++i) {
-        i->first = i->first < oldncol ? idxmap[i->first] : UINT_MAX;
-    }
-    std::sort(nz_frag_counts.begin(), nz_frag_counts.end());
-
     /* Build fragment count array. */
     component_frag = new unsigned int [num_components + 1];
-    frag_counts = new float* [num_components];
-    std::fill(frag_counts, frag_counts + num_components, (float*) NULL);
     frag_probs = new float* [num_components];
     std::fill(frag_probs, frag_probs + num_components, (float*) NULL);
     frag_probs_prop = new float * [num_components];
     std::fill(frag_probs_prop, frag_probs_prop + num_components, (float*) NULL);
-    TSVec<FragIdxCount>::iterator fc = nz_frag_counts.begin();
     for (size_t i = 0, j = 0; i < num_components; ++i) {
         component_frag[i] = j;
         assert(ds[j] <= i);
@@ -2839,83 +2458,18 @@ Sampler::Sampler(unsigned int rng_seed,
 
         if (component_size == 0) continue;
 
-        frag_counts[i] =
-            reinterpret_cast<float*>(aalloc(component_size * sizeof(float)));
-        std::fill(frag_counts[i], frag_counts[i] + component_size, 1.0f);
-
         frag_probs[i] =
             reinterpret_cast<float*>(aalloc(component_size * sizeof(float)));
         frag_probs_prop[i] =
             reinterpret_cast<float*>(aalloc(component_size * sizeof(float)));
 
-        while (fc != nz_frag_counts.end() && fc->first < k) {
-            frag_counts[i][fc->first - j] = (float) fc->second;
-            ++fc;
-        }
-
         j = k;
     }
     component_frag[num_components] = weight_matrix->ncol;
 
-    /* Update multiread fragment indexes. */
-    for (TSVec<MultireadFrag>::iterator i = multiread_frags.begin();
-            i != multiread_frags.end(); ++i) {
-        i->frag_idx = idxmap[i->frag_idx];
-    }
-    std::sort(multiread_frags.begin(), multiread_frags.end());
-
-    num_multireads = 0;
-    unsigned int num_alignments = 0;
-    for (unsigned int i = 0; i < multiread_frags.size(); ) {
-        unsigned int j;
-        for (j = i; j < multiread_frags.size(); ++j) {
-            if (multiread_frags[i].multiread_num != multiread_frags[j].multiread_num) break;
-        }
-
-        if (j - i > 1) {
-            ++num_multireads;
-            num_alignments += j - i;
-        }
-        i = j;
-    }
-
-    multiread_num_alignments = new unsigned int [num_multireads];
-    std::fill(multiread_num_alignments,
-            multiread_num_alignments + num_multireads, 0);
-    multiread_alignments = new MultireadAlignment* [num_multireads];
-    multiread_alignment_pool = new MultireadAlignment [num_alignments];
-
-    unsigned int multiread_num = 0, alignment_num = 0;
-    for (unsigned int i = 0; i < multiread_frags.size(); ) {
-        unsigned int j;
-        for (j = i; j < multiread_frags.size(); ++j) {
-            if (multiread_frags[i].multiread_num != multiread_frags[j].multiread_num) break;
-        }
-
-        if (j - i > 1) {
-            multiread_alignments[multiread_num] =
-                &multiread_alignment_pool[alignment_num];
-            multiread_num_alignments[multiread_num] = j - i;
-
-            for (; i < j; ++i) {
-                unsigned int c = ds[multiread_frags[i].frag_idx];
-                multiread_alignment_pool[alignment_num].component = c;
-                multiread_alignment_pool[alignment_num].frag =
-                    multiread_frags[i].frag_idx;
-                multiread_alignment_pool[alignment_num].align_pr =
-                    multiread_frags[i].align_pr;
-                ++alignment_num;
-            }
-            ++multiread_num;
-        }
-
-        i = j;
-    }
-
     delete [] ds;
     delete [] idxmap;
 
-    frag_count_sums = new float [num_components];
     tmix            = new double [weight_matrix->nrow];
     tgroupmix       = new double [tgroup_tids.size()];
     tgroup_tmix     = new double [weight_matrix->nrow];
@@ -2939,25 +2493,26 @@ Sampler::Sampler(unsigned int rng_seed,
 
     // allocate sample threads
     for (size_t i = 0; i < constants::num_threads; ++i) {
-        multiread_threads.push_back(
-            new MultireadSamplerThread(*this, multiread_queue, multiread_notify_queue));
         abundance_threads.push_back(
             new AbundanceSamplerThread(*this, component_queue, component_notify_queue));
     }
 
     // allocate and seed rngs
-    size_t num_multiread_rngs =
-        num_multireads / constants::sampler_multiread_block_size + 1;
-    multiread_rng_pool.resize(num_multiread_rngs);
-    BOOST_FOREACH (rng_t& rng, multiread_rng_pool) {
-        rng.seed(rng_seed++);
-    }
-
     size_t num_abundance_rngs =
         num_components / constants::sampler_component_block_size + 1;
     abundance_rng_pool.resize(num_abundance_rngs);
     BOOST_FOREACH (rng_t& rng, abundance_rng_pool) {
         rng.seed(rng_seed++);
+    }
+
+    {
+        FILE* out = fopen("transcript-component-sizes.tsv", "w");
+        fprintf(out, "transcript_id\tcomp_size\n");
+        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
+            fprintf(out, "%s\t%u\n", t->transcript_id.get().c_str(),
+                    (unsigned int) component_num_transcripts[transcript_component[t->id]]);
+        }
+        fclose(out);
     }
 }
 
@@ -2983,29 +2538,17 @@ Sampler::~Sampler()
     delete [] transcript_component;
     delete [] transcript_tgroup;
     for (size_t i = 0; i < num_components; ++i) {
-        afree(frag_counts[i]);
         afree(frag_probs[i]);
         afree(frag_probs_prop[i]);
         delete [] component_transcripts[i];
     }
     delete [] component_transcripts;
     delete [] component_num_transcripts;
-    delete [] multiread_alignments;
-    delete [] multiread_alignment_pool;
-    delete [] multiread_num_alignments;
-    delete [] frag_counts;
-    delete [] frag_count_sums;
     delete [] frag_probs;
     delete [] frag_probs_prop;
     delete [] component_frag;
     delete weight_matrix;
     delete [] transcript_weights;
-    delete [] transcript_gc;
-
-    for (std::vector<MultireadSamplerThread*>::iterator i = multiread_threads.begin();
-         i != multiread_threads.end(); ++i) {
-        delete *i;
-    }
 
     for (std::vector<AbundanceSamplerThread*>::iterator i = abundance_threads.begin();
          i != abundance_threads.end(); ++i) {
@@ -3034,19 +2577,13 @@ void Sampler::start()
     }
 
     std::fill(cmix, cmix + num_components, 1.0 / (float) num_components);
-    init_multireads();
     init_frag_probs();
-    update_frag_count_sums();
 
     /* Initial cmix */
     for (unsigned int c = 0; c < num_components; ++c) {
         cmix[c] =
             constants::tmix_prior_prec +
-            frag_count_sums[c];
-    }
-
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        multiread_threads[i]->start();
+            (component_frag[c + 1] - component_frag[c]);
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -3057,14 +2594,6 @@ void Sampler::start()
 
 void Sampler::stop()
 {
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        multiread_queue.push(MultireadBlock());
-    }
-
-    for (size_t i = 0; i < constants::num_threads; ++i) {
-        multiread_threads[i]->join();
-    }
-
     for (size_t i = 0; i < constants::num_threads; ++i) {
         component_queue.push(ComponentBlock());
     }
@@ -3079,19 +2608,26 @@ void Sampler::sample()
 {
     sample_abundance();
 
+    std::vector<double> cmix_weight(num_components);
+    for (unsigned int i = 0; i < num_components; ++i) {
+        cmix_weight[i] = 0.0;
+        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
+            cmix_weight[i] += tmix[component_transcripts[i][j]] * transcript_weights[component_transcripts[i][j]];
+        }
+    }
+
     // adjust for transcript weight
     double expr_total = 0.0;
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         double tmixi = tmix[i];
-        //double tmixi = tmix[i] < 1e-5 ? 1e-10 :
-                         //(tmix[i] > 1.0 - 1e-5 ? 1.0 - 1e-10 : tmix[i]);
-        expr[i] = cmix[transcript_component[i]] * (tmixi / transcript_weights[i]);
+        expr[i] = tmixi * cmix[transcript_component[i]] / cmix_weight[transcript_component[i]];
         expr_total += expr[i];
     }
 
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         expr[i] /= expr_total;
     }
+
 
     // super-useful diagnostics
 #if 0
@@ -3167,59 +2703,6 @@ const std::vector<double>& Sampler::state() const
 }
 
 
-void Sampler::clear_multireads()
-{
-    for (size_t i = 0; i < num_multireads; ++i) {
-        size_t k = multiread_num_alignments[i];
-        for (size_t j = 0; j < k; ++j) {
-            size_t c = multiread_alignments[i][j].component;
-            size_t f = multiread_alignments[i][j].frag;
-            frag_counts[c][f - component_frag[c]] = 0;
-        }
-    }
-}
-
-
-void Sampler::sample_multireads()
-{
-    unsigned int r, i;
-    for (r = 0, i = 0; r + constants::sampler_multiread_block_size < num_multireads;
-            r += constants::sampler_multiread_block_size, ++i) {
-        multiread_queue.push(MultireadBlock(
-                    r, r + constants::sampler_multiread_block_size,
-                    multiread_rng_pool[i]));
-    }
-    if (r < num_multireads) {
-        multiread_queue.push(MultireadBlock(r, num_multireads, multiread_rng_pool[i]));
-    }
-
-    for (r = 0, i = 0; r + constants::sampler_multiread_block_size < num_multireads;
-            r += constants::sampler_multiread_block_size, ++i) {
-        multiread_notify_queue.pop();
-    }
-    if (r < num_multireads) {
-        multiread_notify_queue.pop();
-    }
-
-    update_frag_count_sums();
-}
-
-
-void Sampler::update_frag_count_sums()
-{
-    // Recompute total fragments in each component
-    std::fill(frag_count_sums, frag_count_sums + num_components, 0.0f);
-    total_frag_count = 0;
-    for (size_t i = 0; i < num_components; ++i) {
-        unsigned int component_size = component_frag[i + 1] - component_frag[i];
-        for (unsigned int j = 0; j < component_size; ++j) {
-            frag_count_sums[i] += frag_counts[i][j];
-        }
-        total_frag_count += frag_count_sums[i];
-    }
-}
-
-
 void Sampler::sample_abundance()
 {
     unsigned int c, i;
@@ -3249,18 +2732,6 @@ void Sampler::sample_abundance()
             if (!boost::math::isfinite(frag_probs[i][j])) {
                 Logger::warn("numerical error: %f", frag_probs[i][j]);
             }
-        }
-    }
-}
-
-
-void Sampler::init_multireads()
-{
-    for (unsigned int i = 0; i < num_multireads; ++i) {
-        for (unsigned int j = 0; j < multiread_num_alignments[i]; ++j) {
-            unsigned int c = multiread_alignments[i][j].component;
-            unsigned int f = multiread_alignments[i][j].frag;
-            frag_counts[c][f - component_frag[c]] = 0;
         }
     }
 }

@@ -401,9 +401,11 @@ void Summarize::point_ci_transcript_expression(
 
         for (size_t j = 0; j < N; ++j) {
             matrix_column<matrix<float> > col(Qi, j);
-            std::sort(col.begin(), col.end());
 
-            (*point)(i, j) = col[col.size() / 2];
+            (*point)(i, j) = col[0];
+
+            //std::sort(col.begin(), col.end());
+            //(*point)(i, j) = col[col.size() / 2];
 
             if (lower) {
                 (*lower)(i, j) = col[lround((col.size() - 1) * lower_quantile)];

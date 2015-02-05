@@ -33,6 +33,17 @@ void acopy_vanilla(void* dest, const void* src, size_t n)
 }
 
 
+float sumlog_vanilla(const float* xs, const size_t n)
+{
+    float ans = 0.0;
+    size_t i;
+    for (i = 0; i < n; ++i) {
+        ans += fastlog2(xs[i]);
+    }
+    return ans;
+}
+
+
 float dotlog_vanilla(const float* xs, const float* ys, const size_t n)
 {
     float ans = 0.0;
@@ -69,13 +80,13 @@ void asxpy_vanilla(float* xs, const float* ys, const float c,
 }
 
 
-float asxtydsz_vanilla(const float* xs, const float* ys, const float* zs,
+float asxtydsz_vanilla(const float* ys, const float* zs,
                        const unsigned int* idx, const unsigned int off,
                        const size_t n)
 {
     float ans = 0.0;
     for (size_t i = 0; i < n; ++i) {
-        ans += xs[idx[i] - off] * ys[i] / zs[idx[i] - off];
+        ans += ys[i] / zs[idx[i] - off];
     }
     return ans;
 }

@@ -1,4 +1,5 @@
 
+#include <cctype>
 #include "read_set.hpp"
 #include "constants.hpp"
 
@@ -9,8 +10,7 @@ Alignment::Alignment()
     , cigar_len(0)
     , cigar(NULL)
     , strand(strand_na)
-    , mapq(255)
-    , mismatch_count(0)
+    , alnnum(0)
 {
 }
 
@@ -20,8 +20,8 @@ Alignment::Alignment(const Alignment& a)
     start     = a.start;
     end       = a.end;
     strand    = a.strand;
-    mapq      = a.mapq;
-    mismatch_count = a.mismatch_count;
+    alnnum    = a.alnnum;
+    misaligned_pr  = a.misaligned_pr;
     cigar_len = a.cigar_len;
     cigar = new uint32_t[cigar_len];
     memcpy(cigar, a.cigar, cigar_len * sizeof(uint32_t));
@@ -33,14 +33,53 @@ Alignment::Alignment(const bam1_t* b)
     start     = bam_truepos(&b->core, bam1_cigar(b));
     end       = bam_trueend(&b->core, bam1_cigar(b)) - 1;
     strand    = bam1_strand(b);
-    mapq      = b->core.qual;
 
-    unsigned char* s = bam_aux_get(b, "NM");
-    if (!s) s = bam_aux_get(b, "nM");
+    unsigned int mismatch_count = 0;
+    char* s = reinterpret_cast<char*>(bam_aux_get(b, "NM"));
+    if (!s) s = reinterpret_cast<char*>(bam_aux_get(b, "nM"));
     if (s) {
-        mismatch_count = std::min<unsigned int>(255, bam_aux2i(s));
+        mismatch_count = (unsigned int) bam_aux2i(reinterpret_cast<unsigned char*>(s));
     }
-    else mismatch_count = 0;
+
+    s = reinterpret_cast<char*>(bam_aux_get(b, "MD"));
+    double misalign_likelihood[2] = {1.0, 1.0};
+    if (s) {
+        unsigned char* qs = bam1_qual(b);
+        pos_t off = 0;
+        char* t = s;
+        unsigned long skip;
+        while (*s) {
+            skip = strtoul(s, &t, 10);
+            if (t > s) {
+                off += (pos_t) skip;
+            }
+
+            // probability the base is miscalled
+            double p = pow(10.0, - (double) qs[off] / 10);
+            misalign_likelihood[0] *=
+                p + (1.0 - p) * constants::misalign_mismatch_pr;
+            misalign_likelihood[1] *=
+                p + (1.0 - p) * constants::mismatch_pr;
+
+            if (!*t) break;
+
+            s = t + 1;
+            ++off;
+        }
+
+    }
+    else {
+        misalign_likelihood[0] = pow(constants::misalign_mismatch_pr, mismatch_count);
+        misalign_likelihood[1] = pow(constants::mismatch_pr, mismatch_count);
+    }
+
+        misaligned_pr = (constants::misalign_prior * misalign_likelihood[0]) /
+            ((constants::misalign_prior * misalign_likelihood[0]) +
+             (1.0 - constants::misalign_prior) * misalign_likelihood[1]);
+
+
+    s = reinterpret_cast<char*>(bam_aux_get(b, "HI"));
+    alnnum = s ? (uint16_t) bam_aux2i(reinterpret_cast<unsigned char*>(s)) : 0;
 
     cigar_len = b->core.n_cigar;
     cigar     = new uint32_t [b->core.n_cigar];
@@ -58,16 +97,11 @@ bool Alignment::operator == (const bam1_t* b) const
 {
     if (this->start != (pos_t) bam_truepos(&b->core, bam1_cigar(b))) return false;
     if (this->strand != bam1_strand(b)) return false;
-    if (this->mapq != b->core.qual) return false;
 
-    uint8_t mismatch_count = 0;
-    unsigned char* s = bam_aux_get(b, "NM");
-    if (!s) s = bam_aux_get(b, "nM");
-    if (s) {
-        mismatch_count = std::min<unsigned int>(255, bam_aux2i(s));
-    }
-
-    if (this->mismatch_count != mismatch_count) return false;
+    uint16_t alnnum = 0;
+    unsigned char* s = bam_aux_get(b, "HI");
+    if (s) alnnum = (uint16_t) bam_aux2i(s);
+    if (this->alnnum != alnnum) return false;
 
     if (this->cigar_len != b->core.n_cigar) return false;
     if (this->end != (pos_t) (bam_trueend(&b->core, bam1_cigar(b)) - 1)) return false;
@@ -86,6 +120,7 @@ bool Alignment::operator < (const Alignment& other) const
     if      (start  != other.start)  return start < other.start;
     else if (end    != other.end)    return end < other.end;
     else if (strand != other.strand) return strand < other.strand;
+    else if (alnnum != other.alnnum) return alnnum < other.alnnum;
     //else if (mapq   != other.mapq)   return mapq < other.mapq;
     //else if (mismatch_count != other.mismatch_count) return mismatch_count < other.mismatch_count;
     else if (cigar_len != other.cigar_len) return cigar_len < other.cigar_len;
@@ -100,6 +135,7 @@ bool Alignment::operator == (const Alignment& other) const
     return start     == other.start &&
            end       == other.end &&
            strand    == other.strand &&
+           alnnum    == other.alnnum &&
            //mapq      == other.mapq &&
            cigar_len == other.cigar_len &&
            memcmp(cigar, other.cigar, cigar_len * sizeof(uint32_t)) == 0;
@@ -275,6 +311,7 @@ bool AlignmentPair::operator < (const AlignmentPair& other) const
 bool AlignmentPair::valid_frag() const
 {
     if (mate1 == NULL || mate2 == NULL) return true;
+    if (mate1->alnnum != mate2->alnnum) return false;
 
     switch (constants::libtype) {
         case constants::LIBTYPE_FR:
@@ -296,6 +333,47 @@ bool AlignmentPair::valid_frag() const
             return false;
     }
 }
+
+
+std::pair<pos_t, pos_t> AlignmentPair::flanks_soft_clipping() const
+{
+    std::pair<pos_t, pos_t> clipping(0, 0);
+
+    if (mate1 && mate2 && mate1->cigar_len > 0 && mate2->cigar_len > 0) {
+        const Alignment *a1, *a2;
+        if (mate1->strand == strand_pos) {
+            a1 = mate1;
+            a2 = mate2;
+        }
+        else {
+            a1 = mate2;
+            a2 = mate1;
+        }
+
+        if ((a1->cigar[0] & BAM_CIGAR_MASK) == BAM_CSOFT_CLIP) {
+            clipping.first = a1->cigar[0] >> BAM_CIGAR_SHIFT;
+        }
+
+        if ((a2->cigar[a2->cigar_len - 1] & BAM_CIGAR_MASK) == BAM_CSOFT_CLIP) {
+            clipping.second = a2->cigar[a2->cigar_len - 1] >> BAM_CIGAR_SHIFT;
+        }
+    }
+    else {
+        const Alignment* a = mate1 ? mate1 : mate2;
+        if (a->cigar_len > 0) {
+            if (a->strand == strand_pos &&
+                    (a->cigar[0] & BAM_CIGAR_MASK) == BAM_CSOFT_CLIP) {
+                clipping.first = a->cigar[0] >> BAM_CIGAR_SHIFT;
+            }
+            else if ((a->cigar[a->cigar_len - 1] & BAM_CIGAR_MASK) == BAM_CSOFT_CLIP) {
+                clipping.second = a->cigar[a->cigar_len - 1] >> BAM_CIGAR_SHIFT;
+            }
+        }
+    }
+
+    return clipping;
+}
+
 
 /* A couple functions to assist with AlignmentPair::frag_len */
 static bool exon_compatible_cigar_op(uint8_t op)
@@ -356,25 +434,26 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
 
     // Skip any leading soft clip
     if (c1 != CigarIterator() && c1->op == BAM_CSOFT_CLIP) ++c1;
+    Cigar c = *c1;
 
     while (e1 != TranscriptIntronExonIterator() && c1 != CigarIterator()) {
         // case 1: e entirely preceedes c
-        if (c1->start > e1->first.end) {
+        if (c.start > e1->first.end) {
             ++e1;
         }
 
         // case 2: c is contained within e
-        else if (c1->end   >= e1->first.start
-              && c1->end   <= e1->first.end
-              && c1->start >= e1->first.start)
+        else if (c.end   >= e1->first.start
+              && c.end   <= e1->first.end
+              && c.start >= e1->first.start)
         {
             if (e1->second == EXONIC_INTERVAL_TYPE) {
-                if (!exon_compatible_cigar_op(c1->op)) {
+                if (!exon_compatible_cigar_op(c.op)) {
                     return -1;
                 }
             }
             else {
-                if (!intron_compatible_cigar_op(c1->op)) {
+                if (!intron_compatible_cigar_op(c.op)) {
                     return -1;
                 }
                 intron_len += e1->first.end - e1->first.start + 1;
@@ -382,11 +461,26 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
             }
 
             ++c1;
+            c = *c1;
         }
 
         // case 3: soft clipping partially overlapping an exon or intron
-        else if (c1->op == BAM_CSOFT_CLIP) {
+        else if (c.op == BAM_CSOFT_CLIP) {
             ++c1;
+            c = *c1;
+        }
+
+        else if (c.end > e1->first.end && c.op == BAM_CMATCH) {
+            if (e1->second == EXONIC_INTERVAL_TYPE &&
+                c.end - e1->first.end <= constants::max_intron_overlap) {
+                c.end = e1->first.end;
+            }
+            else if (e1->second == INTRONIC_INTERVAL_TYPE &&
+                     e1->first.end >= c.start &&
+                     e1->first.end - c.start < constants::max_intron_overlap) {
+                c.start = e1->first.end + 1;
+            }
+            else return -1;
         }
 
         // case 4: c precedes partially overlaps e
@@ -407,10 +501,11 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
     bool e2_sup_e1 = false; /* marks when e2 > e1 */
     TranscriptIntronExonIterator e2(t);
     CigarIterator c2(*a2);
+    c = *c2;
 
     while (e2 != TranscriptIntronExonIterator() && c2 != CigarIterator()) {
         // case 1: e entirely preceedes c
-        if (c2->start > e2->first.end) {
+        if (c.start > e2->first.end) {
             if (e2->second == INTRONIC_INTERVAL_TYPE && e2_sup_e1) {
                 intron_len += e2->first.end - e2->first.start + 1;
             }
@@ -421,27 +516,42 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
         }
 
         // case 2: c is contained within e
-        else if (c2->end   >= e2->first.start
-              && c2->end   <= e2->first.end
-              && c2->start >= e2->first.start)
+        else if (c.end   >= e2->first.start
+              && c.end   <= e2->first.end
+              && c.start >= e2->first.start)
         {
             if (e2->second == EXONIC_INTERVAL_TYPE) {
-                if (!exon_compatible_cigar_op(c2->op)) {
+                if (!exon_compatible_cigar_op(c.op)) {
                     return -1;
                 }
             }
             else {
-                if (!intron_compatible_cigar_op(c2->op)) {
+                if (!intron_compatible_cigar_op(c.op)) {
                     return -1;
                 }
             }
 
             ++c2;
+            c = *c2;
         }
 
         // case 3: soft clipping partially overlapping an exon or intron
-        else if (c2->op == BAM_CSOFT_CLIP) {
+        else if (c.op == BAM_CSOFT_CLIP) {
             ++c2;
+            c = *c2;
+        }
+
+        else if (c.end > e2->first.end && c.op == BAM_CMATCH) {
+            if (e2->second == EXONIC_INTERVAL_TYPE &&
+                c.end - e2->first.end <= constants::max_intron_overlap) {
+                c.end = e2->first.end;
+            }
+            else if (e2->second == INTRONIC_INTERVAL_TYPE &&
+                     e2->first.end >= c.start &&
+                     e2->first.end - c.start < constants::max_intron_overlap) {
+                c.start = e2->first.end + 1;
+            }
+            else return -1;
         }
 
         // case 4: c precedes or partially overlaps e

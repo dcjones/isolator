@@ -2,7 +2,7 @@
 #include "constants.hpp"
 
 unsigned int         constants::num_threads                  = 1;
-unsigned int         constants::num_opt_rounds               = 10;
+unsigned int         constants::num_opt_rounds               = 50;
 unsigned int         constants::min_map_qual                 = 0;
 size_t               constants::max_estimate_queue_size      = 500;
 pos_t                constants::min_estimate_exon_length     = 200;
@@ -29,7 +29,7 @@ float                constants::frag_len_dist_smoothing      = 0.2;
 size_t               constants::frag_len_min_pe_reads        = 10000;
 double               constants::frag_len_mu                  = 200.0;
 double               constants::frag_len_sd                  = 100.0;
-float                constants::min_frag_weight              = 1e-4;
+float                constants::min_frag_weight              = 1e-5;
 float                constants::zero_eps                     = 1e-9;
 pos_t                constants::alt_exon_flank_length        = 200;
 pos_t                constants::transcript_5p_extension      = 0;
@@ -57,4 +57,8 @@ double               constants::analyze_experiment_splice_sigma0 = 10.0;
 double               constants::analyze_experiment_tgroup_nu     = 5.0;
 double               constants::analyze_experiment_splice_nu     = 5.0;
 double               constants::analyze_min_splice_sigma         = 0.03;
+pos_t                constants::max_intron_overlap               = 2;
+double               constants::mismatch_pr                      = 0.01;
+double               constants::misalign_mismatch_pr             = 0.05;
+double               constants::misalign_prior                   = 0.01;
 

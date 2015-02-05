@@ -78,7 +78,7 @@ class Transcript : public std::set<Exon>
 
         /* Get the offset of a genomic position within the spliced transcript
          * sequence. */
-        pos_t get_offset(pos_t) const;
+        pos_t get_offset(pos_t, pos_t leftclip, pos_t rightclip) const;
 
         GeneID gene_id;
         GeneName gene_name;

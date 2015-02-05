@@ -220,6 +220,19 @@ namespace constants
      * to near zero, causing the sampler to get stuck. To avoid this, we force
      * variance parameters to be above some small value. */
     extern double analyze_min_splice_sigma;
+
+    /* How much an alignment is allowed to overhang an intron and still be
+     * considered valid. This handles the fairly common case of a read that
+     * should be spliced instead aligning into the intron by one or two bases
+     * which should span the intron.  */
+    extern pos_t max_intron_overlap;
+
+    /* Probabilities controlling how the probability of misalignment is
+     * computed.
+     */
+    extern double mismatch_pr;
+    extern double misalign_mismatch_pr;
+    extern double misalign_prior;
 }
 
 #endif

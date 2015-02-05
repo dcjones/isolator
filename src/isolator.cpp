@@ -1255,7 +1255,7 @@ static int isolator_analyze(int argc, char* argv[])
     int optidx;
     std::string longopt_name;
     while (true) {
-        opt = getopt_long(argc, argv, "ho:vg:p:N:", long_options, &optidx);
+        opt = getopt_long(argc, argv, "ho:vg:p:B:N:s:", long_options, &optidx);
 
         if (opt == -1) break;
 

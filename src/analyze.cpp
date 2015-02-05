@@ -1908,6 +1908,9 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
     write_output(0);
     Logger::pop_task(optimize_task_name);
 
+    BOOST_FOREACH (Sampler* sampler, qsamplers) {
+        sampler->engage_priors();
+    }
 
     BOOST_FOREACH (ConditionSpliceMuSigmaEtaSamplerThread* thread, splice_mu_sigma_sampler_threads) {
         thread->end_burnin();
@@ -1995,11 +1998,6 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
 
 void Analyze::warmup()
 {
-    // An attempt at a more efficient warm-up procedure.
-    BOOST_FOREACH (Sampler* sampler, qsamplers) {
-        sampler->engage_priors();
-    }
-
 #if 0
     // draw a few samples from the quantification samplers without priors
     for (size_t i = 0; i < 10; ++i) {
