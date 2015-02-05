@@ -51,6 +51,7 @@ target_link_libraries(isolator
                       ${Boost_SYSTEM_LIBRARY}
                       ${Boost_THREAD_LIBRARY}
                       ${Boost_TIMER_LIBRARY}
+                      ${Boost_CHRONO_LIBRARY}
                       ${HDF5_LIBRARIES}
                       ${ZLIB_LIBRARIES}
                       ${CMAKE_THREAD_LIBS_INIT})
@@ -73,8 +74,15 @@ target_link_libraries(samcnt
                       ${Boost_SYSTEM_LIBRARY}
                       ${Boost_THREAD_LIBRARY}
                       ${Boost_TIMER_LIBRARY}
+                      ${Boost_CHRONO_LIBRARY}
                       ${ZLIB_LIBRARIES}
                       ${CMAKE_THREAD_LIBS_INIT})
+
+if(UNIX AND NOT APPLE)
+  target_link_libraries(isolator rt)
+  target_link_libraries(samcnt rt)
+endif()
+
 
 install(TARGETS isolator RUNTIME DESTINATION bin)
 
