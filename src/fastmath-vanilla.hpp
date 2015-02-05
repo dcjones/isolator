@@ -14,9 +14,11 @@ void asxpy_vanilla(float* xs, const float* ys, const float c,
                    const unsigned int* idx,
                    const unsigned int off,
                    const size_t n);
+void axpy_vanilla(float* xs, const float* ys, const float c, const size_t n);
 float asxtydsz_vanilla(const float* ys, const float* zs,
                        const unsigned int* idx, const unsigned int off,
                        const size_t n);
+float sumdiv_vanilla(const float* xs, const float* ys, const size_t n);
 float dot_vanilla(const float* xs, const float* ys, const float* zs, const size_t n);
 
 #endif

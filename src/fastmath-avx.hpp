@@ -14,9 +14,11 @@ void asxpy_avx(float* xs, const float* ys, const float c,
                const unsigned int* idx,
                const unsigned int off,
                const size_t n);
+void axpy_avx(float* xs, const float* ys, const float c, const size_t n);
 float asxtydsz_avx(const float* ys, const float* zs,
                    const unsigned int* idx, const unsigned int off,
                    const size_t n);
+float sumdiv_avx(const float* xs, const float* ys, const size_t n);
 float dot_avx(const float* xs, const float* ys, const float* zs, const size_t n);
 
 #endif

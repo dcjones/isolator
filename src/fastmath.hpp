@@ -66,19 +66,32 @@ extern void (*asxpy)(float* xs, const float* ys, const float c,
                      const unsigned int* idx, const unsigned int off,
                      const size_t n);
 
+/*
+ * Compute.
+ *    xs[i] += c * ys[i]
+ *
+ */
+extern void (*axpy)(float* xs, const float* ys, const float c, const size_t n);
+
 
 /* ssxtydsz: sum of sparse x times y divided by sparse z.
  *
  * ...I know, I know, but you try coming up with a better name!
  *
  * This computes the sum of
- *   xs[idx[i] - off] * ys[i] / zs[idx[i] - off]
+ *   ys[i] / zs[idx[i] - off]
  *
  * for 0 <= i < n.
  */
 extern float (*asxtydsz)(const float* ys, const float* zs,
                          const unsigned int* idx, const unsigned int off,
                          const size_t n);
+
+/*
+ * Compute the sum of:
+ *   xs[i] / ys[i]
+ */
+extern float (*sumdiv)(const float* xs, const float* ys, const size_t n);
 
 
 /* Triple product, where xs and zs are aligned and ys may not be.

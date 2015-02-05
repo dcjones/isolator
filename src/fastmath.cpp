@@ -17,9 +17,11 @@ float (*dotlogc)(const float* xs, const float* ys, const size_t n, const float c
 void (*asxpy)(float* xs, const float* ys, const float c,
               const unsigned int* idx, const unsigned int off,
               const size_t n) = NULL;
+void (*axpy)(float* xs, const float* ys, const float c, const size_t n) = NULL;
 float (*asxtydsz)(const float* ys, const float* zs,
                   const unsigned int* idx, const unsigned int off,
                   const size_t n) = NULL;
+float (*sumdiv)(const float* xs, const float* ys, const size_t n);
 float (*dot)(const float* xs, const float* ys, const float* zs, size_t n);
 const char* FASTMATH_INSTR_SET = "";
 
@@ -70,7 +72,9 @@ void fastmath_init()
         dotlog   = dotlog_avx;
         dotlogc  = dotlogc_avx;
         asxpy    = asxpy_avx;
+        axpy     = axpy_avx;
         asxtydsz = asxtydsz_avx;
+        sumdiv   = sumdiv_avx;
         dot      = dot_avx;
         FASTMATH_INSTR_SET = "AVX";
     }
@@ -82,7 +86,9 @@ void fastmath_init()
         dotlog   = dotlog_sse;
         dotlogc  = dotlogc_sse;
         asxpy    = asxpy_sse;
+        axpy     = axpy_vanilla; // TODO
         asxtydsz = asxtydsz_sse;
+        sumdiv   = sumdiv_vanilla; // TODO
         dot      = dot_sse;
         fastmath_sse_init();
         if (cpu_has_sse4()) {
@@ -100,7 +106,9 @@ void fastmath_init()
         dotlog   = dotlog_vanilla;
         dotlogc  = dotlogc_vanilla;
         asxpy    = asxpy_vanilla;
+        axpy     = axpy_vanilla;
         asxtydsz = asxtydsz_vanilla;
+        sumdiv   = sumdiv_vanilla;
         dot      = dot_vanilla;
         FASTMATH_INSTR_SET = "Vanilla";
     }

@@ -308,6 +308,32 @@ void asxpy_avx(float* xs, const float* ys, const float c,
 }
 
 
+void axpy_avx(float* xs, const float* ys, const float c, const size_t n)
+{
+    static const float prob_epsilon = constants::frag_prob_epsilon;
+    PS32_CONST(prob_epsilon, prob_epsilon);
+    __m256 cv = _mm256_set1_ps(c);
+
+    size_t i;
+    for (i = 0; i + 8 <= n; i += 8) {
+        _mm256_store_ps(xs + i,
+            _mm256_max_ps(*reinterpret_cast<const __m256*>(ps32_prob_epsilon),
+                          _mm256_add_ps(_mm256_load_ps(xs + i),
+                                        _mm256_mul_ps(cv, _mm256_load_ps(ys + i)))));
+    }
+
+    switch (n % 8) {
+        case 7: xs[i] = std::max<float>(prob_epsilon, xs[i] + c * ys[i]); ++i;
+        case 6: xs[i] = std::max<float>(prob_epsilon, xs[i] + c * ys[i]); ++i;
+        case 5: xs[i] = std::max<float>(prob_epsilon, xs[i] + c * ys[i]); ++i;
+        case 4: xs[i] = std::max<float>(prob_epsilon, xs[i] + c * ys[i]); ++i;
+        case 3: xs[i] = std::max<float>(prob_epsilon, xs[i] + c * ys[i]); ++i;
+        case 2: xs[i] = std::max<float>(prob_epsilon, xs[i] + c * ys[i]); ++i;
+        case 1: xs[i] = std::max<float>(prob_epsilon, xs[i] + c * ys[i]);
+    }
+}
+
+
 float asxtydsz_avx(const float* ys, const float* zs,
                    const unsigned int* idx, const unsigned int off,
                    const size_t n)
@@ -361,6 +387,37 @@ float asxtydsz_avx(const float* ys, const float* zs,
         case 3: fans += ys[i] / zs[idx[i] - off]; ++i;
         case 2: fans += ys[i] / zs[idx[i] - off]; ++i;
         case 1: fans += ys[i] / zs[idx[i] - off];
+    }
+
+    return fans;
+}
+
+
+float sumdiv_avx(const float* xs, const float* ys, const size_t n)
+{
+    union {
+        __m256 v;
+        float f[8];
+    } ans;
+    ans.v = _mm256_setzero_ps();
+    size_t i;
+    for (i = 0; i + 8 <= n; i += 8) {
+        ans.v = _mm256_add_ps(ans.v,
+                  _mm256_div_ps(_mm256_load_ps(xs + i),
+                                _mm256_load_ps(ys + i)));
+    }
+
+    float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3] +
+                 ans.f[4] + ans.f[5] + ans.f[6] + ans.f[7];
+
+    switch (n % 8) {
+        case 7: fans += xs[i] / ys[i]; ++i;
+        case 6: fans += xs[i] / ys[i]; ++i;
+        case 5: fans += xs[i] / ys[i]; ++i;
+        case 4: fans += xs[i] / ys[i]; ++i;
+        case 3: fans += xs[i] / ys[i]; ++i;
+        case 2: fans += xs[i] / ys[i]; ++i;
+        case 1: fans += xs[i] / ys[i];
     }
 
     return fans;

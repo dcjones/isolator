@@ -80,6 +80,14 @@ void asxpy_vanilla(float* xs, const float* ys, const float c,
 }
 
 
+void axpy_vanilla(float* xs, const float* ys, const float c, const size_t n)
+{
+    for (size_t i = 0; i < n; ++i) {
+        xs[i] = std::max<float>(xs[i] + c * ys[i], prob_epsilon);
+    }
+}
+
+
 float asxtydsz_vanilla(const float* ys, const float* zs,
                        const unsigned int* idx, const unsigned int off,
                        const size_t n)
@@ -87,6 +95,16 @@ float asxtydsz_vanilla(const float* ys, const float* zs,
     float ans = 0.0;
     for (size_t i = 0; i < n; ++i) {
         ans += ys[i] / zs[idx[i] - off];
+    }
+    return ans;
+}
+
+
+float sumdiv_vanilla(const float* xs, const float* ys, const size_t n)
+{
+    float ans = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        ans += xs[i] / ys[i];
     }
     return ans;
 }
