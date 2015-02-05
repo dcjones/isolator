@@ -1237,6 +1237,21 @@ struct ComponentCmp
 };
 
 
+struct ComponentCmpRev
+{
+    ComponentCmpRev(unsigned int* ds)
+        : ds(ds)
+    {
+    }
+
+    bool operator () (unsigned int i, unsigned int j) {
+        return ds[i] > ds[j];
+    }
+
+    unsigned int* ds;
+};
+
+
 class InterTgroupSampler : public Shredder
 {
     public:
@@ -1897,7 +1912,8 @@ class AbundanceSamplerThread
 
                 this->rng = block.rng;
 
-                for (unsigned int c = block.u; c < block.v; ++c) {
+                for (unsigned int l = block.u; l < block.v; ++l) {
+                    unsigned int c = S.ordered_components[l];
                     sample_intra_component(c);
                     if (optimize_state) {
                         optimize_component(c);
@@ -2482,6 +2498,15 @@ Sampler::Sampler(unsigned int rng_seed,
         transcript_weights[i] = std::max<double>(constants::min_transcript_weight, transcript_weights[i]);
     }
 
+    // figure out the best order to process components
+    ordered_components.resize(num_components);
+    for (unsigned int i = 0; i < num_components; ++i) {
+        ordered_components[i] = i;
+    }
+
+    std::sort(ordered_components.begin(), ordered_components.end(),
+              ComponentCmp(component_num_transcripts));
+
     // initialize hyperparameters
     hp.scale = 1.0;
     hp.tgroup_mu.resize(ts.num_tgroups(), 0.0);
@@ -2503,16 +2528,6 @@ Sampler::Sampler(unsigned int rng_seed,
     abundance_rng_pool.resize(num_abundance_rngs);
     BOOST_FOREACH (rng_t& rng, abundance_rng_pool) {
         rng.seed(rng_seed++);
-    }
-
-    {
-        FILE* out = fopen("transcript-component-sizes.tsv", "w");
-        fprintf(out, "transcript_id\tcomp_size\n");
-        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-            fprintf(out, "%s\t%u\n", t->transcript_id.get().c_str(),
-                    (unsigned int) component_num_transcripts[transcript_component[t->id]]);
-        }
-        fclose(out);
     }
 }
 

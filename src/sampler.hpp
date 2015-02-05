@@ -119,6 +119,10 @@ class Sampler
         Queue<int> component_notify_queue;
         std::vector<rng_t> abundance_rng_pool;
 
+        // Components are processed in this order to help prevent
+        // thread starvation.
+        std::vector<unsigned int> ordered_components;
+
         // True if priors on cmix and tmix are used. If false, hyperparameters
         // (values in the hp structure) are ignored.
         bool use_priors;
