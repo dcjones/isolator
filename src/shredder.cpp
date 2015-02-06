@@ -57,6 +57,13 @@ Shredder::~Shredder()
 }
 
 
+void Shredder::set_tolerance(double tolerance)
+{
+    this->tolerance = tolerance;
+    nlopt_set_xtol_abs(opt, &this->tolerance);
+}
+
+
 double Shredder::sample(rng_t& rng, double x0)
 {
     double d0;

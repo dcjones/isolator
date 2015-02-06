@@ -320,7 +320,7 @@ class ConditionSpliceEtaSampler : public Shredder
 {
     public:
         ConditionSpliceEtaSampler()
-            : Shredder(-1000, 1000, 1e-5)
+            : Shredder(-10, 10, 1e-5)
         {}
 
         double sample(rng_t& rng,
@@ -376,8 +376,6 @@ class ConditionSpliceEtaSampler : public Shredder
     protected:
         double f(double eta, double& d)
         {
-            // TODO: condition_samples and all that
-
             double fx = 0.0;
             d = 0.0;
             double condition_splice_sigma = fabs(eta) * unadj_condition_splice_sigma;
