@@ -249,6 +249,13 @@ class WeightMatrix
             }
         }
 
+        void expand_row(float* out, unsigned int i, unsigned int off)
+        {
+            for (unsigned int j = 0; j < rowlens[i]; ++j) {
+                out[idxs[i][j] - off] = rows[i][j];
+            }
+        }
+
         unsigned int nrow, ncol;
 
         /* Number of entries in each row. */
@@ -1237,6 +1244,21 @@ struct ComponentCmp
 };
 
 
+struct ComponentCmpRev
+{
+    ComponentCmpRev(unsigned int* ds)
+        : ds(ds)
+    {
+    }
+
+    bool operator () (unsigned int i, unsigned int j) {
+        return ds[i] > ds[j];
+    }
+
+    unsigned int* ds;
+};
+
+
 class InterTgroupSampler : public Shredder
 {
     public:
@@ -1444,13 +1466,23 @@ class InterTranscriptSampler
             nlopt_set_upper_bounds(opt, &upper_limit);
             nlopt_set_max_objective(opt, intertranscriptsampler_nlopt_objective,
                                     reinterpret_cast<void*>(this));
-
             nlopt_set_ftol_abs(opt, 1e-7);
+
+            size_t max_comp_size = 0;
+            for (unsigned int c = 0; c < S.num_components; ++c) {
+                max_comp_size = std::max<size_t>(max_comp_size,
+                        S.component_frag[c + 1] - S.component_frag[c]);
+            }
+
+            row_u = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
+            row_v = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
         }
 
         ~InterTranscriptSampler()
         {
             nlopt_destroy(opt);
+            afree(row_u);
+            afree(row_v);
         }
 
         double sample(unsigned int u, unsigned int v)
@@ -1550,6 +1582,13 @@ class InterTranscriptSampler
 
             lpf01 = sumlog(S.frag_probs[c] + f0, f1 - f0) / M_LOG2E;
             assert_finite(lpf01);
+
+            // Nope: row_u has to be the entire component
+            memset(row_u, 0, (S.component_frag[c +1] - S.component_frag[c]) * sizeof(float));
+            S.weight_matrix->expand_row(row_u, u, S.component_frag[c]);
+
+            memset(row_v, 0, (S.component_frag[c +1] - S.component_frag[c]) * sizeof(float));
+            S.weight_matrix->expand_row(row_v, v, S.component_frag[c]);
         }
 
 
@@ -1728,28 +1767,16 @@ class InterTranscriptSampler
 
             acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0, (f1 - f0) * sizeof(float));
 
-            asxpy(S.frag_probs_prop[c],
-                  S.weight_matrix->rows[u],
-                  tmixu - S.tmix[u],
-                  S.weight_matrix->idxs[u],
-                  S.component_frag[c],
-                  S.weight_matrix->rowlens[u]);
+            axpy(S.frag_probs_prop[c] + f0,
+                 row_u + f0, tmixu - S.tmix[u], f1 - f0);
 
-            asxpy(S.frag_probs_prop[c],
-                  S.weight_matrix->rows[v],
-                  tmixv - S.tmix[v],
-                  S.weight_matrix->idxs[v],
-                  S.component_frag[c],
-                  S.weight_matrix->rowlens[v]);
+            axpy(S.frag_probs_prop[c] + f0,
+                 row_v, tmixv - S.tmix[v], f1 - f0);
 
             d = 0.0;
-            d += asxtydsz(S.weight_matrix->rows[u], S.frag_probs_prop[c],
-                          S.weight_matrix->idxs[u], S.component_frag[c],
-                          S.weight_matrix->rowlens[u]);
 
-            d -= asxtydsz(S.weight_matrix->rows[v], S.frag_probs_prop[c],
-                          S.weight_matrix->idxs[v], S.component_frag[c],
-                          S.weight_matrix->rowlens[v]);
+            d += sumdiv(row_u + f0, S.frag_probs_prop[c] + f0, f1 - f0);
+            d -= sumdiv(row_v + f0, S.frag_probs_prop[c] + f0, f1 - f0);
 
             d *= tmixu + tmixv;
 
@@ -1802,6 +1829,10 @@ class InterTranscriptSampler
         unsigned int component_size;
         double wtgroupmix0;
         unsigned int f0, f1;
+
+        // dense copies of the sparse weight_matrix rows
+        float* row_u;
+        float* row_v;
 
         Sampler& S;
 
@@ -1897,7 +1928,8 @@ class AbundanceSamplerThread
 
                 this->rng = block.rng;
 
-                for (unsigned int c = block.u; c < block.v; ++c) {
+                for (unsigned int l = block.u; l < block.v; ++l) {
+                    unsigned int c = S.ordered_components[l];
                     sample_intra_component(c);
                     if (optimize_state) {
                         optimize_component(c);
@@ -2482,6 +2514,15 @@ Sampler::Sampler(unsigned int rng_seed,
         transcript_weights[i] = std::max<double>(constants::min_transcript_weight, transcript_weights[i]);
     }
 
+    // figure out the best order to process components
+    ordered_components.resize(num_components);
+    for (unsigned int i = 0; i < num_components; ++i) {
+        ordered_components[i] = i;
+    }
+
+    std::sort(ordered_components.begin(), ordered_components.end(),
+              ComponentCmpRev(component_num_transcripts));
+
     // initialize hyperparameters
     hp.scale = 1.0;
     hp.tgroup_mu.resize(ts.num_tgroups(), 0.0);
@@ -2503,16 +2544,6 @@ Sampler::Sampler(unsigned int rng_seed,
     abundance_rng_pool.resize(num_abundance_rngs);
     BOOST_FOREACH (rng_t& rng, abundance_rng_pool) {
         rng.seed(rng_seed++);
-    }
-
-    {
-        FILE* out = fopen("transcript-component-sizes.tsv", "w");
-        fprintf(out, "transcript_id\tcomp_size\n");
-        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-            fprintf(out, "%s\t%u\n", t->transcript_id.get().c_str(),
-                    (unsigned int) component_num_transcripts[transcript_component[t->id]]);
-        }
-        fclose(out);
     }
 }
 
@@ -2715,6 +2746,7 @@ void Sampler::sample_abundance()
     }
     if (c < num_components) {
         component_queue.push(ComponentBlock(c, num_components, abundance_rng_pool[i]));
+
     }
 
     for (c = 0, i = 0; c + constants::sampler_component_block_size < num_components;

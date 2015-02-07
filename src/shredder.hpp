@@ -16,6 +16,9 @@ class Shredder
         Shredder(double lower_limit, double upper_limit, double tolerance);
         virtual ~Shredder();
 
+        // change the tolerance
+        void set_tolerance(double tolerance);
+
         // Generate a new sample given the current value x0.
         double sample(rng_t& rng, double x0);
 
