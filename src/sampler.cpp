@@ -1771,7 +1771,7 @@ class InterTranscriptSampler
                  row_u + f0, tmixu - S.tmix[u], f1 - f0);
 
             axpy(S.frag_probs_prop[c] + f0,
-                 row_v, tmixv - S.tmix[v], f1 - f0);
+                 row_v + f0, tmixv - S.tmix[v], f1 - f0);
 
             d = 0.0;
 
