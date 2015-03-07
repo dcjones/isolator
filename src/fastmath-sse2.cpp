@@ -270,6 +270,28 @@ void asxpy_sse(float* xs, const float* ys, const float c,
 }
 
 
+void axpy_sse(float* xs, const float* ys, const float c, const size_t n)
+{
+    static const float prob_epsilon = constants::frag_prob_epsilon;
+    PS16_CONST(prob_epsilon, prob_epsilon);
+    __m128 cv = _mm_set1_ps(c);
+
+    size_t i;
+    for (i = 0; i + 4 <= n; i += 4) {
+        _mm_store_ps(xs + i,
+            _mm_max_ps(*reinterpret_cast<const __m128*>(ps16_prob_epsilon),
+                          _mm_add_ps(_mm_load_ps(xs + i),
+                                        _mm_mul_ps(cv, _mm_load_ps(ys + i)))));
+    }
+
+    switch (n % 4) {
+        case 3: xs[i] = std::max<float>(prob_epsilon, xs[i] + c * ys[i]); ++i;
+        case 2: xs[i] = std::max<float>(prob_epsilon, xs[i] + c * ys[i]); ++i;
+        case 1: xs[i] = std::max<float>(prob_epsilon, xs[i] + c * ys[i]);
+    }
+}
+
+
 float asxtydsz_sse(const float* ys, const float* zs,
                    const unsigned int* idx, const unsigned int off,
                    const size_t n)
@@ -316,7 +338,34 @@ float asxtydsz_sse(const float* ys, const float* zs,
 }
 
 
-float dot_sse(const float* xs, const float* ys, const float* zs, size_t n)
+float sumdiv_sse(const float* xs, const float* ys, const size_t n)
+{
+    union {
+        __m128 v;
+        float f[4];
+    } ans;
+    ans.v = _mm_setzero_ps();
+    size_t i;
+    for (i = 0; i + 4 <= n; i += 4) {
+        ans.v = _mm_add_ps(ans.v,
+                  _mm_div_ps(_mm_load_ps(xs + i),
+                                _mm_load_ps(ys + i)));
+    }
+
+    float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3];
+
+    switch (n % 4) {
+        case 3: fans += xs[i] / ys[i]; ++i;
+        case 2: fans += xs[i] / ys[i]; ++i;
+        case 1: fans += xs[i] / ys[i];
+    }
+
+    return fans;
+}
+
+
+float dot_sse(const float* ws, const float* xs,
+              const float* ys, const float* zs, size_t n)
 {
     union ans_t
     {
@@ -326,12 +375,13 @@ float dot_sse(const float* xs, const float* ys, const float* zs, size_t n)
     ans.v = _mm_setzero_ps();
 
     size_t i;
-    __m128 x, y, z;
+    __m128 w, x, y, z;
     for (i = 0; i < 4 * (n / 4); i += 4) {
-        x = _mm_load_ps(xs + i);
-        y = _mm_loadu_ps(ys + i);
+        w = _mm_load_ps(ws + i);
+        x = _mm_loadu_ps(xs + i);
+        y = _mm_load_ps(ys + i);
         z = _mm_load_ps(zs + i);
-        ans.v = _mm_add_ps(ans.v, _mm_mul_ps(_mm_mul_ps(x, y), z));
+        ans.v = _mm_add_ps(ans.v, _mm_mul_ps(_mm_mul_ps(_mm_mul_ps(w, x), y), z));
     }
 
     float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3];
@@ -339,9 +389,9 @@ float dot_sse(const float* xs, const float* ys, const float* zs, size_t n)
     // handle overhang
     i = 4 * (n / 4);
     switch (n % 4) {
-        case 3: fans += xs[i] * ys[i] * zs[i]; ++i;
-        case 2: fans += xs[i] * ys[i] * zs[i]; ++i;
-        case 1: fans += xs[i] * ys[i] * zs[i];
+        case 3: fans += ws[i] * xs[i] * ys[i] * zs[i]; ++i;
+        case 2: fans += ws[i] * xs[i] * ys[i] * zs[i]; ++i;
+        case 1: fans += ws[i] * xs[i] * ys[i] * zs[i];
     }
 
     return fans;

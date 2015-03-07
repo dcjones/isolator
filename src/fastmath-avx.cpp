@@ -424,7 +424,8 @@ float sumdiv_avx(const float* xs, const float* ys, const size_t n)
 }
 
 
-float dot_avx(const float* xs, const float* ys, const float* zs, size_t n)
+float dot_avx(const float* ws, const float* xs,
+              const float* ys, const float* zs, size_t n)
 {
     union ans_t
     {
@@ -434,12 +435,13 @@ float dot_avx(const float* xs, const float* ys, const float* zs, size_t n)
     ans.v = _mm256_setzero_ps();
 
     size_t i;
-    __m256 x, y, z;
+    __m256 w, x, y, z;
     for (i = 0; i < 8 * (n / 8); i += 8) {
-        x = _mm256_load_ps(xs + i);
-        y = _mm256_loadu_ps(ys + i);
+        w = _mm256_load_ps(ws + i);
+        x = _mm256_loadu_ps(xs + i);
+        y = _mm256_load_ps(ys + i);
         z = _mm256_load_ps(zs + i);
-        ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(_mm256_mul_ps(x, y), z));
+        ans.v = _mm256_add_ps(ans.v, _mm256_mul_ps(_mm256_mul_ps(_mm256_mul_ps(w, x), y), z));
     }
 
     float fans = ans.f[0] + ans.f[1] + ans.f[2] + ans.f[3] +
@@ -448,13 +450,13 @@ float dot_avx(const float* xs, const float* ys, const float* zs, size_t n)
     /* handle overhang */
     i = 8 * (n / 8);
     switch (n % 8) {
-        case 7: fans += xs[i] * ys[i] * zs[i]; ++i;
-        case 6: fans += xs[i] * ys[i] * zs[i]; ++i;
-        case 5: fans += xs[i] * ys[i] * zs[i]; ++i;
-        case 4: fans += xs[i] * ys[i] * zs[i]; ++i;
-        case 3: fans += xs[i] * ys[i] * zs[i]; ++i;
-        case 2: fans += xs[i] * ys[i] * zs[i]; ++i;
-        case 1: fans += xs[i] * ys[i] * zs[i];
+        case 7: fans += ws[i] * xs[i] * ys[i] * zs[i]; ++i;
+        case 6: fans += ws[i] * xs[i] * ys[i] * zs[i]; ++i;
+        case 5: fans += ws[i] * xs[i] * ys[i] * zs[i]; ++i;
+        case 4: fans += ws[i] * xs[i] * ys[i] * zs[i]; ++i;
+        case 3: fans += ws[i] * xs[i] * ys[i] * zs[i]; ++i;
+        case 2: fans += ws[i] * xs[i] * ys[i] * zs[i]; ++i;
+        case 1: fans += ws[i] * xs[i] * ys[i] * zs[i];
     }
 
     return fans;

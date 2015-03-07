@@ -1199,6 +1199,7 @@ static int isolator_analyze(int argc, char* argv[])
         {"bias-training-seqs",   required_argument, NULL, 0},
         {"no-gc-correction",     no_argument,       NULL, 0},
         {"no-3p-correction",     no_argument,       NULL, 0},
+        {"no-frag-correction",   no_argument,       NULL, 0},
         {"num-samples",          required_argument, NULL, 'N'},
         {"burnin",               required_argument, NULL, 'B'},
         {"tss-cluster-distance", required_argument, NULL, 0},
@@ -1225,6 +1226,7 @@ static int isolator_analyze(int argc, char* argv[])
     pos_t tss_cluster_dist = 150;
     bool run_gc_correction = true;
     bool run_3p_correction = true;
+    bool run_frag_correction = true;
     constants::num_threads = boost::thread::hardware_concurrency();
     const char* fa_fn  = NULL;
     const char* output_filename = "isolator-output.h5";
@@ -1308,6 +1310,9 @@ static int isolator_analyze(int argc, char* argv[])
                 }
                 else if (longopt_name == "no-3p-correction") {
                     run_3p_correction = false;
+                }
+                else if (longopt_name == "no-frag-correction") {
+                    run_frag_correction = false;
                 }
                 else if (longopt_name == "use-tss") {
                     use_tss = true;
@@ -1452,7 +1457,7 @@ static int isolator_analyze(int argc, char* argv[])
     }
 
     Analyze analyze(rng_seed, burnin, num_samples, ts, fa_fn,
-                    run_gc_correction, run_3p_correction,
+                    run_gc_correction, run_3p_correction, run_frag_correction,
                     qc_output_file != NULL,
                     bias_training_seqnames,
                     experiment_tgroup_sigma_alpha,

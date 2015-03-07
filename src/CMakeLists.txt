@@ -23,6 +23,7 @@ add_executable(isolator
                fastmath-sse2.cpp
                fastmath-sse4.cpp
                fastmath-avx.cpp
+               fragbias.cpp
                fragment_model.cpp
                gcbias.cpp
                hdf5.cpp

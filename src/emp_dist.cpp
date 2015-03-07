@@ -7,51 +7,55 @@
 
 
 EmpDist::EmpDist(EmpDist& other)
-    : n(other.n)
-    , m(other.m)
+    : pdfvals(other.pdfvals)
+    , cdfvals(other.cdfvals)
     , med(other.med)
-    , pdf_memo(other.pdf_memo)
-    , cdf_memo(other.cdf_memo)
 {
-    vals = new unsigned int [n];
-    lens = new unsigned int [n];
-
-    std::copy(other.vals, other.vals + n, vals);
-    std::copy(other.lens, other.lens + n, lens);
 }
 
 
 EmpDist::EmpDist(const unsigned int* vals, const unsigned int* lens, size_t n)
-    : med(NAN)
 {
-    /* count number of non-zero observations. */
-    size_t nnz = 0;
+    double valsum = 0;
     for (size_t i = 0; i < n; ++i) {
-        if (lens[i] > 0) nnz += 1;
+        valsum += lens[i];
     }
 
-    this->vals = new unsigned int [nnz];
-    this->lens = new unsigned int [nnz];
-
-    m = 0;
-    for (size_t i = 0, j = 0; i < n; ++i) {
-        if (lens[i] > 0) {
-            this->vals[j] = vals[i];
-            this->lens[j] = lens[i];
-            m += lens[i];
-            ++j;
+    double cumpr = 0.0;
+    unsigned int lastval = 0, maxval = 1;
+    for (; lastval < n; ++lastval) {
+        cumpr += lens[lastval] / valsum;
+        maxval = vals[lastval];
+        if (cumpr > 1.0 - 1e-6) {
+            break;
         }
     }
 
-    this->n = nnz;
-    this->med = compute_median();
-}
+    pdfvals.resize(maxval);
+    valsum = 0.0;
+    for (unsigned int i = 0; i < lastval; ++i) {
+        valsum += lens[i];
+    }
 
+    for (unsigned int val = 0, i = 0; val < maxval; ) {
+        if (val == vals[i]) {
+            pdfvals[val] = lens[i] / valsum;
+            ++val;
+            ++i;
+        }
+        else if (val < vals[i]) {
+            pdfvals[val] = 0.0;
+            ++val;
+        }
+    }
 
-float EmpDist::compute_median() const
-{
-    if (n == 0) return NAN;
+    cdfvals.resize(maxval);
+    cdfvals[0] = pdfvals[0];
+    for (unsigned int val = 1; val < maxval; ++val) {
+        cdfvals[val] = cdfvals[val - 1] + pdfvals[val];
+    }
 
+    // compute median
     size_t i = 0, j = n - 1;
     unsigned int u = lens[0], v = lens[n - 1];
     while (i < j) {
@@ -64,69 +68,26 @@ float EmpDist::compute_median() const
             v = lens[--j];
         }
     }
-
-    return vals[i];
-}
-
-
-EmpDist::~EmpDist()
-{
-    delete [] vals;
-    delete [] lens;
+    med = vals[i];
 }
 
 
 float EmpDist::median() const
 {
-    if (n == 0) return NAN;
+    if (pdfvals.size() == 0) return NAN;
     else return med;
-}
-
-
-float EmpDist::eval(unsigned int x) const
-{
-    if (x > vals[n - 1]) return 0.0;
-
-    boost::unordered_map<unsigned int, float>::iterator idx;
-    idx = pdf_memo.find(x);
-    if (idx != pdf_memo.end()) {
-        return idx->second;
-    }
-
-    /* binary search for the nearest item in vals */
-    unsigned int i = std::lower_bound(vals, vals + n, x) - vals;
-    float ans = vals[i] == x ? lens[i] / (float) m : 0.0;
-
-    pdf_memo.insert(std::pair<unsigned int, double>(x, ans));
-    return ans;
 }
 
 
 float EmpDist::pdf(unsigned int x) const
 {
-    boost::lock_guard<boost::mutex> lock(mut);
-    return eval(x);
+    return x < pdfvals.size() ? pdfvals[x] : 0.0;
 }
 
 
 float EmpDist::cdf(unsigned int x) const
 {
-    boost::lock_guard<boost::mutex> lock(mut);
-
-    boost::unordered_map<unsigned int, float>::iterator idx;
-    idx = cdf_memo.find(x);
-    if (idx != cdf_memo.end()) return idx->second;
-
-    float ans = 0.0;
-    size_t i;
-    for (i = 0; i < n && vals[i] <= x; ++i) {
-        ans += (float) lens[i];
-    }
-    ans /= (float) m;
-
-    cdf_memo.insert(std::make_pair(x, ans));
-
-    return ans;
+    return x < cdfvals.size() ? cdfvals[x] : 1.0;
 }
 
 

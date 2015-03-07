@@ -11,6 +11,7 @@ Alignment::Alignment()
     , cigar(NULL)
     , strand(strand_na)
     , alnnum(0)
+    , misaligned_pr(0.0)
 {
 }
 
@@ -19,6 +20,7 @@ Alignment::Alignment(const Alignment& a)
 {
     start     = a.start;
     end       = a.end;
+    paired    = a.paired;
     strand    = a.strand;
     alnnum    = a.alnnum;
     misaligned_pr  = a.misaligned_pr;
@@ -33,6 +35,7 @@ Alignment::Alignment(const bam1_t* b)
     start     = bam_truepos(&b->core, bam1_cigar(b));
     end       = bam_trueend(&b->core, bam1_cigar(b)) - 1;
     strand    = bam1_strand(b);
+    paired    = (b->core.flag & BAM_FPAIRED) != 0;
 
     unsigned int mismatch_count = 0;
     char* s = reinterpret_cast<char*>(bam_aux_get(b, "NM"));
@@ -57,9 +60,9 @@ Alignment::Alignment(const bam1_t* b)
             // probability the base is miscalled
             double p = pow(10.0, - (double) qs[off] / 10);
             misalign_likelihood[0] *=
-                p + (1.0 - p) * constants::misalign_mismatch_pr;
+                p + (1.0 - p) * constants::misaligned_mismatch_pr;
             misalign_likelihood[1] *=
-                p + (1.0 - p) * constants::mismatch_pr;
+                p + (1.0 - p) * constants::aligned_mismatch_pr;
 
             if (!*t) break;
 
@@ -69,14 +72,13 @@ Alignment::Alignment(const bam1_t* b)
 
     }
     else {
-        misalign_likelihood[0] = pow(constants::misalign_mismatch_pr, mismatch_count);
-        misalign_likelihood[1] = pow(constants::mismatch_pr, mismatch_count);
+        misalign_likelihood[0] = pow(constants::misaligned_mismatch_pr, mismatch_count);
+        misalign_likelihood[1] = pow(constants::aligned_mismatch_pr, mismatch_count);
     }
 
-        misaligned_pr = (constants::misalign_prior * misalign_likelihood[0]) /
-            ((constants::misalign_prior * misalign_likelihood[0]) +
-             (1.0 - constants::misalign_prior) * misalign_likelihood[1]);
-
+    misaligned_pr = (constants::misalign_prior * misalign_likelihood[0]) /
+        ((constants::misalign_prior * misalign_likelihood[0]) +
+         (1.0 - constants::misalign_prior) * misalign_likelihood[1]);
 
     s = reinterpret_cast<char*>(bam_aux_get(b, "HI"));
     alnnum = s ? (uint16_t) bam_aux2i(reinterpret_cast<unsigned char*>(s)) : 0;
@@ -97,6 +99,7 @@ bool Alignment::operator == (const bam1_t* b) const
 {
     if (this->start != (pos_t) bam_truepos(&b->core, bam1_cigar(b))) return false;
     if (this->strand != bam1_strand(b)) return false;
+    if (this->paired != ((b->core.flag & BAM_FPAIRED) != 0)) return false;
 
     uint16_t alnnum = 0;
     unsigned char* s = bam_aux_get(b, "HI");
@@ -119,6 +122,7 @@ bool Alignment::operator < (const Alignment& other) const
 {
     if      (start  != other.start)  return start < other.start;
     else if (end    != other.end)    return end < other.end;
+    else if (paired != other.paired) return paired < other.paired;
     else if (strand != other.strand) return strand < other.strand;
     else if (alnnum != other.alnnum) return alnnum < other.alnnum;
     //else if (mapq   != other.mapq)   return mapq < other.mapq;
@@ -134,6 +138,7 @@ bool Alignment::operator == (const Alignment& other) const
 {
     return start     == other.start &&
            end       == other.end &&
+           paired    == other.paired &&
            strand    == other.strand &&
            alnnum    == other.alnnum &&
            //mapq      == other.mapq &&
@@ -713,7 +718,7 @@ void ReadSet::add_alignment(const bam1_t* b)
     if (*rp == NULL) *rp = new AlignedRead();
     AlignedRead* r = *rp;
 
-    if (as.empty() || *as.back() != b) as.push_back(new Alignment(b));
+    as.push_back(new Alignment(b));
     Alignment* a = as.back();
 
     if (b->core.flag & BAM_FREAD1 || b->core.flag & BAM_FREAD2) r->paired = true;

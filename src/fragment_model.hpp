@@ -9,6 +9,7 @@
 #include "seqbias/sequencing_bias.hpp"
 #include "transcripts.hpp"
 #include "emp_dist.hpp"
+#include "fragbias.hpp"
 #include "gcbias.hpp"
 #include "tpbias.hpp"
 
@@ -44,7 +45,8 @@ class FragmentModel
         ~FragmentModel();
         void estimate(TranscriptSet& ts, const char* bam_fn, const char* fa_fn,
                       bool use_gc_correction, bool use_3p_correction,
-                      bool tabulate_seqbias, std::set<std::string> bias_training_seqnames);
+                      bool use_frag_correction, bool tabulate_seqbias,
+                      std::set<std::string> bias_training_seqnames);
 
         /* Fragment length probability ,cdf, and median using a fallback when no
          * emperical distribution is available. */
@@ -73,6 +75,9 @@ class FragmentModel
 
         /* Distribution over fragment lengths. */
         EmpDist* frag_len_dist;
+
+        // Fragmentation bias
+        FragBias* fragbias;
 };
 
 

@@ -110,11 +110,12 @@ float sumdiv_vanilla(const float* xs, const float* ys, const size_t n)
 }
 
 
-float dot_vanilla(const float* xs, const float* ys, const float* zs, const size_t n)
+float dot_vanilla(const float* ws, const float* xs,
+                  const float* ys, const float* zs, const size_t n)
 {
     float accum = 0.0;
     for (size_t i = 0; i < n; ++i) {
-        accum += xs[i] * ys[i] * zs[i];
+        accum += ws[i] * xs[i] * ys[i] * zs[i];
     }
     return accum;
 }

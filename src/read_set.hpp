@@ -27,6 +27,7 @@ struct Alignment
 
     pos_t start;
     pos_t end;
+    bool paired;
     uint16_t  cigar_len;
     uint32_t* cigar;
     uint8_t   strand;

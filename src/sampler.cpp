@@ -1,10 +1,11 @@
 
 #include <boost/foreach.hpp>
+#include <boost/lexical_cast.hpp>
 #include <boost/math/special_functions/fpclassify.hpp>
 #include <boost/random.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
-#include <boost/lexical_cast.hpp>
+#include <boost/unordered_map.hpp>
 #include <climits>
 
 #include "constants.hpp"
@@ -18,7 +19,6 @@
 #include "samtools/sam.h"
 #include "samtools/samtools_extra.h"
 #include "shredder.hpp"
-
 
 extern "C" {
 #include "samtools/khash.h"
@@ -91,7 +91,7 @@ typedef std::pair<unsigned int, unsigned int> FragIdxCount;
 class WeightMatrix
 {
     public:
-        WeightMatrix(unsigned int nrow)
+        WeightMatrix(unsigned int nrow, unsigned int max_ncol)
         {
             this->nrow = nrow;
             ncol = 0;
@@ -107,6 +107,17 @@ class WeightMatrix
 
             idxs = new unsigned int* [nrow];
             std::fill(idxs, idxs + nrow, (unsigned int*) NULL);
+
+            align_prs = new float* [nrow];
+            std::fill(align_prs, align_prs + nrow, (float*) NULL);
+
+            align_pr_sum = new float [max_ncol];
+            std::fill(align_pr_sum, align_pr_sum + max_ncol, 0.0f);
+
+            align_count = new unsigned int [max_ncol];
+            std::fill(align_count, align_count + max_ncol, 0);
+
+            this->max_ncol = max_ncol;
 
             compacted = false;
         }
@@ -125,13 +136,17 @@ class WeightMatrix
                 for (unsigned int i = 0; i < nrow; ++i) {
                     free(rows[i]);
                     free(idxs[i]);
+                    free(align_prs[i]);
                 }
             }
             delete [] rows;
             delete [] idxs;
+            delete [] align_prs;
+            delete [] align_pr_sum;
+            delete [] align_count;
         }
 
-        void push(unsigned int i, unsigned int j, float w)
+        void push(unsigned int i, unsigned int j, float w, float align_pr)
         {
             if (rowlens[i] >= reserved[i]) {
                 /* We use a pretty non-agressive resizing strategy, since there
@@ -150,13 +165,24 @@ class WeightMatrix
 
                 rows[i] = realloc_or_die(rows[i], newsize);
                 idxs[i] = realloc_or_die(idxs[i], newsize);
+                align_prs[i] = realloc_or_die(align_prs[i], newsize);
                 reserved[i] = newsize;
             }
 
             idxs[i][rowlens[i]] = j;
             rows[i][rowlens[i]] = w;
+            align_prs[i][rowlens[i]] = align_pr;
             ++rowlens[i];
         };
+
+        void increase_align_pr_sum(unsigned int j, float align_pr)
+        {
+            boost::lock_guard<boost::mutex> lock(
+                    align_pr_sum_mutex[j % (sizeof(align_pr_sum_mutex) / sizeof(align_pr_sum_mutex[0]))]);
+
+            align_pr_sum[j] += align_pr;
+            align_count[j] += 1;
+        }
 
 
         /* This function does two things: sorts the columns by index and
@@ -171,25 +197,83 @@ class WeightMatrix
          * */
         unsigned int* compact(size_t* oldncol)
         {
+            {
+                unsigned int N = 0;
+                for (unsigned int i = 0; i < max_ncol; ++i) {
+                    if (align_count[i] > 0) ++N;
+                }
+
+                Logger::debug("%lu frags with at least one alignment", N);
+            }
+
+            /* Compute ncol */
+            ncol = 0;
+            for (unsigned int i = 0; i < nrow; ++i) {
+                for (unsigned int j = 0; j < rowlens[i]; ++j) {
+                    ncol = std::max<unsigned int>(ncol, idxs[i][j]);
+                }
+            }
+
+            /* Normalize alignment probabilities. */
+            for (unsigned int i = 0; i < nrow; ++i) {
+                for (unsigned int j = 0; j < rowlens[i]; ++j) {
+                    align_prs[i][j] /= align_pr_sum[idxs[i][j]];
+                }
+            }
+            delete [] align_pr_sum;
+            align_pr_sum = NULL;
+
+            unsigned int total_supress_count = 0;
+
             /* Reallocate each row array */
             for (unsigned int i = 0; i < nrow; ++i) {
                 unsigned int m = rowlens[i];
                 if (m == 0) continue;
 
+                unsigned int supressed_count = 0;
+                for (unsigned int j = 0; j < m; ++j) {
+                    if (align_prs[i][j] < constants::min_align_pr ||
+                        align_count[idxs[i][j]] > constants::max_alignments) {
+                        ++supressed_count;
+                        ++total_supress_count;
+                    }
+                }
+                unsigned int newm = m - supressed_count;
+
                 float* newrow = reinterpret_cast<float*>(
-                        aalloc(m * sizeof(float)));
-                memcpy(newrow, rows[i], m * sizeof(float));
+                        aalloc(newm * sizeof(float)));
+
+                unsigned int* newidx = reinterpret_cast<unsigned int*>(
+                        aalloc(newm * sizeof(unsigned int)));
+
+                unsigned int k = 0;
+                for (unsigned int j = 0; j < m; ++j) {
+                    if (align_prs[i][j] >= constants::min_align_pr &&
+                        align_count[idxs[i][j]] <= constants::max_alignments) {
+                        newrow[k] = rows[i][j] * align_prs[i][j];
+                        newidx[k] = idxs[i][j];
+                        ++k;
+                    }
+                }
+
                 free(rows[i]);
                 rows[i] = newrow;
 
-                unsigned int* newidx = reinterpret_cast<unsigned int*>(
-                        aalloc(m * sizeof(unsigned int)));
-                memcpy(newidx, idxs[i], m * sizeof(unsigned int));
                 free(idxs[i]);
                 idxs[i] = newidx;
 
-                reserved[i] = m;
+                reserved[i] = newm;
+                rowlens[i] = newm;
+
+                free(align_prs[i]);
+                align_prs[i] = NULL;
             }
+
+            Logger::debug("%lu low probability alignments supressed",
+                         total_supress_count);
+
+            delete [] align_count;
+            align_count = 0;
 
             /* Mark observed columns */
             ncol = 0;
@@ -256,7 +340,14 @@ class WeightMatrix
             }
         }
 
-        unsigned int nrow, ncol;
+        void expand_row(float* out, unsigned int i, unsigned int off, float w)
+        {
+            for (unsigned int j = 0; j < rowlens[i]; ++j) {
+                out[idxs[i][j] - off] += w * rows[i][j];
+            }
+        }
+
+        unsigned int nrow, ncol, max_ncol;
 
         /* Number of entries in each row. */
         unsigned int* rowlens;
@@ -266,6 +357,18 @@ class WeightMatrix
 
         /* Columns indexed for each row. */
         unsigned int** idxs;
+
+        /* Alignment probabilities, used when building this matrix. */
+        float** align_prs;
+
+        /* align_pr normalization indexed by read id */
+        float* align_pr_sum;
+
+        /* number of alignments for a given frag */
+        unsigned int* align_count;
+
+        /* mutexes for blocks of values in align_pr_sum */
+        boost::mutex align_pr_sum_mutex[32];
 
     private:
         unsigned int median_of_three(const unsigned int* idx,
@@ -617,6 +720,7 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
 
         if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
         if (b->core.mtid != -1 && b->core.tid != b->core.mtid) continue;
+        if ((b->core.flag & BAM_FPAIRED) && (b->core.flag & BAM_FPROPER_PAIR) == 0) continue;
 
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
@@ -694,10 +798,12 @@ class FragWeightEstimationThread
                 FragmentModel& fm,
                 WeightMatrix& weight_matrix,
                 double* transcript_weights,
+                bool run_frag_correction,
                 Queue<SamplerInitInterval*>& q)
             : weight_matrix(weight_matrix)
             , transcript_weights(transcript_weights)
             , fm(fm)
+            , run_frag_correction(run_frag_correction)
             , q(q)
             , thread(NULL)
             , seqbias_size(0)
@@ -706,6 +812,7 @@ class FragWeightEstimationThread
             seqbias[0] = seqbias[1] = NULL;
             posbias = NULL;
             tpbias = NULL;
+            fragbias = NULL;
             if (fm.frag_len_dist) {
                 frag_len_dist = new EmpDist(*fm.frag_len_dist);
             }
@@ -720,6 +827,8 @@ class FragWeightEstimationThread
             afree(seqbias[0]);
             afree(seqbias[1]);
             afree(posbias);
+            afree(tpbias);
+            afree(fragbias);
             /* Note: we are not free weight_matrix_entries and
              * multiread_entries. This get's done in Sampler::Sampler.
              * It's all part of the delicate dance involved it minimizing
@@ -785,7 +894,8 @@ class FragWeightEstimationThread
          * This assumes that transcript_sequence_bias has already been called,
          * and the seqbias arrays set for t. */
         float transcript_weight(const SamplerInitInterval& locus,
-                                const Transcript& t);
+                                const Transcript& t,
+                                bool run_frag_correction);
 
         /* Compute (a number proportional to) the probability of observing the
          * given fragment from the given transcript, assuming every transcript
@@ -798,6 +908,10 @@ class FragWeightEstimationThread
         double* transcript_weights;
 
         FragmentModel& fm;
+
+        // True if fragmentation bias should be used
+        bool run_frag_correction;
+
         Queue<SamplerInitInterval*>& q;
         boost::thread* thread;
 
@@ -813,6 +927,7 @@ class FragWeightEstimationThread
         // fragment gc bias and 3' bias
         float* posbias;
         float* tpbias;
+        float* fragbias;
         size_t posbias_size;
 
         /* Exonic length of the transcript whos bias is stored in seqbias. */
@@ -835,12 +950,14 @@ void FragWeightEstimationThread::process_locus(SamplerInitInterval* locus)
     // look up fragment indexes in advance to reduce contention on fm.alnindex
     std::vector<long> frag_indexes;
     for (ReadSetIterator r(locus->rs); r != ReadSetIterator(); ++r) {
-        frag_indexes.push_back(fm.alnindex.get(r->first));
+        frag_indexes.push_back(fm.alnindex.get(r->first) - 1);
     }
+
+    std::vector<float> max_aln_prs(frag_indexes.size());
+    std::fill(max_aln_prs.begin(), max_aln_prs.end(), 0.0f);
 
     for (TranscriptSetLocus::iterator t = locus->ts.begin();
          t != locus->ts.end(); ++t) {
-
 
         pos_t L = constants::seqbias_left_pos, R = constants::seqbias_right_pos;
         if (locus->seq) {
@@ -850,21 +967,42 @@ void FragWeightEstimationThread::process_locus(SamplerInitInterval* locus)
         }
 
         transcript_sequence_bias(*locus, *t);
-        transcript_weights[t->id] = transcript_weight(*locus, *t);
+        transcript_weights[t->id] = transcript_weight(*locus, *t,
+                                                      run_frag_correction);
 
         unsigned int i = 0;
         for (ReadSetIterator r(locus->rs); r != ReadSetIterator(); ++r) {
-            float maxw = 0.0;
-            for (AlignedReadIterator a(*r->second); a != AlignedReadIterator(); ++a) {
-                float w = fragment_weight(*t, *a);
-                maxw = std::max<float>(maxw, w);
-            }
             long idx = frag_indexes[i];
+            float max_w_align_pr = 0.0;
+            float maxw = 0.0;
+            float max_align_pr = 0.0;
+            for (AlignedReadIterator a(*r->second); a != AlignedReadIterator(); ++a) {
+                if ((a->mate1 && a->mate1->paired && !a->mate2) ||
+                    (a->mate2 && a->mate2->paired && !a->mate1)) continue;
+
+                float w = fragment_weight(*t, *a);
+                float align_pr = 1.0;
+                if (a->mate1) align_pr *= 1.0 - a->mate1->misaligned_pr;
+                if (a->mate2) align_pr *= 1.0 - a->mate2->misaligned_pr;
+
+                if (align_pr * w > max_w_align_pr) {
+                    maxw = w;
+                    max_align_pr = align_pr;
+                    max_w_align_pr = align_pr * w;
+                }
+            }
+
             if (maxw > 0.0) {
-                weight_matrix.push(t->id, idx, maxw);
+                max_aln_prs[i] = std::max<float>(max_aln_prs[i], max_align_pr);
+                weight_matrix.push(t->id, idx, maxw, max_align_pr);
             }
             ++i;
         }
+    }
+
+    for (unsigned int i = 0; i < max_aln_prs.size(); ++i) {
+        long idx = frag_indexes[i];
+        weight_matrix.increase_align_pr_sum(idx, max_aln_prs[i]);
     }
 }
 
@@ -925,7 +1063,7 @@ void FragWeightEstimationThread::transcript_gc_bias(
         }
         if (pos >= frag_len - 1) {
             double gc = (double) gc_count / (double) frag_len;
-            posbias[pos - frag_len + 1] *= fm.gcbias->get_bias(gc);
+            posbias[pos - frag_len + 1] = fm.gcbias->get_bias(gc);
         }
     }
 }
@@ -954,39 +1092,59 @@ void FragWeightEstimationThread::transcript_tp_bias(const Transcript& t, pos_t f
 
 
 float FragWeightEstimationThread::transcript_weight(
-    const SamplerInitInterval& locus, const Transcript& t)
+    const SamplerInitInterval& locus, const Transcript& t,
+    bool run_frag_correction)
 {
     pos_t trans_len = t.exonic_length();
     if ((size_t) trans_len + 1 > ws.size()) ws.resize(trans_len + 1);
 
-    if ((size_t) tlen > posbias_size) {
+    if ((size_t) trans_len > posbias_size) {
         afree(posbias);
         afree(tpbias);
-        posbias = reinterpret_cast<float*>(aalloc(tlen * sizeof(float)));
-        tpbias = reinterpret_cast<float*>(aalloc(tlen * sizeof(float)));
-        posbias_size = tlen;
+        afree(fragbias);
+        posbias = reinterpret_cast<float*>(aalloc(trans_len * sizeof(float)));
+        tpbias = reinterpret_cast<float*>(aalloc(trans_len * sizeof(float)));
+        fragbias = reinterpret_cast<float*>(aalloc(trans_len * sizeof(float)));
+        posbias_size = trans_len;
     }
 
-    pos_t tlen = t.exonic_length();
-
+    // 3' bias
     {
         double omp = 1.0 - fm.tpbias->p;
         double c = 1.0;
         if (t.strand == strand_pos) {
-            for (pos_t pos = tlen - 1; pos >= 0; --pos) {
+            for (pos_t pos = trans_len - 1; pos >= 0; --pos) {
                 c *= omp;
                 tpbias[pos] = c;
             }
         } else {
-            for (pos_t pos = 0; pos < tlen; ++pos) {
+            for (pos_t pos = 0; pos < trans_len; ++pos) {
                 c *= omp;
                 tpbias[pos] = c;
             }
         }
     }
 
+    // fragmentation bias
+    if (run_frag_correction) {
+        fm.fragbias->get_bias(fragbias, trans_len);
+        for (pos_t u = 0; u < trans_len; ++u) {
+            fragbias[u] /= frag_len_c(trans_len - u);
+        }
+    }
+    else {
+        std::fill(fragbias, fragbias + trans_len, 1.0);
+    }
+
+    // combine fragbias and tpbias
+    for (pos_t u = 0; u < trans_len; ++u) {
+        tpbias[u] *= fragbias[u];
+        if (!boost::math::isfinite(tpbias[u])) tpbias[u] = 0.0;
+    }
+
     /* Set ws[k] to be the the number of fragmens of length k, weighted by
      * sequence bias. */
+    memset(posbias, 1.0, trans_len * sizeof(float));
     for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
         float frag_len_pr = frag_len_p(frag_len);
 
@@ -998,13 +1156,7 @@ float FragWeightEstimationThread::transcript_weight(
             continue;
         }
 
-        memcpy(posbias, tpbias, tlen * sizeof(float));
-
         transcript_gc_bias(locus, t, frag_len);
-
-        /* TODO: The following logic assumes the library type is FR. We need
-         * seperate cases to properly handle other library types, that
-         * presumably exist somewhere. */
 
         ws[frag_len] = 0.0;
 
@@ -1013,6 +1165,7 @@ float FragWeightEstimationThread::transcript_weight(
             dot(&seqbias[0][0],
                 &seqbias[1][frag_len - 1],
                 posbias,
+                tpbias,
                 trans_len - frag_len + 1);
 
         ws[frag_len] +=
@@ -1020,22 +1173,22 @@ float FragWeightEstimationThread::transcript_weight(
             dot(&seqbias[1][0],
                 &seqbias[0][frag_len - 1],
                 posbias,
+                tpbias,
                 trans_len - frag_len + 1);
-
-        if (ws[frag_len] == 0.0) {
-            Logger::abort("Numerical error in transcript weight computation.");
-        }
     }
 
     tw = 0.0;
     for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
-        float frag_len_pr = frag_len_p(frag_len) / frag_len_c(tlen);
+        float frag_len_pr = frag_len_p(frag_len);
         tw += frag_len_pr * ws[frag_len];
     }
 
     if (!boost::math::isfinite(tw) || tw <= constants::min_transcript_weight) {
         tw = constants::min_transcript_weight;
     }
+
+    // fragment_weight expects this to be in genome orentation
+    if (t.strand == strand_neg) std::reverse(tpbias, tpbias + trans_len);
 
     return tw;
 }
@@ -1098,6 +1251,8 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
             w *= fm.gcbias->get_bias(gc / frag_len);
         }
 
+        pos_t five_prime_end = a.mate1->strand == t.strand ? offset1 : offset2;
+        w *= tpbias[five_prime_end];
     }
     else {
         if (a.mate1) {
@@ -1124,6 +1279,10 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
                         L + offset,
                         std::min<pos_t>(tlen - 1, L + offset + frag_len - 1));
                 w *= fm.gcbias->get_bias(gc / frag_len);
+            }
+
+            if (a.mate1->strand == t.strand) {
+                w *= tpbias[offset];
             }
         }
 
@@ -1154,20 +1313,11 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
                 w *= fm.gcbias->get_bias(gc / frag_len);
                 assert_finite(w);
             }
+
+            if (a.mate2->strand == t.strand) {
+                w *= tpbias[offset];
+            }
         }
-    }
-
-    if (a.mate1) w *= 1.0 - a.mate1->misaligned_pr;
-    if (a.mate2) w *= 1.0 - a.mate2->misaligned_pr;
-
-    // 3' bias
-    if (t.strand == strand_pos && fm.tpbias && fm.tpbias->p != 0.0) {
-        w *= fm.tpbias->get_bias(tlen - start_offset - 1);
-        assert_finite(w);
-    }
-    else if (t.strand == strand_neg && fm.tpbias && fm.tpbias->p != 0.0) {
-        w *= fm.tpbias->get_bias(end_offset);
-        assert_finite(w);
     }
 
     // strand-specificity
@@ -1184,22 +1334,12 @@ float FragWeightEstimationThread::fragment_weight(const Transcript& t,
     if (frag_len_pr < constants::min_frag_len_pr) {
         return 0.0;
     }
-    frag_len_pr /= frag_len_c(tlen);
 
     if (frag_len_pr * w < constants::min_frag_weight) {
         return 0.0;
     }
 
-    // Most pressing matter is to figure out why raising tw to 0.75 improves
-    // things. If I can understand that, maybe I can do something principled and
-    // get even better results.
-    //
-    // This seems like it should have the same effect as 3' bias correction, but
-    // it has the opposite effect. When correcting for 3' bias, we should be
-    // dividing by a decaying function of the unadjusted tw.
-
-    //w = frag_len_pr * w / pow(tw, 0.75);
-    w = 1.0 / pow(tw, 0.75);
+    w = (w * frag_len_pr) / tw;
 
     if (!boost::math::isfinite(w)) {
         Logger::abort("Non-finite fragment weight computed. %e",
@@ -1263,14 +1403,23 @@ class InterTgroupSampler : public Shredder
 {
     public:
         InterTgroupSampler(Sampler& S)
-            : Shredder(1e-6, 1.0 - 1e-6, 1e-6)
+            : Shredder(constants::zero_eps, 1.0 - constants::zero_eps, constants::zero_eps)
             , S(S)
         {
+            size_t max_comp_size = 0;
+            for (unsigned int c = 0; c < S.num_components; ++c) {
+                max_comp_size = std::max<size_t>(max_comp_size,
+                        S.component_frag[c + 1] - S.component_frag[c]);
+            }
 
+            row_u = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
+            row_v = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
         }
 
         ~InterTgroupSampler()
         {
+            afree(row_u);
+            afree(row_v);
         }
 
         double sample(rng_t& rng, unsigned int c, unsigned int u, unsigned int v,
@@ -1280,56 +1429,55 @@ class InterTgroupSampler : public Shredder
 
             if (upper_limit <= lower_limit) return x0;
 
-            unsigned int component_size = S.component_frag[c + 1] - S.component_frag[c];
-
             // find the range of fragments affected by changes in x
-            unsigned int f0 = S.component_frag[c+1];
-            unsigned int f1 = S.component_frag[c];
+            uf0 = vf0 = S.component_frag[c+1];
+            uf1 = vf1 = S.component_frag[c];
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
                 if (S.weight_matrix->rowlens[tid] > 0) {
-                    f0 = std::min(f0, S.weight_matrix->idxs[tid][0]);
-                    f1 = std::max(f1, 1 + S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1]);
+                    uf0 = std::min(uf0, S.weight_matrix->idxs[tid][0]);
+                    uf1 = std::max(uf1, 1 + S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1]);
                 }
             }
 
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
                 if (S.weight_matrix->rowlens[tid] > 0) {
-                    f0 = std::min(f0, S.weight_matrix->idxs[tid][0]);
-                    f1 = std::max(f1, 1 + S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1]);
+                    vf0 = std::min(vf0, S.weight_matrix->idxs[tid][0]);
+                    vf1 = std::max(vf1, 1 + S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1]);
                 }
             }
-            if (f0 > f1) f0 = f1 = S.component_frag[c];
-            f0 -= S.component_frag[c];
-            f1 -= S.component_frag[c];
 
-            // Round f0 down to the nearst 32-byte boundry so we can use avx/sse.
-            f0 &= 0xfffffff8;
+            if (uf0 > uf1) uf0 = uf1 = S.component_frag[c];
+            if (vf0 > vf1) vf0 = vf1 = S.component_frag[c];
+
+            f0 = std::min(uf0, vf0);
+            f1 = std::max(uf1, vf1);
+
+            f0 -= S.component_frag[c]; uf0 -= S.component_frag[c]; vf0 -= S.component_frag[c];
+            f1 -= S.component_frag[c]; uf1 -= S.component_frag[c]; vf1 -= S.component_frag[c];
+
+            // Round down to the nearst 32-byte boundry so we can use avx/sse.
+            uf0 &= 0xfffffff8;
+            vf0 &= 0xfffffff8;
+            f0  &= 0xfffffff8;
 
             this->x0 = x0;
-            this->lpf01 = sumlog(S.frag_probs[c] + f0, f1 - f0) / M_LOG2E;
             this->c = c;
             this->u = u;
             this->v = v;
-            this->f0 = f0;
-            this->f1 = f1;
             this->tgroupmix_uv = S.tgroupmix[u] + S.tgroupmix[v];
-            this->lp0 = sumlog(S.frag_probs[c], component_size) / M_LOG2E;
 
-            prior_lp0 = 0.0;
-            if (S.use_priors) {
-                double tgroup_xu = fastlog(S.tgroupmix[u] * S.cmix[c]) -
-                                   fastlog(S.tgroup_scaling[u]);
-                prior_lp0 += tgroup_prior.f(S.hp.tgroup_mu[u], S.hp.tgroup_sigma[u],
-                                            &tgroup_xu, 1);
-                double tgroup_xv = fastlog(S.tgroupmix[v] * S.cmix[c]) -
-                                   fastlog(S.tgroup_scaling[v]);
-                prior_lp0 += tgroup_prior.f(S.hp.tgroup_mu[v], S.hp.tgroup_sigma[v],
-                                            &tgroup_xv, 1);
-                this->lp0 += prior_lp0;
+            memset(row_u, 0, (uf1 - uf0) * sizeof(float));
+            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
+                S.weight_matrix->expand_row(row_u, tid,
+                                            S.component_frag[c] + uf0,
+                                            S.tgroup_tmix[tid]);
+            }
 
-                // jacobian
-                prior_lp0 -= fastlog(x0);
-                prior_lp0 -= fastlog(1 - x0);
+            memset(row_v, 0, (vf1 - vf0) * sizeof(float));
+            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
+                S.weight_matrix->expand_row(row_v, tid,
+                                            S.component_frag[c] + vf0,
+                                            S.tgroup_tmix[tid]);
             }
 
             if (optimize_state) {
@@ -1346,102 +1494,83 @@ class InterTgroupSampler : public Shredder
             double tgroupmix_u = x * tgroupmix_uv;
             double tgroupmix_v = (1 - x) * tgroupmix_uv;
 
-            double u_delta = tgroupmix_u / S.tgroupmix[u];
-            double v_delta = tgroupmix_v / S.tgroupmix[v];
-
-            acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0, (f1 - f0) * sizeof(float));
-            d = 0.0;
-
-            // recompute fragment probabilities
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
-                asxpy(S.frag_probs_prop[c],
-                      S.weight_matrix->rows[tid],
-                      S.tmix[tid] * u_delta - S.tmix[tid],
-                      S.weight_matrix->idxs[tid],
-                      S.component_frag[c],
-                      S.weight_matrix->rowlens[tid]);
+            if (uf1 < vf0 || vf1 < uf0) {
+                acopy(S.frag_probs_prop[c] + uf0, S.frag_probs[c] + uf0,
+                      (uf1 - uf0) * sizeof(float));
+                acopy(S.frag_probs_prop[c] + vf0, S.frag_probs[c] + vf0,
+                      (vf1 - vf0) * sizeof(float));
+            }
+            else {
+                acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0,
+                      (f1 - f0) * sizeof(float));
             }
 
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
-                asxpy(S.frag_probs_prop[c],
-                      S.weight_matrix->rows[tid],
-                      S.tmix[tid] * v_delta - S.tmix[tid],
-                      S.weight_matrix->idxs[tid],
-                      S.component_frag[c],
-                      S.weight_matrix->rowlens[tid]);
-            }
+            axpy(S.frag_probs_prop[c] + uf0,
+                 row_u, tgroupmix_u - S.tgroupmix[u], uf1 - uf0);
+
+            axpy(S.frag_probs_prop[c] + vf0,
+                 row_v, tgroupmix_v - S.tgroupmix[v], vf1 - vf0);
 
             // gradient
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
-                const unsigned int rowlen = S.weight_matrix->rowlens[tid];
-                const double z =
-                    S.tgroup_tmix[tid] *
-                    tgroupmix_uv;
-                const unsigned int frag_offset = S.component_frag[c];
-                const unsigned int* idxs = S.weight_matrix->idxs[tid];
-
-                d += z * asxtydsz(S.weight_matrix->rows[tid],
-                                  S.frag_probs_prop[c], idxs, frag_offset, rowlen);
-            }
-
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
-                const unsigned int rowlen = S.weight_matrix->rowlens[tid];
-                const double z =
-                    S.tgroup_tmix[tid] *
-                    tgroupmix_uv;
-                const unsigned int frag_offset = S.component_frag[c];
-                const unsigned int* idxs = S.weight_matrix->idxs[tid];
-
-                d -= z * asxtydsz(S.weight_matrix->rows[tid],
-                                  S.frag_probs_prop[c], idxs, frag_offset, rowlen);
-            }
+            d = 0.0;
+            d += sumdiv(row_u, S.frag_probs_prop[c] + uf0, uf1 - uf0);
+            d -= sumdiv(row_v, S.frag_probs_prop[c] + vf0, vf1 - vf0);
+            d *= tgroupmix_u + tgroupmix_v;
 
             // prior probability
-            double prior_lp_delta = 0.0;
+            double prior_lp = 0.0;
             if (S.use_priors) {
-                prior_lp_delta -= prior_lp0;
                 double xu = S.cmix[c] * tgroupmix_u;
                 double logxu = fastlog(xu) - fastlog(S.tgroup_scaling[u]);
                 double mu_u = S.hp.tgroup_mu[u];
-                prior_lp_delta += tgroup_prior.f(mu_u, S.hp.tgroup_sigma[u], &logxu, 1);
-                prior_lp_delta -= fastlog(x); // jacobian
+                prior_lp += tgroup_prior.f(mu_u, S.hp.tgroup_sigma[u], &logxu, 1);
+                prior_lp -= fastlog(x); // jacobian
 
                 double xv = S.cmix[c] * tgroupmix_v;
                 double logxv = fastlog(xv) - fastlog(S.tgroup_scaling[v]);
                 double mu_v = S.hp.tgroup_mu[v];
-                prior_lp_delta += tgroup_prior.f(mu_v, S.hp.tgroup_sigma[v], &logxv, 1);
-                prior_lp_delta -= fastlog(1 - x); // jacobian
+                prior_lp += tgroup_prior.f(mu_v, S.hp.tgroup_sigma[v], &logxv, 1);
+                prior_lp -= fastlog(1 - x); // jacobian
 
                 // derivative of normal log-pdf
                 d += (mu_u - logxu) / (sq(S.hp.tgroup_sigma[u]) * x);
-                d += (mu_v - logxv) / (sq(S.hp.tgroup_sigma[v]) * (x - 1));
+                // XXX: Should this be +=, that makes more intuitive sense
+                d -= (mu_v - logxv) / (sq(S.hp.tgroup_sigma[v]) * (1 - x));
 
                 // derivative of jacobian
                 d -= 1/x;
-                d -= 1/(x-1);
+                d += 1/(1-x);
             }
 
-            return lp0 - lpf01 +
-                   sumlog(S.frag_probs_prop[c] + f0, f1 - f0) / M_LOG2E +
-                   prior_lp_delta;
+            // optimization can fail if d is huge
+            d = std::max<double>(std::min<double>(d, 1e4), -1e4);
+
+            double lp;
+            if (uf1 < vf0 || vf1 < uf0) {
+                lp = sumlog(S.frag_probs_prop[c] + uf0, uf1 - uf0) +
+                     sumlog(S.frag_probs_prop[c] + vf0, vf1 - vf0);
+            }
+            else {
+                lp = sumlog(S.frag_probs_prop[c] + f0, f1 - f0);
+            }
+
+            return lp / M_LOG2E + prior_lp;
         }
 
     private:
         NormalLogPdf tgroup_prior;
+        float *row_u, *row_v;
 
         double x0;
 
-        // log-probability evaluated at x0
-        double lp0;
-
         // log-probability of the fragments in [f0, f1]
-        double lpf01;
         unsigned int c;
         unsigned int u;
         unsigned int v;
-        unsigned int f0, f1;
+        unsigned int uf0, uf1,
+                     vf0, vf1,
+                     f0, f1;
         double tgroupmix_uv;
-        double prior_lp0;
 
         Sampler& S;
 };
@@ -1460,13 +1589,14 @@ class InterTranscriptSampler
             , lower_limit(constants::zero_eps)
             , upper_limit(1.0 - constants::zero_eps)
         {
-            //opt = nlopt_create(NLOPT_LD_SLSQP, 1);
-            opt = nlopt_create(NLOPT_LN_SBPLX, 1);
+            opt = nlopt_create(NLOPT_LD_SLSQP, 1);
+            //opt = nlopt_create(NLOPT_LN_SBPLX, 1);
             nlopt_set_lower_bounds(opt, &lower_limit);
             nlopt_set_upper_bounds(opt, &upper_limit);
             nlopt_set_max_objective(opt, intertranscriptsampler_nlopt_objective,
                                     reinterpret_cast<void*>(this));
             nlopt_set_ftol_abs(opt, 1e-7);
+            nlopt_set_maxeval(opt, 20);
 
             size_t max_comp_size = 0;
             for (unsigned int c = 0; c < S.num_components; ++c) {
@@ -1528,7 +1658,6 @@ class InterTranscriptSampler
         {
             this->u = u;
             this->v = v;
-            double x0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
 
             c = S.transcript_component[u];
             assert(c == S.transcript_component[v]);
@@ -1536,59 +1665,42 @@ class InterTranscriptSampler
             tgroup = S.transcript_tgroup[u];
             assert(tgroup == S.transcript_tgroup[v]);
 
-            component_size = S.component_frag[c + 1] - S.component_frag[c];
-            lp0 = sumlog(S.frag_probs[c], component_size) / M_LOG2E;
-
             wtgroupmix0 = 0.0;
-            prior_lp0 = 0.0;
-            if (S.use_priors) {
-                BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
-                    wtgroupmix0 += S.tmix[tid] / S.transcript_weights[tid];
-                }
-
-                double wtmixu = (S.tmix[u] / S.transcript_weights[u]) / wtgroupmix0;
-                double wtmixv = (S.tmix[v] / S.transcript_weights[v]) / wtgroupmix0;
-
-                prior_lp0 += splice_prior.f(S.hp.splice_mu[u], S.hp.splice_sigma[u],
-                                            &wtmixu, 1);
-
-                prior_lp0 += splice_prior.f(S.hp.splice_mu[v], S.hp.splice_sigma[v],
-                                            &wtmixv, 1);
-
-                prior_lp0 += log_weight_transform_gradient(x0);
-
-                lp0 += prior_lp0;
-                assert_finite(prior_lp0);
+            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
+                wtgroupmix0 += S.tmix[tid] / S.transcript_weights[tid];
             }
 
-            f0 = S.component_frag[c+1];
-            f1 = S.component_frag[c];
+            uf0 = vf0 = S.component_frag[c+1];
+            uf1 = vf1 = S.component_frag[c];
             if (S.weight_matrix->rowlens[u] > 0) {
-                f0 = S.weight_matrix->idxs[u][0];
-                f1 = 1 + S.weight_matrix->idxs[u][S.weight_matrix->rowlens[u] - 1];
+                uf0 = S.weight_matrix->idxs[u][0];
+                uf1 = 1 + S.weight_matrix->idxs[u][S.weight_matrix->rowlens[u] - 1];
             }
 
             if (S.weight_matrix->rowlens[v] > 0) {
-                f0 = std::min(f0, S.weight_matrix->idxs[v][0]);
-                f1 = std::max(f1,  1 + S.weight_matrix->idxs[v][S.weight_matrix->rowlens[v] - 1]);
+                vf0 = S.weight_matrix->idxs[v][0];
+                vf1 = 1 + S.weight_matrix->idxs[v][S.weight_matrix->rowlens[v] - 1];
             }
 
-            if (f0 > f1) f0 = f1 = S.component_frag[c];
-            f0 -= S.component_frag[c];
-            f1 -= S.component_frag[c];
+            if (uf0 > uf1) uf0 = uf1 = S.component_frag[c];
+            if (vf0 > vf1) vf0 = vf1 = S.component_frag[c];
 
-            // Round f0 down to the nearst 32-byte boundry so we can use avx/sse.
+            f0 = std::min(uf0, vf0);
+            f1 = std::max(uf1, vf1);
+
+            f0 -= S.component_frag[c]; uf0 -= S.component_frag[c]; vf0 -= S.component_frag[c];
+            f1 -= S.component_frag[c]; uf1 -= S.component_frag[c]; vf1 -= S.component_frag[c];
+
+            // Round down to the nearst 32-byte boundry so we can use avx/sse.
+            uf0 &= 0xfffffff8;
+            vf0 &= 0xfffffff8;
             f0 &= 0xfffffff8;
 
-            lpf01 = sumlog(S.frag_probs[c] + f0, f1 - f0) / M_LOG2E;
-            assert_finite(lpf01);
+            memset(row_u, 0, (uf1 - uf0) * sizeof(float));
+            S.weight_matrix->expand_row(row_u, u, S.component_frag[c] + uf0);
 
-            // Nope: row_u has to be the entire component
-            memset(row_u, 0, (S.component_frag[c +1] - S.component_frag[c]) * sizeof(float));
-            S.weight_matrix->expand_row(row_u, u, S.component_frag[c]);
-
-            memset(row_v, 0, (S.component_frag[c +1] - S.component_frag[c]) * sizeof(float));
-            S.weight_matrix->expand_row(row_v, v, S.component_frag[c]);
+            memset(row_v, 0, (vf1 - vf0) * sizeof(float));
+            S.weight_matrix->expand_row(row_v, v, S.component_frag[c] + vf0);
         }
 
 
@@ -1597,7 +1709,6 @@ class InterTranscriptSampler
             prepare_sample_optimize(u, v);
             double x0 = S.tmix[u] / (S.tmix[u] + S.tmix[v]);
             if (lower_limit >= upper_limit) return x0;
-
             return optimize(x0);
         }
 
@@ -1713,7 +1824,20 @@ class InterTranscriptSampler
         // Since the prior is specified over weighted transcript abundance, we
         // have to account for the transform, or else the results can be a bit
         // biased.
-        double log_weight_transform_gradient(double x)
+        double weight_transform_gradient_u(double x)
+        {
+            double wu = S.transcript_weights[u];
+            double wv = S.transcript_weights[v];
+            double c = S.tmix[u] + S.tmix[v];
+            double a = wtgroupmix0 - S.tmix[u] / wu - S.tmix[v] / wv;
+
+            // derivative of: (x*c/u) / (x*c/u + (1-x)*c/v + a))
+            return
+                (c * wu * wv * (a * wv + c)) /
+                sq(-a * wu * wv + c * wu * x - c * wu - c * wv * x);
+        }
+
+        double weight_transform_gradient_v(double x)
         {
 
             double wu = S.transcript_weights[u];
@@ -1721,25 +1845,11 @@ class InterTranscriptSampler
             double c = S.tmix[u] + S.tmix[v];
             double a = wtgroupmix0 - S.tmix[u] / wu - S.tmix[v] / wv;
 
-            // derivative of: (x*c/u) / (x*c/u + (1-x)*c/v + a))
-            double su =
-                (c * wu * wv * (a * wv + c)) /
-                sq(-a * wu * wv + c * wu * x - c * wu - c * wv * x);
-
-            double log_su = fastlog(su);
-            assert_finite(su);
-
             // derivative of: ((1-x)*c/v) / (x*c/u + (1-x)*c/v + a))
-            double sv =
+            return
                 - (c * wu * wv * (a * wu + c)) /
                 sq(-a * wu * wv + c * wu * x - c * wu - c * wv * x);
-
-            double log_sv = fastlog(-sv);
-            assert_finite(sv);
-
-            return log_su + log_sv;
         }
-
 
         // used for the jacobian adjustment
         double derivative_log_weight_transform_gradient(double x)
@@ -1765,25 +1875,31 @@ class InterTranscriptSampler
             double tmixu = x * (S.tmix[u] + S.tmix[v]);
             double tmixv = (1 - x) * (S.tmix[u] + S.tmix[v]);
 
-            acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0, (f1 - f0) * sizeof(float));
+            if (uf1 < vf0 || vf1 < uf0) {
+                acopy(S.frag_probs_prop[c] + uf0, S.frag_probs[c] + uf0,
+                      (uf1 - uf0) * sizeof(float));
+                acopy(S.frag_probs_prop[c] + vf0, S.frag_probs[c] + vf0,
+                      (vf1 - vf0) * sizeof(float));
+            }
+            else {
+                acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0,
+                      (f1 - f0) * sizeof(float));
+            }
 
-            axpy(S.frag_probs_prop[c] + f0,
-                 row_u + f0, tmixu - S.tmix[u], f1 - f0);
-
-            axpy(S.frag_probs_prop[c] + f0,
-                 row_v + f0, tmixv - S.tmix[v], f1 - f0);
+            axpy(S.frag_probs_prop[c] + uf0,
+                 row_u, tmixu - S.tmix[u], uf1 - uf0);
+            axpy(S.frag_probs_prop[c] + vf0,
+                 row_v, tmixv - S.tmix[v], vf1 - vf0);
 
             d = 0.0;
 
-            d += sumdiv(row_u + f0, S.frag_probs_prop[c] + f0, f1 - f0);
-            d -= sumdiv(row_v + f0, S.frag_probs_prop[c] + f0, f1 - f0);
+            d += sumdiv(row_u, S.frag_probs_prop[c] + uf0, uf1 - uf0);
+            d -= sumdiv(row_v, S.frag_probs_prop[c] + vf0, vf1 - vf0);
 
             d *= tmixu + tmixv;
 
-            double prior_lp_delta = 0.0;
+            double prior_lp = 0.0;
             if (S.use_priors) {
-                prior_lp_delta -= prior_lp0;
-
                 double wtgroupmix = wtgroupmix0 +
                     (tmixu - S.tmix[u]) / S.transcript_weights[u] +
                     (tmixv - S.tmix[v]) / S.transcript_weights[v];
@@ -1791,31 +1907,46 @@ class InterTranscriptSampler
                 double wtmixu = (tmixu / S.transcript_weights[u]) / wtgroupmix;
                 double wtmixv = (tmixv / S.transcript_weights[v]) / wtgroupmix;
 
-                prior_lp_delta += splice_prior.f(S.hp.splice_mu[u],
+                prior_lp += splice_prior.f(S.hp.splice_mu[u],
                                                  S.hp.splice_sigma[u],
                                                  &wtmixu, 1);
 
-                prior_lp_delta += splice_prior.f(S.hp.splice_mu[v],
+                prior_lp += splice_prior.f(S.hp.splice_mu[v],
                                                  S.hp.splice_sigma[v],
                                                  &wtmixv, 1);
 
+                double su = weight_transform_gradient_u(x),
+                       sv = weight_transform_gradient_v(x);
+
                 // jacobian
-                prior_lp_delta += log_weight_transform_gradient(x);
+                prior_lp += fastlog(su) + fastlog(-sv);
 
                 d += splice_prior.df_dx(S.hp.splice_mu[u],
                                         S.hp.splice_sigma[u],
-                                        &wtmixu, 1);
+                                        &wtmixu, 1) * su;
 
-                d -= splice_prior.df_dx(S.hp.splice_mu[v],
+                d += splice_prior.df_dx(S.hp.splice_mu[v],
                                         S.hp.splice_sigma[v],
-                                        &wtmixv, 1);
+                                        &wtmixv, 1) * sv;
 
+                // derivative of the log jacobian
                 d += derivative_log_weight_transform_gradient(x);
             }
 
-            return lp0 - lpf01 +
-                   sumlog(S.frag_probs_prop[c] + f0, f1 - f0) / M_LOG2E +
-                   prior_lp_delta;
+            // avoid optimization failing due to extremely large
+            // gradients
+            d = std::max<double>(std::min<double>(d, 1e4), -1e4);
+
+            double lp;
+            if (uf1 < vf0 || vf1 < uf0) {
+                lp = sumlog(S.frag_probs_prop[c] + uf0, uf1 - uf0) +
+                     sumlog(S.frag_probs_prop[c] + vf0, vf1 - vf0);
+            }
+            else {
+                lp = sumlog(S.frag_probs_prop[c] + f0, f1 - f0);
+            }
+
+            return lp / M_LOG2E + prior_lp;
         }
 
 
@@ -1825,10 +1956,11 @@ class InterTranscriptSampler
         NormalLogPdf splice_prior;
 
         unsigned int u, v, c, tgroup;
-        double lp0, lpf01, prior_lp0;
-        unsigned int component_size;
         double wtgroupmix0;
-        unsigned int f0, f1;
+
+        unsigned int uf0, uf1,
+                     vf0, vf1,
+                     f0, f1;
 
         // dense copies of the sparse weight_matrix rows
         float* row_u;
@@ -1960,7 +2092,7 @@ class AbundanceSamplerThread
     private:
         float find_component_slice_edge(unsigned int c, float x0, float slice_height, float step);
 
-        float compute_component_probability(unsigned int c, float x);
+        double compute_component_probability(unsigned int c, float x);
 
         float recompute_intra_component_probability(unsigned int u, unsigned int v,
                                               float tmixu, float tmixv,
@@ -1978,7 +2110,7 @@ class AbundanceSamplerThread
                                              double wtgroupmix_u,
                                              double wtgroupmix_v);
 
-        NormalLogPdf cmix_prior;
+        LogNormalLogPdf cmix_prior;
 
         InterTgroupSampler inter_tgroup_sampler;
         InterTranscriptSampler inter_transcript_sampler;
@@ -2017,8 +2149,8 @@ float AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 {
     float component_epsilon = S.component_num_transcripts[c] * constants::zero_eps;
 
-    const float eps = 1e-3;
-    float x, y;
+    const float eps = 1e-4;
+    double x, y;
     do {
         x = std::max<float>(component_epsilon, x0 + step);
         y = compute_component_probability(c, x);
@@ -2034,7 +2166,7 @@ float AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
     }
     else {
         a = x0;
-        b = std::max<float>(component_epsilon, x0 + step);
+        b = x0 + step;
     }
 
     while (fabs(b - a) / ((b+a)/2) > eps) {
@@ -2055,9 +2187,9 @@ float AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 }
 
 
-float AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
+double AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
 {
-    float lp = gamma_lnpdf((S.component_frag[c + 1] - S.component_frag[c]) +
+    double lp = gamma_lnpdf((S.component_frag[c + 1] - S.component_frag[c]) +
                            constants::tmix_prior_prec,
                            1.0, cmixc);
 
@@ -2065,12 +2197,11 @@ float AbundanceSamplerThread::compute_component_probability(unsigned int c, floa
         // prior
         BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
             double x = S.tgroupmix[tgroup] * cmixc;
-            double logx = fastlog(x) - fastlog(S.tgroup_scaling[tgroup]);
+            double scaledx = x / S.tgroup_scaling[tgroup];
             double mu = S.hp.tgroup_mu[tgroup];
             double sigma = S.hp.tgroup_sigma[tgroup];
 
-            double prior_lp = cmix_prior.f(mu, sigma, &logx, 1);
-            prior_lp -= fastlog(x); // jacobian
+            double prior_lp = cmix_prior.f(mu, sigma, &scaledx, 1);
             lp += prior_lp;
 
             if (!boost::math::isfinite(lp)) {
@@ -2104,6 +2235,11 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
         }
     }
 
+    // sample transcript abundance within tgroups
+    BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
+        sample_intra_tgroup(tgroup);
+    }
+
     acopy(S.frag_probs_prop[c], S.frag_probs[c],
           (S.component_frag[c + 1] - S.component_frag[c]) * sizeof(float));
 
@@ -2126,13 +2262,14 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
                 ++j;
             }
 
+            // don't try to sample if there's very little room to move
+            if ((S.tgroupmix[tgroupu] <= 2.0 * constants::zero_eps &&
+                 S.tgroupmix[tgroupv] <= 2.0 * constants::zero_eps) ||
+                (S.tgroupmix[tgroupu] >= 1.0 - 2.0 * constants::zero_eps &&
+                 S.tgroupmix[tgroupv] >= 1.0 - 2.0 * constants::zero_eps)) continue;
+
             sample_inter_tgroup(c, tgroupu, tgroupv);
         }
-    }
-
-    // sample transcript abundance within tgroups
-    BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-        sample_intra_tgroup(tgroup);
     }
 }
 
@@ -2155,7 +2292,10 @@ void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u,
     S.tgroupmix[v] = tgroupmix_v;
 
     BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
-        double tmix_tid = std::max<float>(constants::zero_eps, S.tmix[tid] * u_delta);
+        double tmix_tid =
+            std::min<float>(
+                    1.0 - constants::zero_eps,
+                    std::max<float>(constants::zero_eps, S.tmix[tid] * u_delta));
         asxpy(S.frag_probs[c],
               S.weight_matrix->rows[tid],
               tmix_tid - S.tmix[tid],
@@ -2167,7 +2307,10 @@ void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u,
     }
 
     BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
-        double tmix_tid = std::max<float>(constants::zero_eps, S.tmix[tid] * v_delta);
+        double tmix_tid =
+            std::min<float>(
+                    1.0 - constants::zero_eps,
+                    std::max<float>(constants::zero_eps, S.tmix[tid] * v_delta));
         asxpy(S.frag_probs[c],
               S.weight_matrix->rows[tid],
               tmix_tid - S.tmix[tid],
@@ -2200,8 +2343,16 @@ void AbundanceSamplerThread::sample_intra_tgroup(unsigned int tgroup)
                 v = random_uniform_int(*rng);
             }
 
-            sample_inter_transcript(S.tgroup_tids[tgroup][u],
-                                    S.tgroup_tids[tgroup][v]);
+            unsigned int tidu = S.tgroup_tids[tgroup][u],
+                         tidv = S.tgroup_tids[tgroup][v];
+
+            // don't try to sample if there's very little room to move
+            if ((S.tmix[tidu] <= 2.0 * constants::zero_eps &&
+                 S.tmix[tidv] <= 2.0 * constants::zero_eps) ||
+                (S.tmix[tidu] >= 1.0 - 2.0 * constants::zero_eps &&
+                 S.tmix[tidv] >= 1.0 - 2.0 * constants::zero_eps)) continue;
+
+            sample_inter_transcript(tidu, tidv);
         }
     }
 }
@@ -2285,18 +2436,18 @@ void AbundanceSamplerThread::sample_component(unsigned int c)
 
     float x0 = S.cmix[c];
 
-    float lp0 = compute_component_probability(c, x0);
-    float slice_height = lp0 +
+    double lp0 = compute_component_probability(c, x0);
+    double slice_height = lp0 +
         fastlog(std::max<double>(constants::zero_eps, random_uniform_01(*rng)));
-    float step = 1.0;
+    double step = 1.0;
 
-    float x_min = find_component_slice_edge(c, x0, slice_height, -step);
-    float x_max = find_component_slice_edge(c, x0, slice_height, +step);
+    double x_min = find_component_slice_edge(c, x0, slice_height, -step);
+    double x_max = find_component_slice_edge(c, x0, slice_height, +step);
 
-    float x;
+    double x;
     while (true) {
          x = x_min + (x_max - x_min) * random_uniform_01(*rng);
-         float lp = compute_component_probability(c, x);
+         double lp = compute_component_probability(c, x);
 
          if (lp >= slice_height) break;
          else if (x > x0) x_max = x;
@@ -2320,27 +2471,29 @@ void AbundanceSamplerThread::optimize_component(unsigned int c)
 
     this->c = c;
     double x0 = (S.component_frag[c + 1] - S.component_frag[c]) +
-                constants::tmix_prior_prec * S.component_num_transcripts[c];
+                constants::tmix_prior_prec;
+    double x = x0;
 
     double maxf;
     double component_epsilon = S.component_num_transcripts[c] * 1e-6;
     nlopt_set_lower_bounds(component_opt, &component_epsilon);
-    nlopt_result result = nlopt_optimize(component_opt, &x0, &maxf);
+    nlopt_result result = nlopt_optimize(component_opt, &x, &maxf);
     if (result < 0 && (result != NLOPT_FAILURE ||
-                !boost::math::isfinite(x0) || !boost::math::isfinite(maxf))) {
+                !boost::math::isfinite(x) || !boost::math::isfinite(maxf))) {
         Logger::warn("Optimization failed with code %d", (int) result);
     }
 
-    S.cmix[c] = x0;
+    S.cmix[c] = x;
 }
 
 
 Sampler::Sampler(unsigned int rng_seed,
                  const char* bam_fn, const char* fa_fn,
                  TranscriptSet& ts, FragmentModel& fm,
-                 bool use_priors)
+                 bool run_frag_correction, bool use_priors)
     : ts(ts)
     , fm(fm)
+    , run_frag_correction(run_frag_correction)
     , use_priors(use_priors)
 {
     /* Producer/consumer queue of intervals containing indexed reads to be
@@ -2353,7 +2506,7 @@ Sampler::Sampler(unsigned int rng_seed,
         intervals.push_back(new SamplerInitInterval(*i, q));
     }
 
-    weight_matrix = new WeightMatrix(ts.size());
+    weight_matrix = new WeightMatrix(ts.size(), fm.alnindex.size());
     transcript_weights = new double [ts.size()];
     tgroup_scaling.resize(ts.num_tgroups());
 
@@ -2363,6 +2516,7 @@ Sampler::Sampler(unsigned int rng_seed,
                     fm,
                     *weight_matrix,
                     transcript_weights,
+                    run_frag_correction,
                     q));
         threads.back()->start();
     }
@@ -2462,11 +2616,13 @@ Sampler::Sampler(unsigned int rng_seed,
         component_transcripts[c][component_num_transcripts[c]++] = i;
     }
 
-    // TODO: why is this necessary??
-    /* Now, reorder columns by component. */
+    /* Now, reorder columns by transcript and component. */
+
     unsigned int* idxord = new unsigned int [weight_matrix->ncol];
     for (size_t i = 0; i < weight_matrix->ncol; ++i) idxord[i] = i;
-    std::sort(idxord, idxord + weight_matrix->ncol, ComponentCmp(ds));
+
+    std::stable_sort(idxord, idxord + weight_matrix->ncol, ComponentCmp(ds));
+
     idxmap = new unsigned int [weight_matrix->ncol];
     for (size_t i = 0; i < weight_matrix->ncol; ++i) idxmap[idxord[i]] = i;
     delete [] idxord;
@@ -2651,7 +2807,8 @@ void Sampler::sample()
     double expr_total = 0.0;
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         double tmixi = tmix[i];
-        expr[i] = tmixi * cmix[transcript_component[i]] / cmix_weight[transcript_component[i]];
+        //expr[i] = tmixi * cmix[transcript_component[i]] / cmix_weight[transcript_component[i]];
+        expr[i] = tmixi * cmix[transcript_component[i]] / transcript_weights[i];
         expr_total += expr[i];
     }
 
@@ -2659,42 +2816,27 @@ void Sampler::sample()
         expr[i] /= expr_total;
     }
 
-
     // super-useful diagnostics
 #if 0
     {
         FILE* out = fopen("gc-length-expr.tsv", "w");
-        fprintf(out, "transcript_id\texons\tgc\tlength\tweight\tcount\texpr\n");
+        fprintf(out, "transcript_id\tstrand\texons\tlength\tweight\tcount\texpr\tcomp_size\tnum_tgroups\n");
         for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-            fprintf(out, "%s\t%lu\t%0.4f\t%lu\t%e\t%lu\t%e\n",
+            fprintf(out, "%s\t%d\t%lu\t%lu\t%e\t%lu\t%e\t%lu\t%lu\n",
                     t->transcript_id.get().c_str(),
+                    (int) t->strand,
                     (unsigned long) t->size(),
-                    transcript_gc[t->id],
                     (unsigned long) t->exonic_length(),
                     transcript_weights[t->id],
                     (unsigned long) weight_matrix->rowlens[t->id],
-                    expr[t->id]);
+                    expr[t->id],
+                    (unsigned long) component_num_transcripts[transcript_component[t->id]],
+                    (unsigned long) component_tgroups[transcript_component[t->id]].size());
         }
         fclose(out);
     }
 #endif
 
-#if 0
-    // super-useful diagnostics
-    {
-        FILE* out = fopen("gc-length-expr.tsv", "w");
-        fprintf(out, "gc\tlength\tweight\tcount\texpr\n");
-        for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-            fprintf(out, "%0.4f\t%lu\t%e\t%lu\t%e\n",
-                    transcript_gc[t->id],
-                    (unsigned long) t->exonic_length(),
-                    transcript_weights[t->id],
-                    (unsigned long) weight_matrix->rowlens[t->id],
-                    expr[t->id]);
-        }
-        fclose(out);
-    }
-#endif
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         expr[i] *= hp.scale;
     }
@@ -2801,7 +2943,7 @@ void Sampler::init_frag_probs()
 
 unsigned long Sampler::num_frags() const
 {
-    return lround(total_frag_count);
+    return weight_matrix->ncol;
 }
 
 

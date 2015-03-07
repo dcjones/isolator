@@ -405,9 +405,16 @@ void Summarize::point_ci_transcript_expression(
             // TODO: maximum posterior. there should be a switch to use this
             //(*point)(i, j) = col[0];
 
-            // posterior mean
+            // posterior median
             std::sort(col.begin(), col.end());
             (*point)(i, j) = col[col.size() / 2];
+
+            // posterior mean
+            //double accum = 0.0;
+            //BOOST_FOREACH (float val, col) {
+                //accum += val;
+            //}
+            //(*point)(i, j) = accum / col.size();
 
             if (lower) {
                 (*lower)(i, j) = col[lround((col.size() - 1) * lower_quantile)];

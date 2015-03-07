@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include "constants.hpp"
+#include "fastmath.hpp"
 #include "fragment_model.hpp"
 #include "logger.hpp"
 #include "queue.hpp"
@@ -56,7 +57,7 @@ void AlnIndex::add(const char* key)
 
     value_t* val = hattrie_get(t, key, strlen(key));
     if (*val == 0) {
-        *val = 1 + hattrie_size(t);
+        *val = hattrie_size(t) + 1;
     }
 }
 
@@ -490,6 +491,7 @@ FragmentModel::~FragmentModel()
     delete sb[1];
     delete gcbias;
     delete tpbias;
+    delete fragbias;
     delete frag_len_dist;
 }
 
@@ -499,6 +501,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
         const char* fa_fn,
         bool use_gc_correction,
         bool use_3p_correction,
+        bool use_frag_correction,
         bool tabulate_bias,
         std::set<std::string> bias_training_seqnames)
 {
@@ -672,6 +675,16 @@ void FragmentModel::estimate(TranscriptSet& ts,
         }
 
         frag_len_dist = new EmpDist(frag_len_vals, frag_len_lens, frag_lens.size());
+        {
+            FILE* out = fopen("frag-len-dist.txt", "w");
+            for (pos_t fl = 1; fl < 1000; ++fl) {
+                fprintf(out, "%ld\t%e\t%e\n",
+                        fl, (double) frag_len_dist->pdf(fl),
+                        (double) frag_len_dist->cdf(fl));
+            }
+
+            fclose(out);
+        }
 
         delete [] frag_len_vals;
         delete [] frag_len_lens;
@@ -712,6 +725,12 @@ void FragmentModel::estimate(TranscriptSet& ts,
     for (size_t i = 0; i < constants::num_threads; ++i) {
         delete threads[i];
     }
+
+    // train fragmentation bias
+    if (use_frag_correction) {
+        fragbias = new FragBias(this);
+    }
+    else fragbias = NULL;
 }
 
 

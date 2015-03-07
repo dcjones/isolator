@@ -14,10 +14,13 @@ void asxpy_sse(float* xs, const float* ys, const float c,
                const unsigned int* idx,
                const unsigned int off,
                const size_t n);
+void axpy_sse(float* xs, const float* ys, const float c, const size_t n);
 float asxtydsz_sse(const float* ys, const float* zs,
                    const unsigned int* idx, const unsigned int off,
                    const size_t n);
-float dot_sse(const float* xs, const float* ys, const float* zs, const size_t n);
+float sumdiv_sse(const float* xs, const float* ys, const size_t n);
+float dot_sse(const float* ws, const float* xs,
+              const float* ys, const float* zs, const size_t n);
 void fastmath_sse_init();
 
 #endif

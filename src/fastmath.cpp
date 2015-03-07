@@ -22,7 +22,7 @@ float (*asxtydsz)(const float* ys, const float* zs,
                   const unsigned int* idx, const unsigned int off,
                   const size_t n) = NULL;
 float (*sumdiv)(const float* xs, const float* ys, const size_t n);
-float (*dot)(const float* xs, const float* ys, const float* zs, size_t n);
+float (*dot)(const float* ws, const float* xs, const float* ys, const float* zs, size_t n);
 const char* FASTMATH_INSTR_SET = "";
 
 
@@ -86,9 +86,9 @@ void fastmath_init()
         dotlog   = dotlog_sse;
         dotlogc  = dotlogc_sse;
         asxpy    = asxpy_sse;
-        axpy     = axpy_vanilla; // TODO
+        axpy     = axpy_sse;
         asxtydsz = asxtydsz_sse;
-        sumdiv   = sumdiv_vanilla; // TODO
+        sumdiv   = sumdiv_sse;
         dot      = dot_sse;
         fastmath_sse_init();
         if (cpu_has_sse4()) {

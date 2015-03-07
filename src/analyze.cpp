@@ -105,6 +105,54 @@ class NormalMuSampler
 };
 
 
+class LogNormalTMuSampler : public Shredder
+{
+    public:
+        LogNormalTMuSampler(double lower_bound, double upper_bound)
+            : Shredder(lower_bound, upper_bound, 1e-5)
+        {
+        }
+
+        double sample(rng_t& rng, double mu0, double sigma, const double* xs,
+                      size_t n, double prior_nu, double prior_mu,
+                      double prior_sigma)
+        {
+            this->sigma = sigma;
+            this->prior_nu = prior_nu;
+            this->prior_mu = prior_mu;
+            this->prior_sigma = prior_sigma;
+            this->xs = xs;
+            this->n = n;
+
+            double ans = Shredder::sample(rng, mu0);
+
+            return ans;
+        }
+
+    private:
+        StudentsTLogPdf prior_logpdf;
+        LogNormalLogPdf likelihood_logpdf;
+        double sigma;
+        double prior_nu;
+        double prior_mu;
+        double prior_sigma;
+        const double* xs;
+        size_t n;
+
+    public:
+        double f(double mu, double& d)
+        {
+            d = likelihood_logpdf.df_dmu(mu, sigma, xs, n) +
+                prior_logpdf.df_dx(prior_nu, prior_mu, prior_sigma, &mu, 1);
+
+            return likelihood_logpdf.f(mu, sigma, xs, n) +
+                   prior_logpdf.f(prior_nu, prior_mu, prior_sigma, &mu, 1);
+        }
+};
+
+
+
+
 class NormalTMuSampler : public Shredder
 {
     public:
@@ -142,7 +190,7 @@ class NormalTMuSampler : public Shredder
     public:
         double f(double mu, double& d)
         {
-            d = likelihood_logpdf.df_dx(mu, sigma, xs, n) +
+            d = likelihood_logpdf.df_dmu(mu, sigma, xs, n) +
                 prior_logpdf.df_dx(prior_nu, prior_mu, prior_sigma, &mu, 1);
 
             return likelihood_logpdf.f(mu, sigma, xs, n) +
@@ -172,6 +220,7 @@ class StudentTMuSampler : public Shredder
             this->n = n;
 
             return Shredder::sample(rng, mu0);
+            //return Shredder::optimize(mu0);
         }
 
 
@@ -316,6 +365,55 @@ class GammaNormalSigmaSampler : public Shredder
 };
 
 
+class GammaLogNormalSigmaSampler : public Shredder
+{
+    public:
+        GammaLogNormalSigmaSampler()
+            : Shredder(1e-8, 1e5, 1e-5)
+        {
+        }
+
+        double sample(rng_t& rng, const double* mu,
+                      double sigma0, const double* xs, size_t n,
+                      double prior_alpha, double prior_beta)
+        {
+            this->prior_alpha = prior_alpha;
+            this->prior_beta = prior_beta;
+            this->mu = mu;
+            this->xs = xs;
+            this->n = n;
+            return Shredder::sample(rng, sigma0);
+        }
+
+
+    private:
+        double prior_alpha, prior_beta;
+        const double* mu;
+        const double* xs;
+        size_t n;
+
+        LogNormalLogPdf likelihood_logpdf;
+        GammaLogPdf prior_logpdf;
+
+    protected:
+        double f(double sigma, double& d)
+        {
+            d = 0.0;
+            double fx = 0.0;
+
+            for (size_t i = 0; i < n; ++i) {
+                d += likelihood_logpdf.df_dsigma(mu[i], sigma, &xs[i], 1);
+                fx += likelihood_logpdf.f(mu[i], sigma, &xs[i], 1);
+            }
+
+            d += prior_logpdf.df_dx(prior_alpha, prior_beta, &sigma, 1);
+            fx += prior_logpdf.f(prior_alpha, prior_beta, &sigma, 1);
+
+            return fx;
+        }
+};
+
+
 class ConditionSpliceEtaSampler : public Shredder
 {
     public:
@@ -442,6 +540,7 @@ class ConditionTgroupMuSigmaSamplerThread
             T = condition_tgroup_sigma.size();
             C = condition_samples.size();
             xs.resize(K);
+            xs_mu.resize(K);
         }
 
         void end_burnin()
@@ -473,18 +572,20 @@ class ConditionTgroupMuSigmaSamplerThread
                         assert_finite(condition_tgroup_mu(i, tgroup));
                     }
 
-                    // sample sigma
                     for (size_t i = 0; i < K; ++i) {
-                        xs[i] = ts(i, tgroup) - condition_tgroup_mu(condition[i], tgroup);
+                        xs_mu[i] = condition_tgroup_mu(condition[i], tgroup);
+                        xs[i] = ts(i, tgroup);
                     }
 
                     // Force sigma to something rather large to avoid getting
                     // when initialized in an extremely low probability state
-                    if (burnin_state) condition_tgroup_sigma[tgroup] = 1.0;
+                    if (burnin_state) condition_tgroup_sigma[tgroup] = 5.0;
                     else {
+                        //condition_tgroup_sigma[tgroup] = 1.0;
                         condition_tgroup_sigma[tgroup] =
                             sigma_sampler.sample(
-                                    rng, condition_tgroup_sigma[tgroup],
+                                    rng, &xs_mu.at(0),
+                                    condition_tgroup_sigma[tgroup],
                                     &xs.at(0), K,
                                     condition_tgroup_alpha,
                                     condition_tgroup_beta);
@@ -527,6 +628,7 @@ class ConditionTgroupMuSigmaSamplerThread
 
         // temporary data vector
         std::vector<double> xs;
+        std::vector<double> xs_mu;
 
         // number of replicates
         size_t K;
@@ -537,8 +639,8 @@ class ConditionTgroupMuSigmaSamplerThread
         // number of conditions
         size_t C;
 
-        NormalTMuSampler   mu_sampler;
-        GammaNormalSigmaSampler sigma_sampler;
+        LogNormalTMuSampler   mu_sampler;
+        GammaLogNormalSigmaSampler sigma_sampler;
 };
 
 
@@ -1125,6 +1227,7 @@ Analyze::Analyze(unsigned int rng_seed,
                  const char* genome_filename,
                  bool run_gc_correction,
                  bool run_3p_correction,
+                 bool run_frag_correction,
                  bool collect_qc_data,
                  std::set<std::string> bias_training_seqnames,
                  double experiment_tgroup_sigma_alpha,
@@ -1143,6 +1246,7 @@ Analyze::Analyze(unsigned int rng_seed,
     , genome_filename(genome_filename)
     , run_gc_correction(run_gc_correction)
     , run_3p_correction(run_3p_correction)
+    , run_frag_correction(run_frag_correction)
     , bias_training_seqnames(bias_training_seqnames)
     , collect_qc_data(collect_qc_data)
     , K(0)
@@ -1251,6 +1355,7 @@ class SamplerInitThread
                           std::vector<FragmentModel*>& fms,
                           bool run_gc_correction,
                           bool run_3p_correction,
+                          bool run_frag_correction,
                           bool collect_qc_data,
                           std::set<std::string> bias_training_seqnames,
                           std::vector<Sampler*>& samplers,
@@ -1261,6 +1366,7 @@ class SamplerInitThread
             , fms(fms)
             , run_gc_correction(run_gc_correction)
             , run_3p_correction(run_3p_correction)
+            , run_frag_correction(run_frag_correction)
             , collect_qc_data(collect_qc_data)
             , bias_training_seqnames(bias_training_seqnames)
             , samplers(samplers)
@@ -1278,12 +1384,14 @@ class SamplerInitThread
 
                 fms[index] = new FragmentModel();
                 fms[index]->estimate(transcripts, filenames[index].c_str(), fa_fn,
-                                     run_gc_correction, run_3p_correction, collect_qc_data,
+                                     run_gc_correction, run_3p_correction,
+                                     run_frag_correction, collect_qc_data,
                                      bias_training_seqnames);
 
                 samplers[index] = new Sampler(rng_seed,
                                               filenames[index].c_str(), fa_fn,
-                                              transcripts, *fms[index]);
+                                              transcripts, *fms[index],
+                                              run_frag_correction);
             }
         }
 
@@ -1307,6 +1415,7 @@ class SamplerInitThread
         std::vector<FragmentModel*>& fms;
         bool run_gc_correction;
         bool run_3p_correction;
+        bool run_frag_correction;
         bool collect_qc_data;
         std::set<std::string> bias_training_seqnames;
 
@@ -1399,8 +1508,8 @@ void Analyze::setup_samplers()
     for (unsigned int i = 0; i < constants::num_threads; ++i) {
         threads[i] = new SamplerInitThread(rng_seed, filenames, genome_filename,
                                            transcripts, fms, run_gc_correction,
-                                           run_3p_correction, collect_qc_data,
-                                           bias_training_seqnames,
+                                           run_3p_correction, run_frag_correction,
+                                           collect_qc_data, bias_training_seqnames,
                                            qsamplers, indexes);
         threads[i]->start();
     }
@@ -1731,11 +1840,6 @@ void Analyze::compute_ts()
         for (TranscriptSet::iterator t = transcripts.begin(); t != transcripts.end(); ++t) {
             row(t->tgroup) += Q(i, t->id);
         }
-
-        for (size_t tgroup = 0; tgroup < T; ++tgroup) {
-            row(tgroup) = log(row(tgroup));
-            assert_finite(row(tgroup));
-        }
     }
 }
 
@@ -1902,13 +2006,13 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
         Logger::get_task(optimize_task_name).inc();
     }
 
-    // write the maximum posterior state as sample 0
-    write_output(0);
-    Logger::pop_task(optimize_task_name);
-
     BOOST_FOREACH (Sampler* sampler, qsamplers) {
         sampler->engage_priors();
     }
+
+    // write the maximum posterior state as sample 0
+    write_output(0);
+    Logger::pop_task(optimize_task_name);
 
     BOOST_FOREACH (ConditionSpliceMuSigmaEtaSamplerThread* thread, splice_mu_sigma_sampler_threads) {
         thread->end_burnin();
@@ -2323,9 +2427,9 @@ void Analyze::compute_ts_scaling()
 
 void Analyze::choose_initial_values()
 {
-    std::fill(experiment_tgroup_mu.begin(), experiment_tgroup_mu.end(), -25);
-    std::fill(condition_tgroup_mu.data().begin(), condition_tgroup_mu.data().end(), -25);
-    std::fill(condition_tgroup_sigma.begin(), condition_tgroup_sigma.end(), 10.0);
+    std::fill(experiment_tgroup_mu.begin(), experiment_tgroup_mu.end(), -20);
+    std::fill(condition_tgroup_mu.data().begin(), condition_tgroup_mu.data().end(), -20);
+    std::fill(condition_tgroup_sigma.begin(), condition_tgroup_sigma.end(), 1.0);
 
     experiment_splice_sigma = 0.5;
     experiment_tgroup_sigma = 0.5;

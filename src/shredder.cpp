@@ -17,7 +17,9 @@ double shredder_opt_objective(unsigned int _n, const double* _x,
 
     Shredder* sampler = reinterpret_cast<Shredder*>(data);
     if (_grad) {
-        return sampler->f(_x[0], _grad[0]);
+        double fx = sampler->f(_x[0], _grad[0]);
+        _grad[0] = std::max<double>(std::min<double>(_grad[0], 1e4), -1e4);
+        return fx;
     }
     else {
         double d;
@@ -45,8 +47,9 @@ Shredder::Shredder(double lower_limit, double upper_limit, double tolerance)
     nlopt_set_upper_bounds(opt, &upper_limit);
     nlopt_set_max_objective(opt, shredder_opt_objective,
             reinterpret_cast<void*>(this));
+    nlopt_set_maxeval(opt, 20);
 
-    nlopt_set_ftol_abs(opt, 1e-2);
+    nlopt_set_ftol_abs(opt, 1e-7);
     nlopt_set_xtol_abs(opt, &tolerance);
 }
 
@@ -68,6 +71,7 @@ double Shredder::sample(rng_t& rng, double x0)
 {
     double d0;
     double lp0 = f(x0, d0);
+
     assert_finite(lp0);
 
     double slice_height = fastlog(
@@ -264,6 +268,46 @@ double NormalLogPdf::df_dsigma(double mu, double sigma, const double* xs, size_t
     double part = 0.0;
     for (size_t i = 0; i < n; ++i) {
         part += sq(xs[i] - mu);
+    }
+
+    return part / cb(sigma) - n/sigma;
+}
+
+
+double LogNormalLogPdf::f(double mu, double sigma, const double* xs, size_t n)
+{
+    double part1 = n * (NEG_LOG_2_PI_DIV_2 - fastlog(sigma));
+    double part2 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        double logx = fastlog(xs[i]);
+        part2 += sq(logx - mu) / (2 * sq(sigma)) + logx;
+    }
+
+    return part1 - part2;
+}
+
+
+double LogNormalLogPdf::df_dx(double mu, double sigma, double x)
+{
+    return (mu - fastlog(x)) / (x * sq(sigma)) - 1.0 / x;
+}
+
+
+double LogNormalLogPdf::df_dmu(double mu, double sigma, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += fastlog(xs[i]) - mu;
+    }
+    return part / sq(sigma);
+}
+
+
+double LogNormalLogPdf::df_dsigma(double mu, double sigma, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += sq(fastlog(xs[i]) - mu);
     }
 
     return part / cb(sigma) - n/sigma;

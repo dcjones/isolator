@@ -47,6 +47,7 @@ class Sampler
         Sampler(unsigned int rng_seed,
                 const char* bam_fn, const char* ref_fn,
                 TranscriptSet& ts, FragmentModel& fm,
+                bool run_frag_correction,
                 bool use_priors=false);
         ~Sampler();
 
@@ -122,6 +123,9 @@ class Sampler
         // Components are processed in this order to help prevent
         // thread starvation.
         std::vector<unsigned int> ordered_components;
+
+        // True if fragmentation bias should be corrected for
+        bool run_frag_correction;
 
         // True if priors on cmix and tmix are used. If false, hyperparameters
         // (values in the hp structure) are ignored.

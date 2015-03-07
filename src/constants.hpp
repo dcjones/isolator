@@ -230,9 +230,20 @@ namespace constants
     /* Probabilities controlling how the probability of misalignment is
      * computed.
      */
-    extern double mismatch_pr;
-    extern double misalign_mismatch_pr;
+    extern double aligned_mismatch_pr;
+    extern double misaligned_mismatch_pr;
     extern double misalign_prior;
+
+    /* Fragbias is computed explicitly for ends of transcripts and
+     * interpolated for the middle. */
+    extern pos_t fragbias_endlen;
+
+    /* Scale fragbias to avoid tiny numbers. */
+    extern float fragbias_scale;
+
+    /* Minimum probability of correct alignment. Alignments below this
+     * will be supressed. */
+    extern double min_align_pr;
 }
 
 #endif

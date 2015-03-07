@@ -94,9 +94,10 @@ extern float (*asxtydsz)(const float* ys, const float* zs,
 extern float (*sumdiv)(const float* xs, const float* ys, const size_t n);
 
 
-/* Triple product, where xs and zs are aligned and ys may not be.
+/* Quadruple product, where ws, ys, zs are aligned, and xs may not be.
  */
- extern float (*dot)(const float* xs, const float* ys, const float* zs, const size_t n);
+ extern float (*dot)(const float* ws, const float* xs, const float* ys, const float* zs,
+                     const size_t n);
 
 
 /* Fast log2 approximation. */

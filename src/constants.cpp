@@ -2,7 +2,7 @@
 #include "constants.hpp"
 
 unsigned int         constants::num_threads                  = 1;
-unsigned int         constants::num_opt_rounds               = 50;
+unsigned int         constants::num_opt_rounds               = 30;
 unsigned int         constants::min_map_qual                 = 0;
 size_t               constants::max_estimate_queue_size      = 500;
 pos_t                constants::min_estimate_exon_length     = 200;
@@ -21,7 +21,7 @@ pos_t                constants::tpbias_max_tlen              = 10000;
 size_t               constants::tpbias_max_transcripts       = 200000;
 double               constants::gc_loess_smoothing           = 1.5;
 constants::libtype_t constants::libtype                      = constants::LIBTYPE_FR;
-unsigned int         constants::max_alignments               = 100;
+unsigned int         constants::max_alignments               = 200;
 pos_t                constants::max_frag_len                 = 1000;
 float                constants::min_frag_len_pr              = 1e-4;
 float                constants::transcript_len_min_frag_pr   = 1e-3;
@@ -49,16 +49,18 @@ unsigned int         constants::min_tss_group_isoforms_conditioning = 50;
 double               constants::sample_scaling_quantile      = 0.9;
 size_t               constants::sample_scaling_truncation    = 100000;
 float                constants::frag_prob_epsilon            = 1e-14;
-float                constants::min_expr                     = 1e-9;
+float                constants::min_expr                     = 1e-8;
 double               constants::analyze_experiment_tgroup_mu0    = -25;
-double               constants::analyze_experiment_tgroup_sigma0 = 10;
+double               constants::analyze_experiment_tgroup_sigma0 = 10.0;
 double               constants::analyze_experiment_splice_mu0    = 0.5;
-double               constants::analyze_experiment_splice_sigma0 = 10.0;
+double               constants::analyze_experiment_splice_sigma0 = 1.0;
 double               constants::analyze_experiment_tgroup_nu     = 5.0;
 double               constants::analyze_experiment_splice_nu     = 5.0;
 double               constants::analyze_min_splice_sigma         = 0.03;
 pos_t                constants::max_intron_overlap               = 2;
-double               constants::mismatch_pr                      = 0.01;
-double               constants::misalign_mismatch_pr             = 0.05;
-double               constants::misalign_prior                   = 0.01;
-
+double               constants::aligned_mismatch_pr              = 0.01;
+double               constants::misaligned_mismatch_pr           = 0.05;
+double               constants::misalign_prior                   = 0.05;
+pos_t                constants::fragbias_endlen                  = 100;
+float                constants::fragbias_scale                   = 3e5;
+double               constants::min_align_pr                     = 0.1;
