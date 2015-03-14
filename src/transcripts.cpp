@@ -347,7 +347,7 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
         str_t* g_id = reinterpret_cast<str_t*>(
                 str_map_get(row->attributes, gid_attr, gid_attr_strlen));
 
-        if (!t_id) {
+        if (!t_id || t_id->n == 0) {
             ++skip_count;
             continue;
         }
@@ -362,12 +362,12 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
 
         if (t.empty() || t.gene_id == "") {
             t.seqname = row->seqname->s;
-            if (g_id) t.gene_id = g_id->s;
+            if (g_id && g_id->n > 0) t.gene_id = g_id->s;
             t.transcript_id = t_id->s;
             t.strand = (strand_t) row->strand;
             t.source = row->source->s;
-            if (t_gene_name) t.gene_name = t_gene_name->s;
-            if (t_biotype)   t.biotype = t_biotype->s;
+            if (t_gene_name && t_gene_name->n > 0) t.gene_name = t_gene_name->s;
+            if (t_biotype && t_biotype->n > 0) t.biotype = t_biotype->s;
         }
 
         if (strcmp(feature, row->feature->s) != 0) continue;
