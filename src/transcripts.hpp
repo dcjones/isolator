@@ -90,9 +90,6 @@ class Transcript : public std::set<Exon>
         pos_t min_start;
         pos_t max_end;
 
-        pos_t start_codon;
-        pos_t stop_codon;
-
         GeneBiotype biotype;
         GeneSource source;
 

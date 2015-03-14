@@ -42,8 +42,6 @@ Transcript::Transcript()
     : strand(strand_na)
     , min_start(-1)
     , max_end(-1)
-    , start_codon(-1)
-    , stop_codon(-1)
 {
 
 }
@@ -58,8 +56,6 @@ Transcript::Transcript(const Transcript& other)
     , strand(other.strand)
     , min_start(other.min_start)
     , max_end(other.max_end)
-    , start_codon(other.start_codon)
-    , stop_codon(other.stop_codon)
     , biotype(other.biotype)
     , source(other.source)
     , tgroup(other.tgroup)
@@ -345,20 +341,18 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
 
         ++count;
 
-        if (strcmp(feature,       row->feature->s) != 0 &&
-            strcmp("start_codon", row->feature->s) != 0 &&
-            strcmp("stop_codon",  row->feature->s) != 0) continue;
-
         str_t* t_id = reinterpret_cast<str_t*>(
                 str_map_get(row->attributes, tid_attr, tid_attr_strlen));
 
         str_t* g_id = reinterpret_cast<str_t*>(
                 str_map_get(row->attributes, gid_attr, gid_attr_strlen));
 
-        if (t_id == NULL || g_id == NULL) {
+        if (!t_id) {
             ++skip_count;
             continue;
         }
+
+        Transcript& t = ts[t_id->s];
 
         str_t* t_gene_name = reinterpret_cast<str_t*>(
                 str_map_get(row->attributes, "gene_name", 9));
@@ -366,11 +360,9 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
         str_t* t_biotype = reinterpret_cast<str_t*>(
                 str_map_get(row->attributes, "gene_biotype", 12));
 
-        Transcript& t = ts[t_id->s];
-
-        if (t.empty()) {
+        if (t.empty() || t.gene_id == "") {
             t.seqname = row->seqname->s;
-            t.gene_id = g_id->s;
+            if (g_id) t.gene_id = g_id->s;
             t.transcript_id = t_id->s;
             t.strand = (strand_t) row->strand;
             t.source = row->source->s;
@@ -378,18 +370,9 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
             if (t_biotype)   t.biotype = t_biotype->s;
         }
 
-        pos_t pos = (t.strand == strand_pos ? row->start : row->end) - 1;
-
-        if (strcmp(feature, row->feature->s) == 0) {
-            /* '-1' to make 0-based, end-inclusive. */
-            t.add(row->start - 1, row->end - 1);
-        }
-        else if (strcmp("start_codon", row->feature->s) == 0) {
-            t.start_codon = pos;
-        }
-        else if (strcmp("stop_codon", row->feature->s) == 0) {
-            t.stop_codon = pos;
-        }
+        if (strcmp(feature, row->feature->s) != 0) continue;
+        /* '-1' to make 0-based, end-inclusive. */
+        t.add(row->start - 1, row->end - 1);
     }
 
     gtf_row_free(row);
