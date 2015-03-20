@@ -347,6 +347,53 @@ class WeightMatrix
             }
         }
 
+        void expand_row(float* out, const unsigned int* idxs, unsigned int numidxs,
+                        unsigned int i, float w = 1.0)
+        {
+            unsigned int j = 0, k = 0;
+            while (k < numidxs) {
+                if (j >= rowlens[i] || idxs[k] < this->idxs[i][j]) {
+                    ++k;
+                }
+                else if (idxs[k] > this->idxs[i][j]) {
+                    Logger::abort("Missing index in expand_row");
+                }
+                else {
+                    out[k++] += w * rows[i][j++];
+                }
+            }
+        }
+
+        unsigned int idx_union(unsigned int* out, unsigned int u, unsigned int v)
+        {
+            return idx_union(out, idxs[u], rowlens[u], v);
+        }
+
+        unsigned int idx_union(unsigned int* out, const unsigned int* idxs_u,
+                               unsigned int idxs_u_len, unsigned int v)
+        {
+            unsigned int ku = 0, kv = 0, k = 0;
+            while (ku < idxs_u_len || kv < rowlens[v]) {
+                if (ku >= idxs_u_len) {
+                    out[k++] = idxs[v][kv++];
+                }
+                else if (kv >= rowlens[v]) {
+                    out[k++] = idxs_u[ku++];
+                }
+                else if (idxs_u[ku] < idxs[v][kv]) {
+                    out[k++] = idxs_u[ku++];
+                }
+                else if (idxs_u[ku] > idxs[v][kv]) {
+                    out[k++] = idxs[v][kv++];
+                }
+                else {
+                    out[k++] = idxs_u[ku++];
+                    ++kv;
+                }
+            }
+            return k;
+        }
+
         unsigned int nrow, ncol, max_ncol;
 
         /* Number of entries in each row. */
@@ -1414,10 +1461,16 @@ class InterTgroupSampler : public Shredder
 
             row_u = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
             row_v = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
+            frag_probs_prop = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
+            idxs = new unsigned int [max_comp_size];
+            idxs_work = new unsigned int [max_comp_size];
         }
 
         ~InterTgroupSampler()
         {
+            delete [] idxs;
+            delete [] idxs_work;
+            afree(frag_probs_prop);
             afree(row_u);
             afree(row_v);
         }
@@ -1429,36 +1482,53 @@ class InterTgroupSampler : public Shredder
 
             if (upper_limit <= lower_limit) return x0;
 
-            // find the range of fragments affected by changes in x
-            uf0 = vf0 = S.component_frag[c+1];
-            uf1 = vf1 = S.component_frag[c];
+            idxlen = 0;
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
-                if (S.weight_matrix->rowlens[tid] > 0) {
-                    uf0 = std::min(uf0, S.weight_matrix->idxs[tid][0]);
-                    uf1 = std::max(uf1, 1 + S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1]);
-                }
+                std::swap(idxs, idxs_work);
+                idxlen = S.weight_matrix->idx_union(idxs, idxs_work, idxlen, tid);
             }
 
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
-                if (S.weight_matrix->rowlens[tid] > 0) {
-                    vf0 = std::min(vf0, S.weight_matrix->idxs[tid][0]);
-                    vf1 = std::max(vf1, 1 + S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1]);
-                }
+                std::swap(idxs, idxs_work);
+                idxlen = S.weight_matrix->idx_union(idxs, idxs_work, idxlen, tid);
             }
 
-            if (uf0 > uf1) uf0 = uf1 = S.component_frag[c];
-            if (vf0 > vf1) vf0 = vf1 = S.component_frag[c];
+            uf0 = idxlen;
+            uf1 = 0;
+            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
+                if (S.weight_matrix->rowlens[tid] > 0) {
+                    unsigned int firstidx = S.weight_matrix->idxs[tid][0];
+                    unsigned int lastidx = S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1];
 
-            f0 = std::min(uf0, vf0);
-            f1 = std::max(uf1, vf1);
+                    unsigned int tid_f0, tid_f1;
+                    for (tid_f0 = 0; tid_f0 < idxlen && idxs[tid_f0] != firstidx; ++tid_f0);
+                    for (tid_f1 = tid_f0; tid_f1 < idxlen && idxs[tid_f1] != lastidx; ++tid_f1);
+                    ++tid_f1;
 
-            f0 -= S.component_frag[c]; uf0 -= S.component_frag[c]; vf0 -= S.component_frag[c];
-            f1 -= S.component_frag[c]; uf1 -= S.component_frag[c]; vf1 -= S.component_frag[c];
-
-            // Round down to the nearst 32-byte boundry so we can use avx/sse.
+                    uf0 = std::min<unsigned int>(uf0, tid_f0);
+                    uf1 = std::max<unsigned int>(uf1, tid_f1);
+                }
+            }
             uf0 &= 0xfffffff8;
+            memset(row_u, 0, idxlen * sizeof(float));
+
+            vf0 = idxlen;
+            vf1 = 0;
+            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
+                if (S.weight_matrix->rowlens[tid] > 0) {
+                    unsigned int firstidx = S.weight_matrix->idxs[tid][0];
+                    unsigned int lastidx = S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1];
+
+                    unsigned int tid_f0, tid_f1;
+                    for (tid_f0 = 0; tid_f0 < idxlen && idxs[tid_f0] != firstidx; ++tid_f0);
+                    for (tid_f1 = tid_f0; tid_f1 < idxlen && idxs[tid_f1] != lastidx; ++tid_f1);
+                    ++tid_f1;
+
+                    vf0 = std::min<unsigned int>(vf0, tid_f0);
+                    vf1 = std::max<unsigned int>(vf1, tid_f1);
+                }
+            }
             vf0 &= 0xfffffff8;
-            f0  &= 0xfffffff8;
 
             this->x0 = x0;
             this->c = c;
@@ -1466,17 +1536,15 @@ class InterTgroupSampler : public Shredder
             this->v = v;
             this->tgroupmix_uv = S.tgroupmix[u] + S.tgroupmix[v];
 
-            memset(row_u, 0, (uf1 - uf0) * sizeof(float));
+            memset(row_u, 0, idxlen * sizeof(float));
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
-                S.weight_matrix->expand_row(row_u, tid,
-                                            S.component_frag[c] + uf0,
+                S.weight_matrix->expand_row(row_u, idxs + uf0, uf1 - uf0, tid,
                                             S.tgroup_tmix[tid]);
             }
 
-            memset(row_v, 0, (vf1 - vf0) * sizeof(float));
+            memset(row_v, 0, idxlen * sizeof(float));
             BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
-                S.weight_matrix->expand_row(row_v, tid,
-                                            S.component_frag[c] + vf0,
+                S.weight_matrix->expand_row(row_v, idxs + vf0, vf1 - vf0, tid,
                                             S.tgroup_tmix[tid]);
             }
 
@@ -1494,27 +1562,20 @@ class InterTgroupSampler : public Shredder
             double tgroupmix_u = x * tgroupmix_uv;
             double tgroupmix_v = (1 - x) * tgroupmix_uv;
 
-            if (uf1 < vf0 || vf1 < uf0) {
-                acopy(S.frag_probs_prop[c] + uf0, S.frag_probs[c] + uf0,
-                      (uf1 - uf0) * sizeof(float));
-                acopy(S.frag_probs_prop[c] + vf0, S.frag_probs[c] + vf0,
-                      (vf1 - vf0) * sizeof(float));
-            }
-            else {
-                acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0,
-                      (f1 - f0) * sizeof(float));
+            for (unsigned int k = 0; k < idxlen; ++k) {
+                frag_probs_prop[k] = S.frag_probs[c][idxs[k] - S.component_frag[c]];
             }
 
-            axpy(S.frag_probs_prop[c] + uf0,
+            axpy(frag_probs_prop + uf0,
                  row_u, tgroupmix_u - S.tgroupmix[u], uf1 - uf0);
 
-            axpy(S.frag_probs_prop[c] + vf0,
+            axpy(frag_probs_prop + vf0,
                  row_v, tgroupmix_v - S.tgroupmix[v], vf1 - vf0);
 
             // gradient
             d = 0.0;
-            d += sumdiv(row_u, S.frag_probs_prop[c] + uf0, uf1 - uf0);
-            d -= sumdiv(row_v, S.frag_probs_prop[c] + vf0, vf1 - vf0);
+            d += sumdiv(row_u, frag_probs_prop + uf0, uf1 - uf0);
+            d -= sumdiv(row_v, frag_probs_prop + vf0, vf1 - vf0);
             d *= tgroupmix_u + tgroupmix_v;
 
             // prior probability
@@ -1545,21 +1606,16 @@ class InterTgroupSampler : public Shredder
             // optimization can fail if d is huge
             d = std::max<double>(std::min<double>(d, 1e4), -1e4);
 
-            double lp;
-            if (uf1 < vf0 || vf1 < uf0) {
-                lp = sumlog(S.frag_probs_prop[c] + uf0, uf1 - uf0) +
-                     sumlog(S.frag_probs_prop[c] + vf0, vf1 - vf0);
-            }
-            else {
-                lp = sumlog(S.frag_probs_prop[c] + f0, f1 - f0);
-            }
-
+            double lp = sumlog(frag_probs_prop, idxlen);
             return lp / M_LOG2E + prior_lp;
         }
 
     private:
         NormalLogPdf tgroup_prior;
         float *row_u, *row_v;
+        unsigned int *idxs, *idxs_work;
+        unsigned int idxlen;
+        float* frag_probs_prop;
 
         double x0;
 
@@ -1568,8 +1624,7 @@ class InterTgroupSampler : public Shredder
         unsigned int u;
         unsigned int v;
         unsigned int uf0, uf1,
-                     vf0, vf1,
-                     f0, f1;
+                     vf0, vf1;
         double tgroupmix_uv;
 
         Sampler& S;
@@ -1606,11 +1661,15 @@ class InterTranscriptSampler
 
             row_u = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
             row_v = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
+            frag_probs_prop = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
+            idxs = new unsigned int [max_comp_size];
         }
 
         ~InterTranscriptSampler()
         {
             nlopt_destroy(opt);
+            delete [] idxs;
+            afree(frag_probs_prop);
             afree(row_u);
             afree(row_v);
         }
@@ -1670,37 +1729,31 @@ class InterTranscriptSampler
                 wtgroupmix0 += S.tmix[tid] / S.transcript_weights[tid];
             }
 
-            uf0 = vf0 = S.component_frag[c+1];
-            uf1 = vf1 = S.component_frag[c];
+            idxlen = S.weight_matrix->idx_union(idxs, u, v);
+
+            uf0 = uf1 = 0;
             if (S.weight_matrix->rowlens[u] > 0) {
-                uf0 = S.weight_matrix->idxs[u][0];
-                uf1 = 1 + S.weight_matrix->idxs[u][S.weight_matrix->rowlens[u] - 1];
+                unsigned int firstidx = S.weight_matrix->idxs[u][0];
+                unsigned int lastidx = S.weight_matrix->idxs[u][S.weight_matrix->rowlens[u] - 1];
+                for (uf0 = 0; uf0 < idxlen && idxs[uf0] != firstidx; ++uf0);
+                for (uf1 = uf0; uf1 < idxlen && idxs[uf1] != lastidx; ++uf1);
+                ++uf1;
             }
-
-            if (S.weight_matrix->rowlens[v] > 0) {
-                vf0 = S.weight_matrix->idxs[v][0];
-                vf1 = 1 + S.weight_matrix->idxs[v][S.weight_matrix->rowlens[v] - 1];
-            }
-
-            if (uf0 > uf1) uf0 = uf1 = S.component_frag[c];
-            if (vf0 > vf1) vf0 = vf1 = S.component_frag[c];
-
-            f0 = std::min(uf0, vf0);
-            f1 = std::max(uf1, vf1);
-
-            f0 -= S.component_frag[c]; uf0 -= S.component_frag[c]; vf0 -= S.component_frag[c];
-            f1 -= S.component_frag[c]; uf1 -= S.component_frag[c]; vf1 -= S.component_frag[c];
-
-            // Round down to the nearst 32-byte boundry so we can use avx/sse.
             uf0 &= 0xfffffff8;
+            memset(row_u, 0, idxlen * sizeof(float));
+            S.weight_matrix->expand_row(row_u, idxs + uf0, uf1 - uf0, u);
+
+            vf0 = vf1 = 0;
+            if (S.weight_matrix->rowlens[v] > 0) {
+                unsigned int firstidx = S.weight_matrix->idxs[v][0];
+                unsigned int lastidx = S.weight_matrix->idxs[v][S.weight_matrix->rowlens[v] - 1];
+                for (vf0 = 0; vf0 < idxlen && idxs[vf0] != firstidx; ++vf0);
+                for (vf1 = vf0; vf1 < idxlen && idxs[vf1] != lastidx; ++vf1);
+                ++vf1;
+            }
             vf0 &= 0xfffffff8;
-            f0 &= 0xfffffff8;
-
-            memset(row_u, 0, (uf1 - uf0) * sizeof(float));
-            S.weight_matrix->expand_row(row_u, u, S.component_frag[c] + uf0);
-
-            memset(row_v, 0, (vf1 - vf0) * sizeof(float));
-            S.weight_matrix->expand_row(row_v, v, S.component_frag[c] + vf0);
+            memset(row_v, 0, idxlen * sizeof(float));
+            S.weight_matrix->expand_row(row_v, idxs + vf0, vf1 - vf0, v);
         }
 
 
@@ -1875,28 +1928,18 @@ class InterTranscriptSampler
             double tmixu = x * (S.tmix[u] + S.tmix[v]);
             double tmixv = (1 - x) * (S.tmix[u] + S.tmix[v]);
 
-            if (uf1 < vf0 || vf1 < uf0) {
-                acopy(S.frag_probs_prop[c] + uf0, S.frag_probs[c] + uf0,
-                      (uf1 - uf0) * sizeof(float));
-                acopy(S.frag_probs_prop[c] + vf0, S.frag_probs[c] + vf0,
-                      (vf1 - vf0) * sizeof(float));
-            }
-            else {
-                acopy(S.frag_probs_prop[c] + f0, S.frag_probs[c] + f0,
-                      (f1 - f0) * sizeof(float));
+            for (unsigned int k = 0; k < idxlen; ++k) {
+                frag_probs_prop[k] = S.frag_probs[c][idxs[k] - S.component_frag[c]];
             }
 
-            axpy(S.frag_probs_prop[c] + uf0,
-                 row_u, tmixu - S.tmix[u], uf1 - uf0);
-            axpy(S.frag_probs_prop[c] + vf0,
-                 row_v, tmixv - S.tmix[v], vf1 - vf0);
+            axpy(frag_probs_prop + uf0, row_u, tmixu - S.tmix[u], uf1 - uf0);
+            axpy(frag_probs_prop + vf0, row_v, tmixv - S.tmix[v], vf1 - vf0);
 
-            d = 0.0;
-
-            d += sumdiv(row_u, S.frag_probs_prop[c] + uf0, uf1 - uf0);
-            d -= sumdiv(row_v, S.frag_probs_prop[c] + vf0, vf1 - vf0);
+            d += sumdiv(row_u, frag_probs_prop + uf0, uf1 - uf0);
+            d -= sumdiv(row_v, frag_probs_prop + vf0, vf1 - vf0);
 
             d *= tmixu + tmixv;
+
 
             double prior_lp = 0.0;
             if (S.use_priors) {
@@ -1937,15 +1980,7 @@ class InterTranscriptSampler
             // gradients
             d = std::max<double>(std::min<double>(d, 1e4), -1e4);
 
-            double lp;
-            if (uf1 < vf0 || vf1 < uf0) {
-                lp = sumlog(S.frag_probs_prop[c] + uf0, uf1 - uf0) +
-                     sumlog(S.frag_probs_prop[c] + vf0, vf1 - vf0);
-            }
-            else {
-                lp = sumlog(S.frag_probs_prop[c] + f0, f1 - f0);
-            }
-
+            double lp = sumlog(frag_probs_prop, idxlen);
             return lp / M_LOG2E + prior_lp;
         }
 
@@ -1959,10 +1994,12 @@ class InterTranscriptSampler
         double wtgroupmix0;
 
         unsigned int uf0, uf1,
-                     vf0, vf1,
-                     f0, f1;
+                     vf0, vf1;
 
         // dense copies of the sparse weight_matrix rows
+        unsigned int* idxs;
+        unsigned int idxlen;
+        float* frag_probs_prop;
         float* row_u;
         float* row_v;
 
@@ -2239,9 +2276,6 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
     BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
         sample_intra_tgroup(tgroup);
     }
-
-    acopy(S.frag_probs_prop[c], S.frag_probs[c],
-          (S.component_frag[c + 1] - S.component_frag[c]) * sizeof(float));
 
     if (S.component_tgroups[c].size() > 1) {
         for (unsigned int i = 0; i < S.component_tgroups[c].size(); ++i) {
@@ -2634,8 +2668,6 @@ Sampler::Sampler(unsigned int rng_seed,
     component_frag = new unsigned int [num_components + 1];
     frag_probs = new float* [num_components];
     std::fill(frag_probs, frag_probs + num_components, (float*) NULL);
-    frag_probs_prop = new float * [num_components];
-    std::fill(frag_probs_prop, frag_probs_prop + num_components, (float*) NULL);
     for (size_t i = 0, j = 0; i < num_components; ++i) {
         component_frag[i] = j;
         assert(ds[j] <= i);
@@ -2647,8 +2679,6 @@ Sampler::Sampler(unsigned int rng_seed,
         if (component_size == 0) continue;
 
         frag_probs[i] =
-            reinterpret_cast<float*>(aalloc(component_size * sizeof(float)));
-        frag_probs_prop[i] =
             reinterpret_cast<float*>(aalloc(component_size * sizeof(float)));
 
         j = k;
@@ -2726,13 +2756,11 @@ Sampler::~Sampler()
     delete [] transcript_tgroup;
     for (size_t i = 0; i < num_components; ++i) {
         afree(frag_probs[i]);
-        afree(frag_probs_prop[i]);
         delete [] component_transcripts[i];
     }
     delete [] component_transcripts;
     delete [] component_num_transcripts;
     delete [] frag_probs;
-    delete [] frag_probs_prop;
     delete [] component_frag;
     delete weight_matrix;
     delete [] transcript_weights;

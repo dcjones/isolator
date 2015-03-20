@@ -180,10 +180,6 @@ class Sampler
          * component i, given the component and transcript mixtures. */
         float** frag_probs;
 
-        /* A mirror of frag_probs for non-desctructively evaluating proposals.
-         * */
-        float** frag_probs_prop;
-
         /* component_frag[i] given the index of the first fragment in component
          * i */
         unsigned int* component_frag;
