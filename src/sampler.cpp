@@ -1772,8 +1772,7 @@ class InterTranscriptSampler
             x0 = std::max<double>(std::min<double>(x0, upper_limit), lower_limit);
 
             nlopt_result result = nlopt_optimize(opt, &x0, &maxf);
-            if (result < 0 && (result != NLOPT_FAILURE ||
-                        !boost::math::isfinite(x0) || !boost::math::isfinite(maxf))) {
+            if (result < 0 && result != NLOPT_ROUNDOFF_LIMITED) {
                 Logger::warn("Optimization failed with code %d", (int) result);
             }
             assert_finite(x0);
@@ -2512,8 +2511,7 @@ void AbundanceSamplerThread::optimize_component(unsigned int c)
     double component_epsilon = S.component_num_transcripts[c] * 1e-6;
     nlopt_set_lower_bounds(component_opt, &component_epsilon);
     nlopt_result result = nlopt_optimize(component_opt, &x, &maxf);
-    if (result < 0 && (result != NLOPT_FAILURE ||
-                !boost::math::isfinite(x) || !boost::math::isfinite(maxf))) {
+    if (result < 0 && result != NLOPT_ROUNDOFF_LIMITED) {
         Logger::warn("Optimization failed with code %d", (int) result);
     }
 

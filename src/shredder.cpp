@@ -109,8 +109,7 @@ double Shredder::optimize(double x0)
     double maxf;
     nlopt_result result = nlopt_optimize(opt, &x0, &maxf);
 
-    if (result < 0 && (result != NLOPT_FAILURE ||
-                !boost::math::isfinite(x0) || !boost::math::isfinite(maxf))) {
+    if (result < 0 && result != NLOPT_ROUNDOFF_LIMITED) {
         Logger::warn("Optimization failed with code %d", (int) result);
     }
 
