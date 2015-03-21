@@ -59,6 +59,9 @@ class NormalLogPdf
         double df_dx(double mu, double sigma, const double* xs, size_t n);
         double df_dmu(double mu, double sigma, const double* xs, size_t n);
         double df_dsigma(double mu, double sigma, const double* xs, size_t n);
+
+        double f(double mu, double sigma, double x);
+        double df_dx(double mu, double sigma, double x);
 };
 
 

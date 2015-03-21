@@ -1461,6 +1461,7 @@ class InterTgroupSampler : public Shredder
 
             row_u = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
             row_v = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
+            frag_probs = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
             frag_probs_prop = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
             idxs = new unsigned int [max_comp_size];
             idxs_work = new unsigned int [max_comp_size];
@@ -1470,6 +1471,7 @@ class InterTgroupSampler : public Shredder
         {
             delete [] idxs;
             delete [] idxs_work;
+            afree(frag_probs);
             afree(frag_probs_prop);
             afree(row_u);
             afree(row_v);
@@ -1548,6 +1550,10 @@ class InterTgroupSampler : public Shredder
                                             S.tgroup_tmix[tid]);
             }
 
+            for (unsigned int k = 0; k < idxlen; ++k) {
+                frag_probs[k] = S.frag_probs[c][idxs[k] - S.component_frag[c]];
+            }
+
             if (optimize_state) {
                 return Shredder::optimize(x0);
             }
@@ -1561,6 +1567,8 @@ class InterTgroupSampler : public Shredder
         {
             double tgroupmix_u = x * tgroupmix_uv;
             double tgroupmix_v = (1 - x) * tgroupmix_uv;
+
+            acopy(frag_probs_prop, frag_probs, idxlen * sizeof(float));
 
             for (unsigned int k = 0; k < idxlen; ++k) {
                 frag_probs_prop[k] = S.frag_probs[c][idxs[k] - S.component_frag[c]];
@@ -1584,13 +1592,13 @@ class InterTgroupSampler : public Shredder
                 double xu = S.cmix[c] * tgroupmix_u;
                 double logxu = fastlog(xu) - fastlog(S.tgroup_scaling[u]);
                 double mu_u = S.hp.tgroup_mu[u];
-                prior_lp += tgroup_prior.f(mu_u, S.hp.tgroup_sigma[u], &logxu, 1);
+                prior_lp += tgroup_prior.f(mu_u, S.hp.tgroup_sigma[u], logxu);
                 prior_lp -= fastlog(x); // jacobian
 
                 double xv = S.cmix[c] * tgroupmix_v;
                 double logxv = fastlog(xv) - fastlog(S.tgroup_scaling[v]);
                 double mu_v = S.hp.tgroup_mu[v];
-                prior_lp += tgroup_prior.f(mu_v, S.hp.tgroup_sigma[v], &logxv, 1);
+                prior_lp += tgroup_prior.f(mu_v, S.hp.tgroup_sigma[v], logxv);
                 prior_lp -= fastlog(1 - x); // jacobian
 
                 // derivative of normal log-pdf
@@ -1615,7 +1623,7 @@ class InterTgroupSampler : public Shredder
         float *row_u, *row_v;
         unsigned int *idxs, *idxs_work;
         unsigned int idxlen;
-        float* frag_probs_prop;
+        float *frag_probs, *frag_probs_prop;
 
         double x0;
 
@@ -1661,6 +1669,7 @@ class InterTranscriptSampler
 
             row_u = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
             row_v = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
+            frag_probs = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
             frag_probs_prop = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
             idxs = new unsigned int [max_comp_size];
         }
@@ -1669,6 +1678,7 @@ class InterTranscriptSampler
         {
             nlopt_destroy(opt);
             delete [] idxs;
+            afree(frag_probs);
             afree(frag_probs_prop);
             afree(row_u);
             afree(row_v);
@@ -1754,6 +1764,10 @@ class InterTranscriptSampler
             vf0 &= 0xfffffff8;
             memset(row_v, 0, idxlen * sizeof(float));
             S.weight_matrix->expand_row(row_v, idxs + vf0, vf1 - vf0, v);
+
+            for (unsigned int k = 0; k < idxlen; ++k) {
+                frag_probs[k] = S.frag_probs[c][idxs[k] - S.component_frag[c]];
+            }
         }
 
 
@@ -1927,9 +1941,7 @@ class InterTranscriptSampler
             double tmixu = x * (S.tmix[u] + S.tmix[v]);
             double tmixv = (1 - x) * (S.tmix[u] + S.tmix[v]);
 
-            for (unsigned int k = 0; k < idxlen; ++k) {
-                frag_probs_prop[k] = S.frag_probs[c][idxs[k] - S.component_frag[c]];
-            }
+            acopy(frag_probs_prop, frag_probs, idxlen * sizeof(float));
 
             axpy(frag_probs_prop + uf0, row_u, tmixu - S.tmix[u], uf1 - uf0);
             axpy(frag_probs_prop + vf0, row_v, tmixv - S.tmix[v], vf1 - vf0);
@@ -1938,7 +1950,6 @@ class InterTranscriptSampler
             d -= sumdiv(row_v, frag_probs_prop + vf0, vf1 - vf0);
 
             d *= tmixu + tmixv;
-
 
             double prior_lp = 0.0;
             if (S.use_priors) {
@@ -1950,12 +1961,12 @@ class InterTranscriptSampler
                 double wtmixv = (tmixv / S.transcript_weights[v]) / wtgroupmix;
 
                 prior_lp += splice_prior.f(S.hp.splice_mu[u],
-                                                 S.hp.splice_sigma[u],
-                                                 &wtmixu, 1);
+                                           S.hp.splice_sigma[u],
+                                           wtmixu);
 
                 prior_lp += splice_prior.f(S.hp.splice_mu[v],
-                                                 S.hp.splice_sigma[v],
-                                                 &wtmixv, 1);
+                                           S.hp.splice_sigma[v],
+                                           wtmixv);
 
                 double su = weight_transform_gradient_u(x),
                        sv = weight_transform_gradient_v(x);
@@ -1965,11 +1976,11 @@ class InterTranscriptSampler
 
                 d += splice_prior.df_dx(S.hp.splice_mu[u],
                                         S.hp.splice_sigma[u],
-                                        &wtmixu, 1) * su;
+                                        wtmixu) * su;
 
                 d += splice_prior.df_dx(S.hp.splice_mu[v],
                                         S.hp.splice_sigma[v],
-                                        &wtmixv, 1) * sv;
+                                        wtmixv) * sv;
 
                 // derivative of the log jacobian
                 d += derivative_log_weight_transform_gradient(x);
@@ -1998,7 +2009,7 @@ class InterTranscriptSampler
         // dense copies of the sparse weight_matrix rows
         unsigned int* idxs;
         unsigned int idxlen;
-        float* frag_probs_prop;
+        float *frag_probs, *frag_probs_prop;
         float* row_u;
         float* row_v;
 

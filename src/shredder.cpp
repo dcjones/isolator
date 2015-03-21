@@ -242,6 +242,20 @@ double NormalLogPdf::f(double mu, double sigma, const double* xs, size_t n)
 }
 
 
+double NormalLogPdf::f(double mu, double sigma, const double x)
+{
+    double part1 = NEG_LOG_2_PI_DIV_2 - fastlog(sigma);
+    double part2 = sq(x - mu) / (2 * sq(sigma));
+    return part1 - part2;
+}
+
+
+double NormalLogPdf::df_dx(double mu, double sigma, const double x)
+{
+    return (mu - x) / sq(sigma);
+}
+
+
 double NormalLogPdf::df_dx(double mu, double sigma, const double* xs, size_t n)
 {
     double part = 0.0;
