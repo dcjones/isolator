@@ -50,7 +50,7 @@ float fastlog2(float x_)
     p = m * p + -3.3241990f;
     p = m * p +  3.1157899f;
 
-    p *= m - 1.0;
+    p *= m - 1.0f;
 
     return p + e;
 }
@@ -58,7 +58,8 @@ float fastlog2(float x_)
 
 float fastlog(float x)
 {
-    return fastlog2(x) / M_LOG2E;
+    //return fastlog2(x) / M_LOG2E;
+    return fastlog2(x) / 1.442695f;
 }
 
 

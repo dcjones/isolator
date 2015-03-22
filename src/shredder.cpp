@@ -125,7 +125,6 @@ double Shredder::find_slice_edge(double x0, double slice_height,
 
     // if newton method iterations are not making progress, resort to bisection
     size_t newton_count = 0;
-    const size_t max_newton_count = 10;
 
     double lp = lp0 - slice_height;
     double d = d0;
@@ -171,7 +170,7 @@ double Shredder::find_slice_edge(double x0, double slice_height,
             else        x_bound_upper = x;
         }
 
-        bool bisect = newton_count >= max_newton_count ||
+        bool bisect = newton_count >= constants::max_newton_steps ||
             x1 < x_bound_lower + tolerance || x1 > x_bound_upper - tolerance;
 
         // try using the gradient

@@ -244,6 +244,10 @@ namespace constants
     /* Minimum probability of correct alignment. Alignments below this
      * will be supressed. */
     extern double min_align_pr;
+
+    /* Maximum number of steps using newton's method before we resort to
+     * bisection. */
+    extern size_t max_newton_steps;
 }
 
 #endif

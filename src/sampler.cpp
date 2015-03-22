@@ -7,6 +7,7 @@
 #include <boost/thread.hpp>
 #include <boost/unordered_map.hpp>
 #include <climits>
+#include <ctime>
 
 #include "constants.hpp"
 #include "fastmath.hpp"
@@ -1802,6 +1803,7 @@ class InterTranscriptSampler
             const double d_eps  = 1e-1;
             const double x_eps  = 1e-6;
 
+            size_t newton_count = 0;
             double lp = lp0 - slice_height;
             double d = d0;
             double x = x0;
@@ -1846,7 +1848,8 @@ class InterTranscriptSampler
                     else        x_bound_upper = x;
                 }
 
-                bool bisect = x1 < x_bound_lower + x_eps || x1 > x_bound_upper - x_eps;
+                bool bisect = newton_count > constants::max_newton_steps ||
+                    x1 < x_bound_lower + x_eps || x1 > x_bound_upper - x_eps;
 
                 // try using the gradient
                 if (!bisect) {
@@ -1875,6 +1878,7 @@ class InterTranscriptSampler
                         }
                     }
                 }
+                else ++newton_count;
 
                 assert_finite(lp);
                 //assert_finite(d);

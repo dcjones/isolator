@@ -64,3 +64,4 @@ double               constants::misalign_prior                   = 0.05;
 pos_t                constants::fragbias_endlen                  = 100;
 float                constants::fragbias_scale                   = 3e5;
 double               constants::min_align_pr                     = 0.1;
+size_t               constants::max_newton_steps                 = 10;
