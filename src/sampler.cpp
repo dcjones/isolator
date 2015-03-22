@@ -2715,8 +2715,15 @@ Sampler::Sampler(unsigned int rng_seed,
         ordered_components[i] = i;
     }
 
+    unsigned int* component_num_frags = new unsigned int [num_components];
+    for (unsigned int c = 0; c < num_components; ++c) {
+        component_num_frags[c] = component_frag[c+1] - component_frag[c];
+    }
+
     std::sort(ordered_components.begin(), ordered_components.end(),
-              ComponentCmpRev(component_num_transcripts));
+              ComponentCmpRev(component_num_frags));
+
+    delete [] component_num_frags;
 
     // initialize hyperparameters
     hp.scale = 1.0;
