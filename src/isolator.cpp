@@ -1166,6 +1166,8 @@ static void print_analyze_help(FILE* fout)
         "                                all sequences are used.\n"
         "-N, --num-samples         generate this many samples (default: 250)\n"
         "-B, --burnin              warmup for this many samples before collecting data (default: 10)\n\n"
+        "    --min-align-pr CUTOFF supress alignments with estimated probabilities below\n"
+        "                          this number (default: 0.1)\n"
         "Model parameters:\n"
         "    --experiment_tgroup_sigma_alpha\n"
         "    --experiment_tgroup_sigma_beta\n"
@@ -1202,6 +1204,7 @@ static int isolator_analyze(int argc, char* argv[])
         {"no-frag-correction",   no_argument,       NULL, 0},
         {"num-samples",          required_argument, NULL, 'N'},
         {"burnin",               required_argument, NULL, 'B'},
+        {"min-align-pr",         required_argument, NULL, 0},
         {"tss-cluster-distance", required_argument, NULL, 0},
 
         {"experiment_tgroup_sigma_alpha",  required_argument, NULL, 0},
@@ -1325,6 +1328,9 @@ static int isolator_analyze(int argc, char* argv[])
                 }
                 else if (longopt_name == "exons") {
                     use_exons = true;
+                }
+                else if (longopt_name == "min-align-pr") {
+                    constants::min_align_pr = atof(optarg);
                 }
                 else if (longopt_name == "experiment_tgroup_sigma_alpha") {
                     experiment_tgroup_sigma_alpha = strtod(optarg, NULL);

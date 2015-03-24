@@ -68,9 +68,6 @@ namespace constants
 
     extern libtype_t libtype;
 
-    /* Blacklist reads with more than this many alignments. */
-    extern unsigned int max_alignments;
-
     /* When estimating fragment length distributions, throw out anything larger
      * than this, assuming it's an artifact. */
     extern pos_t max_frag_len;
