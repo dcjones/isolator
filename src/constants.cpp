@@ -15,7 +15,6 @@ pos_t                constants::tpbias_min_tlen              = 5000;
 pos_t                constants::tpbias_max_tlen              = 10000;
 size_t               constants::tpbias_max_transcripts       = 200000;
 constants::libtype_t constants::libtype                      = constants::LIBTYPE_FR;
-unsigned int         constants::max_alignments               = 200;
 pos_t                constants::max_frag_len                 = 1000;
 float                constants::min_frag_len_pr              = 1e-4;
 float                constants::transcript_len_min_frag_pr   = 1e-3;

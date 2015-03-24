@@ -115,9 +115,6 @@ class WeightMatrix
             align_pr_sum = new float [max_ncol];
             std::fill(align_pr_sum, align_pr_sum + max_ncol, 0.0f);
 
-            align_count = new unsigned int [max_ncol];
-            std::fill(align_count, align_count + max_ncol, 0);
-
             this->max_ncol = max_ncol;
 
             compacted = false;
@@ -144,7 +141,6 @@ class WeightMatrix
             delete [] idxs;
             delete [] align_prs;
             delete [] align_pr_sum;
-            delete [] align_count;
         }
 
         void push(unsigned int i, unsigned int j, float w, float align_pr)
@@ -182,7 +178,6 @@ class WeightMatrix
                     align_pr_sum_mutex[j % (sizeof(align_pr_sum_mutex) / sizeof(align_pr_sum_mutex[0]))]);
 
             align_pr_sum[j] += align_pr;
-            align_count[j] += 1;
         }
 
 
@@ -198,15 +193,6 @@ class WeightMatrix
          * */
         unsigned int* compact(size_t* oldncol)
         {
-            {
-                unsigned int N = 0;
-                for (unsigned int i = 0; i < max_ncol; ++i) {
-                    if (align_count[i] > 0) ++N;
-                }
-
-                Logger::debug("%lu frags with at least one alignment", N);
-            }
-
             /* Compute ncol */
             ncol = 0;
             for (unsigned int i = 0; i < nrow; ++i) {
@@ -233,8 +219,7 @@ class WeightMatrix
 
                 unsigned int supressed_count = 0;
                 for (unsigned int j = 0; j < m; ++j) {
-                    if (align_prs[i][j] < constants::min_align_pr ||
-                        align_count[idxs[i][j]] > constants::max_alignments) {
+                    if (align_prs[i][j] < constants::min_align_pr) {
                         ++supressed_count;
                         ++total_supress_count;
                     }
@@ -249,8 +234,7 @@ class WeightMatrix
 
                 unsigned int k = 0;
                 for (unsigned int j = 0; j < m; ++j) {
-                    if (align_prs[i][j] >= constants::min_align_pr &&
-                        align_count[idxs[i][j]] <= constants::max_alignments) {
+                    if (align_prs[i][j] >= constants::min_align_pr) {
                         newrow[k] = rows[i][j] * align_prs[i][j];
                         newidx[k] = idxs[i][j];
                         ++k;
@@ -272,9 +256,6 @@ class WeightMatrix
 
             Logger::debug("%lu low probability alignments supressed",
                          total_supress_count);
-
-            delete [] align_count;
-            align_count = 0;
 
             /* Mark observed columns */
             ncol = 0;
@@ -411,9 +392,6 @@ class WeightMatrix
 
         /* align_pr normalization indexed by read id */
         float* align_pr_sum;
-
-        /* number of alignments for a given frag */
-        unsigned int* align_count;
 
         /* mutexes for blocks of values in align_pr_sum */
         boost::mutex align_pr_sum_mutex[32];
