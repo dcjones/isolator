@@ -21,23 +21,12 @@ namespace constants
      * */
     extern unsigned int num_opt_rounds;
 
-    /* Minimum allowable map quality. Alignments lower that this are thrown out.
-     * */
-    extern unsigned int min_map_qual;
-
     /* During the parameter estimation phase, a work queue of genomic intervals
      * is used to accumulate statistic in parallel. This parameter controls the
      * maximum number of items in that queue. If too large, memory becomes an
      * issue, if too small threads may become starved.
      */
     extern size_t max_estimate_queue_size;
-
-    /* Minimum length of an exonic region to use while estimating the fragment
-     * length distribution. */
-    extern pos_t min_estimate_exon_length;
-
-    /* Don't collect training reads from exons shorter than this. */
-    extern pos_t seqbias_min_exon_length;
 
     /* Read this many reads from the BAM file before training seqbias. It will
      * then choose seqbias_num_reads at random from these to train on. */
@@ -54,11 +43,6 @@ namespace constants
      * seqbias. */
     extern size_t seqbias_right_pos;
 
-    /* Seperate seqbias models are trained for the 3' end 5' ends of
-     * transcripts. These numbers define the extent of the ends. */
-    extern pos_t seqbias_tp_end;
-    extern pos_t seqbias_fp_end;
-
     /* Don't use sequences shorter than this to train gc bias */
     extern pos_t gcbias_min_seq_len;
 
@@ -74,9 +58,6 @@ namespace constants
 
     /* Maximum number of transcripts to use to train 3' bias. */
     extern size_t tpbias_max_transcripts;
-
-    /* Loess smoothing for GC correction. */
-    extern double gc_loess_smoothing;
 
     /* Library type; how the mates in paired-end data sets were generated. */
     enum libtype_t {
@@ -102,10 +83,6 @@ namespace constants
      * strand bias etc, for fragments whose length has lower probability than
      * this. */
     extern float transcript_len_min_frag_pr;
-
-    /* The degree of smoothing to use for the emperical distribution over
-     * fragment lengths. */
-    extern float frag_len_dist_smoothing;
 
     /* Minimum number of paired-end reads needed to estimate the fragment length
      * distribution. */
@@ -146,45 +123,12 @@ namespace constants
      * minimum transcript weight that is applied to avoid these situations. */
     extern float min_transcript_weight;
 
-    /* As an extra precation, don't quantify transcripts where more than this
-     * percentage of the reads would be rejected by size selection. */
-    extern float min_transcript_fraglen_acceptance;
-
     /* Symmetric-dirchlet prior precision for transcript mixtures. */
     extern float tmix_prior_prec;
 
     /* Worker threads for the sampler process blocks of this many components and
      * multireads, respectively, at a time. */
     extern unsigned int sampler_component_block_size;
-    extern unsigned int sampler_multiread_block_size;
-
-    /* When doing maximum posterior estimation, we halt when either the relative
-     * or absolute error are below respective cutoffs. */
-    extern float maxpost_rel_error;
-    extern float maxpost_abs_error;
-
-    /* Once consecutive iterations of maximum posterior estimation change the
-     * overall probability by less than this amount, the process halts. */
-    extern float maxpost_abs_peps;
-
-    /* When using newton's method to find slice extents, only allow so many
-     * iterations to avoid cycles. */
-    extern unsigned int max_newton_iter;
-
-    /* Number of initial burn-in samples to generate and throw away. */
-    extern unsigned int sampler_burnin_samples;
-
-    /* Number of hillclimbing iterations. */
-    extern unsigned int sampler_hillclimb_samples;
-
-    /* When looking for changes in splicing, a pooled precision prior is
-     * conditioned on the number of isoforms in the group. We don't want this
-     * conditioning to make things too sparse for groups with many isoforms, so
-     * at least this many group with k isoforms must exist to condition on k,
-     * otherwise we just group it with k - 1. Yeah, so this is a little hard to
-     * explain tersely....
-     */
-    extern unsigned int min_tss_group_isoforms_conditioning;
 
     /* Normalize to this quantile to compare expression fold change. */
     extern double sample_scaling_quantile;
