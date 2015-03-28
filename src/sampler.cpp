@@ -1762,15 +1762,16 @@ class InterTranscriptSampler
         double optimize(double x0)
         {
             double maxf;
-            x0 = std::max<double>(std::min<double>(x0, upper_limit), lower_limit);
+            double x = std::max<double>(std::min<double>(x0, upper_limit), lower_limit);
 
-            nlopt_result result = nlopt_optimize(opt, &x0, &maxf);
+            nlopt_result result = nlopt_optimize(opt, &x, &maxf);
             if (result < 0 && result != NLOPT_ROUNDOFF_LIMITED) {
                 Logger::warn("Optimization failed with code %d", (int) result);
             }
-            assert_finite(x0);
-
-            return x0;
+            if (!boost::math::isfinite(x)) {
+                return x0;
+            }
+            else return x;
         }
 
         double find_slice_edge(double x0, double slice_height,
