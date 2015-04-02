@@ -5,15 +5,8 @@
  *
  */
 
-#include <stdlib.h>
-
 #include "misc.h"
-#include "../config.h"
-
-#ifdef HAVE_LIBJEMALLOC
-#define JEMALLOC_MANGLE
-#include <jemalloc/jemalloc.h>
-#endif
+#include <stdlib.h>
 
 
 void* malloc_or_die(size_t n)

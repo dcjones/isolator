@@ -12,7 +12,10 @@
 #ifndef HATTRIE_COMMON_H
 #define HATTRIE_COMMON_H
 
-typedef unsigned long value_t;
+#include "pstdint.h"
+
+// an unsigned int that is guaranteed to be the same size as a pointer
+typedef uintptr_t value_t;
 
 #endif
 
