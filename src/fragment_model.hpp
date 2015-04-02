@@ -30,6 +30,7 @@ class AlnIndex
          * index. */
         long get(const char* key);
 
+        size_t used_memory() const;
 
     private:
         hattrie_t* t;

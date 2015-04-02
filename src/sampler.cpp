@@ -120,6 +120,17 @@ class WeightMatrix
             compacted = false;
         }
 
+        size_t memory_used() const
+        {
+            size_t nbytes = sizeof(float) * max_ncol +
+                nrow * 2 * sizeof(unsigned int);
+
+            for (size_t i = 0; i < nrow; ++i) {
+                nbytes += reserved[i] * (2 * sizeof(float) + sizeof(unsigned int));
+            }
+            return nbytes;
+        }
+
         ~WeightMatrix()
         {
             delete [] rowlens;
@@ -157,7 +168,7 @@ class WeightMatrix
                     newsize = 2 * reserved[i];
                 }
                 else {
-                    newsize = reserved[i] + 100;
+                    newsize = reserved[i] + 1000;
                 }
 
                 rows[i] = realloc_or_die(rows[i], newsize);
@@ -611,8 +622,8 @@ class SamplerInitInterval
             , tid(-1)
             , q(q)
         {
-            start = std::max<pos_t>(0, ts.min_start - 1000);
-            end = ts.max_end + 1000;
+            start = ts.min_start;
+            end = ts.max_end;
         }
 
         void add_alignment(const bam1_t* b)
@@ -2555,6 +2566,9 @@ Sampler::Sampler(unsigned int rng_seed,
 
     sam_scan(intervals, bam_fn, fa_fn, task_name.c_str());
 
+    Logger::abort("weight matrix is %0.2fMB before compact",
+                  (double) weight_matrix->memory_used() / 1e6);
+
     for (size_t i = 0; i < constants::num_threads; ++i) q.push(NULL);
     for (size_t i = 0; i < constants::num_threads; ++i) threads[i]->join();
 
@@ -2568,6 +2582,9 @@ Sampler::Sampler(unsigned int rng_seed,
             (unsigned long) weight_matrix->nrow,
             (unsigned long) weight_matrix->ncol);
     delete [] idxmap;
+
+    Logger::debug("weight matrix is %0.2fMB after compact",
+                  (double) weight_matrix->memory_used() / 1e6);
 
     /* Find connected components. */
     unsigned int N = weight_matrix->ncol + weight_matrix->nrow;

@@ -165,6 +165,8 @@ class ReadSet
         /* Make the set empty. Free memory. */
         void clear();
 
+        size_t size() const;
+
         /* Map aligned reads to number of occurances. */
         struct UniqueReadCountsCmp
         {

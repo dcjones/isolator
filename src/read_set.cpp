@@ -749,6 +749,12 @@ void ReadSet::clear()
 }
 
 
+size_t ReadSet::size() const
+{
+    return rs ? hattrie_size(rs) : 0;
+}
+
+
 void ReadSet::make_unique_read_counts(ReadSet::UniqueReadCounts& counts)
 {
     if (rs == NULL) return;

@@ -74,6 +74,12 @@ long AlnIndex::get(const char* key)
 }
 
 
+size_t AlnIndex::used_memory() const
+{
+    return hattrie_sizeof(t);
+}
+
+
 /* An interval used for fragment model parameter estimation. */
 class FragmentModelInterval
 {
@@ -314,6 +320,9 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
 
     bam_destroy1(b);
     samclose(bam_f);
+
+    Logger::debug("alignement index is %0.2fMB",
+                  (double) alnindex.used_memory() / 1e6);
 
     if (task_name) Logger::pop_task(task_name);
 }
