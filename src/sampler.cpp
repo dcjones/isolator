@@ -2566,7 +2566,7 @@ Sampler::Sampler(unsigned int rng_seed,
 
     sam_scan(intervals, bam_fn, fa_fn, task_name.c_str());
 
-    Logger::abort("weight matrix is %0.2fMB before compact",
+    Logger::debug("weight matrix is %0.2fMB before compact",
                   (double) weight_matrix->memory_used() / 1e6);
 
     for (size_t i = 0; i < constants::num_threads; ++i) q.push(NULL);
