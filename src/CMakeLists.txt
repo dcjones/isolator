@@ -13,6 +13,7 @@ add_subdirectory(seqbias)
 add_subdirectory(yaml)
 
 add_executable(isolator
+               alnindex.cpp
                analyze.cpp
                common.cpp
                constants.cpp
@@ -58,13 +59,14 @@ target_link_libraries(isolator
                       ${CMAKE_THREAD_LIBS_INIT})
 
 add_executable(samcnt
-               samcnt.cpp
+               alnindex.cpp
                common.cpp
                constants.cpp
                intervals.cpp
                logger.cpp
-               transcripts.cpp
-               read_set.cpp)
+               read_set.cpp
+               samcnt.cpp
+               transcripts.cpp)
 
 target_link_libraries(samcnt
                       hat-trie

@@ -160,7 +160,7 @@ class ReadSet
         ~ReadSet();
 
         /* Add an alignment to the read set. */
-        void add_alignment(const bam1_t* b);
+        void add_alignment(long idx, const bam1_t* b);
 
         /* Make the set empty. Free memory. */
         void clear();
@@ -182,37 +182,9 @@ class ReadSet
         /* Make a unique read count from the read set. */
         void make_unique_read_counts(UniqueReadCounts& counts);
 
-    private:
-        /* Map of read ids to a AligneRead objects. */
-        hattrie_t* rs;
-
-        /* A pool of unique alignments. */
-        std::vector<Alignment*> as;
-
-        friend class ReadSetIterator;
+        std::map<long, AlignedRead*> rs;
 };
 
-
-/* Iterate through a set of reads. */
-class ReadSetIterator :
-    public boost::iterator_facade<ReadSetIterator,
-                                  const std::pair<const char*, AlignedRead*>,
-                                  boost::forward_traversal_tag>
-{
-    public:
-        ReadSetIterator();
-        ReadSetIterator(const ReadSet&);
-        ~ReadSetIterator();
-
-    private:
-        friend class boost::iterator_core_access;
-        void increment();
-        bool equal(const ReadSetIterator& other) const;
-        const std::pair<const char*, AlignedRead*>& dereference() const;
-
-        hattrie_iter_t* it;
-        std::pair<const char*, AlignedRead*> x;
-};
 
 
 #endif

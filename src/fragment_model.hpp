@@ -5,37 +5,13 @@
 
 #include <string>
 
-#include "hat-trie/hat-trie.h"
-#include "seqbias/sequencing_bias.hpp"
-#include "transcripts.hpp"
+#include "alnindex.hpp"
 #include "emp_dist.hpp"
 #include "fragbias.hpp"
 #include "gcbias.hpp"
+#include "seqbias/sequencing_bias.hpp"
 #include "tpbias.hpp"
-
-
-/* Assign indexes to a set of string. (Read ids in this case.) */
-class AlnIndex
-{
-    public:
-        AlnIndex();
-        ~AlnIndex();
-
-        size_t size() const;
-        void clear();
-
-        void add(const char* key);
-
-        /* Return -1 if the key is not present, otherwise return the key's
-         * index. */
-        long get(const char* key);
-
-        size_t used_memory() const;
-
-    private:
-        hattrie_t* t;
-        boost::mutex mut;
-};
+#include "transcripts.hpp"
 
 
 /* A probabalistic model of fragment sampling in RNA-Seq experiments. */

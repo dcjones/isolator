@@ -1,4 +1,5 @@
 
+#include <boost/foreach.hpp>
 #include <cctype>
 #include "read_set.hpp"
 #include "constants.hpp"
@@ -692,7 +693,6 @@ const AlignmentPair& AlignedReadIterator::dereference() const
 
 
 ReadSet::ReadSet()
-    : rs(NULL)
 {
 }
 
@@ -700,27 +700,21 @@ ReadSet::ReadSet()
 ReadSet::~ReadSet()
 {
     clear();
-
-    std::vector<Alignment*>::iterator j;
-    for (j = as.begin(); j != as.end(); ++j) {
-        delete *j;
-    }
 }
 
 
-void ReadSet::add_alignment(const bam1_t* b)
+void ReadSet::add_alignment(long idx, const bam1_t* b)
 {
-    if (rs == NULL) rs = hattrie_create();
+    AlignedRead* r;
+    std::map<long, AlignedRead*>::iterator i = rs.find(idx);
+    if (i == rs.end()) {
+        r = new AlignedRead();
+        rs[idx] = r;
+    } else {
+        r = i->second;
+    }
 
-    AlignedRead** rp = reinterpret_cast<AlignedRead**>(
-            hattrie_get(rs, bam1_qname(b), b->core.l_qname - 1));
-
-    if (*rp == NULL) *rp = new AlignedRead();
-    AlignedRead* r = *rp;
-
-    as.push_back(new Alignment(b));
-    Alignment* a = as.back();
-
+    Alignment* a = new Alignment(b);
     if (b->core.flag & BAM_FREAD1 || b->core.flag & BAM_FREAD2) r->paired = true;
 
     if (b->core.flag & BAM_FREAD2) r->mate2.push_back(a);
@@ -733,99 +727,38 @@ void ReadSet::add_alignment(const bam1_t* b)
 
 void ReadSet::clear()
 {
-    if (rs == NULL) return;
+    for (std::map<long, AlignedRead*>::iterator i = rs.begin(); i != rs.end(); ++i) {
+        BOOST_FOREACH (Alignment* m, i->second->mate1) {
+            delete m;
+        }
 
-    hattrie_iter_t* i;
-    for (i = hattrie_iter_begin(rs, false);
-         !hattrie_iter_finished(i);
-         hattrie_iter_next(i)) {
-        AlignedRead** r = reinterpret_cast<AlignedRead**>(hattrie_iter_val(i));
-        delete *r;
+        BOOST_FOREACH (Alignment* m, i->second->mate2) {
+            delete m;
+        }
+        delete i->second;
     }
 
-    hattrie_iter_free(i);
-    hattrie_free(rs);
-    rs = NULL;
+    rs.clear();
 }
 
 
 size_t ReadSet::size() const
 {
-    return rs ? hattrie_size(rs) : 0;
+    return rs.size();
 }
 
 
 void ReadSet::make_unique_read_counts(ReadSet::UniqueReadCounts& counts)
 {
-    if (rs == NULL) return;
-    hattrie_iter_t* i;
     ReadSet::UniqueReadCounts::iterator j;
-    for (i = hattrie_iter_begin(rs, false);
-         !hattrie_iter_finished(i);
-         hattrie_iter_next(i)) {
-        AlignedRead** r = reinterpret_cast<AlignedRead**>(hattrie_iter_val(i));
 
-        j = counts.find(*r);
+    for (std::map<long, AlignedRead*>::iterator i = rs.begin(); i != rs.end(); ++i) {
+        AlignedRead* r = i->second;
+        j = counts.find(r);
         if (j == counts.end()) {
-            counts.insert(std::make_pair(*r, 1));
+            counts.insert(std::make_pair(r, 1));
         }
         else j->second += 1;
     }
-
-    hattrie_iter_free(i);
 }
-
-
-ReadSetIterator::ReadSetIterator()
-    : it(NULL)
-{
-}
-
-
-ReadSetIterator::ReadSetIterator(const ReadSet& s)
-    : it(NULL)
-{
-    if (s.rs) {
-        it = hattrie_iter_begin(s.rs, false);
-        if (!hattrie_iter_finished(it)) {
-            x.first = hattrie_iter_key(it, NULL);
-            x.second = *reinterpret_cast<AlignedRead**>(hattrie_iter_val(it));
-        }
-    }
-}
-
-
-ReadSetIterator::~ReadSetIterator()
-{
-    hattrie_iter_free(it);
-}
-
-
-void ReadSetIterator::increment()
-{
-    hattrie_iter_next(it);
-    if (!hattrie_iter_finished(it)) {
-        x.first = hattrie_iter_key(it, NULL);
-        x.second = *reinterpret_cast<AlignedRead**>(hattrie_iter_val(it));
-    }
-}
-
-
-bool ReadSetIterator::equal(const ReadSetIterator& other) const
-{
-    if (it == NULL || hattrie_iter_finished(it)) {
-        return other.it == NULL || hattrie_iter_finished(other.it);
-    }
-    else if (other.it == NULL || hattrie_iter_finished(other.it)) {
-        return false;
-    }
-    else return hattrie_iter_equal(it, other.it);
-}
-
-
-const std::pair<const char*, AlignedRead*>& ReadSetIterator::dereference() const
-{
-    return x;
-}
-
 

@@ -626,9 +626,9 @@ class SamplerInitInterval
             end = ts.max_end;
         }
 
-        void add_alignment(const bam1_t* b)
+        void add_alignment(long idx, const bam1_t* b)
         {
-            rs.add_alignment(b);
+            rs.add_alignment(idx, b);
         }
 
         void clear()
@@ -668,6 +668,7 @@ class SamplerInitInterval
         friend void sam_scan(std::vector<SamplerInitInterval*>& intervals,
                              const char* bam_fn,
                              const char* fa_fn,
+                             AlnIndex& alnindex,
                              const char* task_name);
 };
 
@@ -685,6 +686,7 @@ struct SamplerInitIntervalPtrCmp
 /* Read through a sorted SAM/BAM file, initializing the sampler as we go. */
 void sam_scan(std::vector<SamplerInitInterval*>& intervals,
               const char* bam_fn, const char* fa_fn,
+              AlnIndex& alnindex,
               const char* task_name)
 {
     /* Measure file size to monitor progress. */
@@ -794,6 +796,8 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
         last_tid = b->core.tid;
         last_pos = b->core.pos;
 
+        long idx = alnindex.get(bam1_qname(b));
+
         /* Add reads to intervals in which they are contained. */
         for (j = j0; j < n; ++j) {
             if (b->core.tid < intervals[j]->tid) break;
@@ -813,7 +817,7 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
 
             pos_t b_end = (pos_t) bam_calend(&b->core, bam1_cigar(b)) - 1;
             if (b_end <= intervals[j]->end) {
-                intervals[j]->add_alignment(b);
+                intervals[j]->add_alignment(idx, b);
             }
         }
     }
@@ -984,13 +988,7 @@ class FragWeightEstimationThread
 
 void FragWeightEstimationThread::process_locus(SamplerInitInterval* locus)
 {
-    // look up fragment indexes in advance to reduce contention on fm.alnindex
-    std::vector<long> frag_indexes;
-    for (ReadSetIterator r(locus->rs); r != ReadSetIterator(); ++r) {
-        frag_indexes.push_back(fm.alnindex.get(r->first) - 1);
-    }
-
-    std::vector<float> max_aln_prs(frag_indexes.size());
+    std::vector<float> max_aln_prs(locus->rs.size());
     std::fill(max_aln_prs.begin(), max_aln_prs.end(), 0.0f);
 
     for (TranscriptSetLocus::iterator t = locus->ts.begin();
@@ -1008,8 +1006,9 @@ void FragWeightEstimationThread::process_locus(SamplerInitInterval* locus)
                                                       run_frag_correction);
 
         unsigned int i = 0;
-        for (ReadSetIterator r(locus->rs); r != ReadSetIterator(); ++r) {
-            long idx = frag_indexes[i];
+        for (std::map<long, AlignedRead*>::iterator r = locus->rs.rs.begin();
+             r != locus->rs.rs.end(); ++r) {
+            long idx = r->first;
             float max_w_align_pr = 0.0;
             float maxw = 0.0;
             float max_align_pr = 0.0;
@@ -1037,8 +1036,10 @@ void FragWeightEstimationThread::process_locus(SamplerInitInterval* locus)
         }
     }
 
-    for (unsigned int i = 0; i < max_aln_prs.size(); ++i) {
-        long idx = frag_indexes[i];
+    unsigned int i = 0;
+    for (std::map<long, AlignedRead*>::iterator r = locus->rs.rs.begin();
+         r != locus->rs.rs.end(); ++r, ++i) {
+        long idx = r->first;
         weight_matrix.increase_align_pr_sum(idx, max_aln_prs[i]);
     }
 }
@@ -2564,7 +2565,7 @@ Sampler::Sampler(unsigned int rng_seed,
                             std::string(bam_fn) +
                             std::string(")");
 
-    sam_scan(intervals, bam_fn, fa_fn, task_name.c_str());
+    sam_scan(intervals, bam_fn, fa_fn, fm.alnindex, task_name.c_str());
 
     Logger::debug("weight matrix is %0.2fMB before compact",
                   (double) weight_matrix->memory_used() / 1e6);

@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <getopt.h>
 
+#include "alnindex.hpp"
 #include "logger.hpp"
 #include "read_set.hpp"
 #include "transcripts.hpp"
@@ -92,7 +93,8 @@ static void process_locus(TrieMap<unsigned long>& counts,
                           const TranscriptSetLocus& locus,
                           const ReadSet& rs, Stranded stranded)
 {
-    for (ReadSetIterator r(rs); r != ReadSetIterator(); ++r) {
+    for (std::map<long, AlignedRead*>::const_iterator r = rs.rs.begin();
+            r != rs.rs.end(); ++r) {
         AlignedReadIterator aln(*r->second);
         if (aln == AlignedReadIterator()) continue;
         const AlignmentPair& frag = *aln;
@@ -295,12 +297,15 @@ int main(int argc, char* argv[])
         counts[t->gene_id.get().c_str()] = 0;
     }
 
+    AlnIndex alnindex;
     ReadSet rs;
     size_t i = 0; // index into intervals
 
     while (samread(sam_file, b) >= 0 && i < intervals.size()) {
         pos_t start_pos = b->core.pos;
         pos_t end_pos = bam_calend(&b->core, bam1_cigar(b));
+
+        long idx = alnindex.get(bam1_qname(b));
 
         // skip reads with multiple alignments
         MateCount& count = aln_counts[bam1_qname(b)];
@@ -323,7 +328,7 @@ int main(int argc, char* argv[])
 
             if (start_pos <= intervals[i].locus.max_end &&
                 end_pos >= intervals[i].locus.min_start) {
-                rs.add_alignment(b);
+                rs.add_alignment(idx, b);
                 continue;
             }
         }

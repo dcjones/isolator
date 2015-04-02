@@ -27,59 +27,6 @@ static void supress_khash_unused_function_warnings()
 }
 
 
-AlnIndex::AlnIndex()
-{
-    t = hattrie_create();
-}
-
-
-AlnIndex::~AlnIndex()
-{
-    hattrie_free(t);
-}
-
-
-size_t AlnIndex::size() const
-{
-    return hattrie_size(t);
-}
-
-
-void AlnIndex::clear()
-{
-    hattrie_clear(t);
-}
-
-
-void AlnIndex::add(const char* key)
-{
-    boost::lock_guard<boost::mutex> lock(mut);
-
-    value_t* val = hattrie_get(t, key, strlen(key));
-    if (*val == 0) {
-        *val = hattrie_size(t) + 1;
-    }
-}
-
-
-long AlnIndex::get(const char* key)
-{
-    boost::lock_guard<boost::mutex> lock(mut);
-
-    value_t* val = hattrie_tryget(t, key, strlen(key));
-    if (val == NULL) return -1;
-    else {
-        return *val - 1;;
-    }
-}
-
-
-size_t AlnIndex::used_memory() const
-{
-    return hattrie_sizeof(t);
-}
-
-
 /* An interval used for fragment model parameter estimation. */
 class FragmentModelInterval
 {
@@ -121,9 +68,9 @@ class FragmentModelInterval
         {
         }
 
-        void add_alignment(const bam1_t* b)
+        void add_alignment(long idx, const bam1_t* b)
         {
-            rs.add_alignment(b);
+            rs.add_alignment(idx, b);
         }
 
         bool operator < (const FragmentModelInterval& other) const
@@ -258,7 +205,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
         last_tid = b->core.tid;
         last_pos = b->core.pos;
 
-        alnindex.add(bam1_qname(b));
+        long idx = alnindex.add(bam1_qname(b));
 
         // Process seqbias intervals
         while (sbi != seqbias_intervals.end() && (*sbi)->tid < b->core.tid) ++sbi;
@@ -311,7 +258,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
 
             pos_t b_end = (pos_t) bam_trueend(&b->core, bam1_cigar(b)) - 1;
             if (b_end <= intervals[j]->end) {
-                intervals[j]->add_alignment(b);
+                intervals[j]->add_alignment(idx, b);
             }
         }
     }
