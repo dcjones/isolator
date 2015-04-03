@@ -776,8 +776,6 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
             excluded_seq = excluded_seqs.find(seqname) != excluded_seqs.end();
         }
 
-        if (excluded_seq) continue;
-
         if (fa_f && b->core.tid != last_tid) {
             /* TODO: handle the case in which an alignments sequence is not in
              * the reference We should ignore these reads and complain loudly.
@@ -805,6 +803,8 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
 
         last_tid = b->core.tid;
         last_pos = b->core.pos;
+
+        if (excluded_seq) continue;
 
         long idx = alnindex.get(bam1_qname(b));
 

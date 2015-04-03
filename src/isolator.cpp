@@ -1327,7 +1327,7 @@ static int isolator_analyze(int argc, char* argv[])
                 }
                 else if (longopt_name == "exclude-seqs") {
                     const char* seq;
-                    for (seq = strtok(optarg, ","); seq; strtok(NULL, ",")) {
+                    for (seq = strtok(optarg, ","); seq; seq = strtok(NULL, ",")) {
                         excluded_seqs.insert(std::string(seq));
                     }
                 }

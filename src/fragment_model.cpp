@@ -207,10 +207,10 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
                     "Please run: 'samtools sort'.");
         }
 
-        if (excluded_seq) continue;
-
         last_tid = b->core.tid;
         last_pos = b->core.pos;
+
+        if (excluded_seq) continue;
 
         long idx = alnindex.add(bam1_qname(b));
 
