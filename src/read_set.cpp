@@ -706,7 +706,7 @@ ReadSet::~ReadSet()
 void ReadSet::add_alignment(long idx, const bam1_t* b)
 {
     AlignedRead* r;
-    std::map<long, AlignedRead*>::iterator i = rs.find(idx);
+    boost::unordered_map<long, AlignedRead*>::iterator i = rs.find(idx);
     if (i == rs.end()) {
         r = new AlignedRead();
         rs[idx] = r;
@@ -727,7 +727,7 @@ void ReadSet::add_alignment(long idx, const bam1_t* b)
 
 void ReadSet::clear()
 {
-    for (std::map<long, AlignedRead*>::iterator i = rs.begin(); i != rs.end(); ++i) {
+    for (boost::unordered_map<long, AlignedRead*>::iterator i = rs.begin(); i != rs.end(); ++i) {
         BOOST_FOREACH (Alignment* m, i->second->mate1) {
             delete m;
         }
@@ -752,7 +752,7 @@ void ReadSet::make_unique_read_counts(ReadSet::UniqueReadCounts& counts)
 {
     ReadSet::UniqueReadCounts::iterator j;
 
-    for (std::map<long, AlignedRead*>::iterator i = rs.begin(); i != rs.end(); ++i) {
+    for (boost::unordered_map<long, AlignedRead*>::iterator i = rs.begin(); i != rs.end(); ++i) {
         AlignedRead* r = i->second;
         j = counts.find(r);
         if (j == counts.end()) {

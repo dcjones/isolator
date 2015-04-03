@@ -93,7 +93,7 @@ static void process_locus(TrieMap<unsigned long>& counts,
                           const TranscriptSetLocus& locus,
                           const ReadSet& rs, Stranded stranded)
 {
-    for (std::map<long, AlignedRead*>::const_iterator r = rs.rs.begin();
+    for (boost::unordered_map<long, AlignedRead*>::const_iterator r = rs.rs.begin();
             r != rs.rs.end(); ++r) {
         AlignedReadIterator aln(*r->second);
         if (aln == AlignedReadIterator()) continue;

@@ -3,7 +3,6 @@
 #define ISOLATOR_ALNINDEX_HPP
 
 #include <cstdlib>
-#include <boost/thread.hpp>
 
 #include "hat-trie/hat-trie.h"
 
@@ -28,7 +27,6 @@ class AlnIndex
 
     private:
         hattrie_t* t;
-        boost::mutex mut;
 };
 
 #endif

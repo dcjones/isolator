@@ -1006,7 +1006,7 @@ void FragWeightEstimationThread::process_locus(SamplerInitInterval* locus)
                                                       run_frag_correction);
 
         unsigned int i = 0;
-        for (std::map<long, AlignedRead*>::iterator r = locus->rs.rs.begin();
+        for (boost::unordered_map<long, AlignedRead*>::iterator r = locus->rs.rs.begin();
              r != locus->rs.rs.end(); ++r) {
             long idx = r->first;
             float max_w_align_pr = 0.0;
@@ -1037,7 +1037,7 @@ void FragWeightEstimationThread::process_locus(SamplerInitInterval* locus)
     }
 
     unsigned int i = 0;
-    for (std::map<long, AlignedRead*>::iterator r = locus->rs.rs.begin();
+    for (boost::unordered_map<long, AlignedRead*>::iterator r = locus->rs.rs.begin();
          r != locus->rs.rs.end(); ++r, ++i) {
         long idx = r->first;
         weight_matrix.increase_align_pr_sum(idx, max_aln_prs[i]);

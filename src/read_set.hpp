@@ -3,6 +3,7 @@
 #define ISOLATOR_READ_SET_HPP
 
 #include <boost/iterator/iterator_facade.hpp>
+#include <boost/unordered_map.hpp>
 #include <vector>
 
 #include "common.hpp"
@@ -182,7 +183,7 @@ class ReadSet
         /* Make a unique read count from the read set. */
         void make_unique_read_counts(UniqueReadCounts& counts);
 
-        std::map<long, AlignedRead*> rs;
+        boost::unordered_map<long, AlignedRead*> rs;
 };
 
 

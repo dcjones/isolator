@@ -1,5 +1,6 @@
 
 #include "alnindex.hpp"
+#include <cstring>
 
 
 AlnIndex::AlnIndex()
@@ -28,8 +29,6 @@ void AlnIndex::clear()
 
 long AlnIndex::add(const char* key)
 {
-    boost::lock_guard<boost::mutex> lock(mut);
-
     value_t* val = hattrie_get(t, key, strlen(key));
     if (*val == 0) {
         *val = hattrie_size(t) + 1;
@@ -40,8 +39,6 @@ long AlnIndex::add(const char* key)
 
 long AlnIndex::get(const char* key)
 {
-    boost::lock_guard<boost::mutex> lock(mut);
-
     value_t* val = hattrie_tryget(t, key, strlen(key));
     if (val == NULL) return -1;
     else {
