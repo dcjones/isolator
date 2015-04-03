@@ -668,6 +668,7 @@ class SamplerInitInterval
         friend void sam_scan(std::vector<SamplerInitInterval*>& intervals,
                              const char* bam_fn,
                              const char* fa_fn,
+                             std::set<std::string> excluded_seqs,
                              AlnIndex& alnindex,
                              const char* task_name);
 };
@@ -686,6 +687,7 @@ struct SamplerInitIntervalPtrCmp
 /* Read through a sorted SAM/BAM file, initializing the sampler as we go. */
 void sam_scan(std::vector<SamplerInitInterval*>& intervals,
               const char* bam_fn, const char* fa_fn,
+              std::set<std::string> excluded_seqs,
               AlnIndex& alnindex,
               const char* task_name)
 {
@@ -746,6 +748,7 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
     bam1_t* b = bam_init1();
     int32_t last_tid = -1;
     int32_t last_pos = -1;
+    bool excluded_seq = false;
     while (samread(bam_f, b) >= 0) {
         ++read_num;
 
@@ -764,9 +767,16 @@ void sam_scan(std::vector<SamplerInitInterval*>& intervals,
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
             Logger::abort(
-                    "Excuse me, but I must insist that your SAM/BAM file be sorted. "
+                    "The input SAM/BAM file must be sorted. "
                     "Please run: 'samtools sort'.");
         }
+
+        if (b->core.tid != last_tid) {
+            std::string seqname(bam_f->header->target_name[b->core.tid]);
+            excluded_seq = excluded_seqs.find(seqname) != excluded_seqs.end();
+        }
+
+        if (excluded_seq) continue;
 
         if (fa_f && b->core.tid != last_tid) {
             /* TODO: handle the case in which an alignments sequence is not in
@@ -2527,6 +2537,7 @@ void AbundanceSamplerThread::optimize_component(unsigned int c)
 
 Sampler::Sampler(unsigned int rng_seed,
                  const char* bam_fn, const char* fa_fn,
+                 std::set<std::string> excluded_seqs,
                  TranscriptSet& ts, FragmentModel& fm,
                  bool run_frag_correction, bool use_priors)
     : ts(ts)
@@ -2565,7 +2576,7 @@ Sampler::Sampler(unsigned int rng_seed,
                             std::string(bam_fn) +
                             std::string(")");
 
-    sam_scan(intervals, bam_fn, fa_fn, fm.alnindex, task_name.c_str());
+    sam_scan(intervals, bam_fn, fa_fn, excluded_seqs, fm.alnindex, task_name.c_str());
 
     Logger::debug("weight matrix is %0.2fMB before compact",
                   (double) weight_matrix->memory_used() / 1e6);

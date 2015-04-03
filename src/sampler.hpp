@@ -46,6 +46,7 @@ class Sampler
     public:
         Sampler(unsigned int rng_seed,
                 const char* bam_fn, const char* ref_fn,
+                std::set<std::string> excluded_seqs,
                 TranscriptSet& ts, FragmentModel& fm,
                 bool run_frag_correction,
                 bool use_priors=false);

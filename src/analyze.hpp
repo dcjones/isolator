@@ -40,6 +40,7 @@ class Analyze
                 bool run_3p_correction,
                 bool run_frag_correction,
                 bool collect_qc_data,
+                std::set<std::string> excluded_seqs,
                 std::set<std::string> bias_training_seqnames,
                 double experiment_tgroup_sigma_alpha,
                 double experiment_tgroup_sigma_beta,
@@ -96,6 +97,9 @@ class Analyze
 
         // True if fragmentation bias should be corrected
         bool run_frag_correction;
+
+        // Sequences on which aligned reads should be ignored
+        std::set<std::string> excluded_seqs;
 
         // If non-empty, contains names of sequence to which bias training
         // should be restricted.

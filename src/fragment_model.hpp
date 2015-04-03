@@ -23,6 +23,7 @@ class FragmentModel
         void estimate(TranscriptSet& ts, const char* bam_fn, const char* fa_fn,
                       bool use_gc_correction, bool use_3p_correction,
                       bool use_frag_correction, bool tabulate_seqbias,
+                      std::set<std::string> excluded_seqs,
                       std::set<std::string> bias_training_seqnames);
 
         /* Fragment length probability ,cdf, and median using a fallback when no

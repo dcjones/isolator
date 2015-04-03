@@ -1206,6 +1206,7 @@ static int isolator_analyze(int argc, char* argv[])
         {"burnin",               required_argument, NULL, 'B'},
         {"min-align-pr",         required_argument, NULL, 0},
         {"tss-cluster-distance", required_argument, NULL, 0},
+        {"exclude-seqs",         required_argument, NULL, 0},
 
         {"experiment_tgroup_sigma_alpha",  required_argument, NULL, 0},
         {"experiment_tgroup_sigma_beta",   required_argument, NULL, 0},
@@ -1240,6 +1241,7 @@ static int isolator_analyze(int argc, char* argv[])
     bool use_tss = false;
     const char* qc_filename = NULL;
     std::set<std::string> bias_training_seqnames;
+    std::set<std::string> excluded_seqs;
 
     // model parameter defaults
     double experiment_tgroup_sigma_alpha = 1.0,
@@ -1322,6 +1324,12 @@ static int isolator_analyze(int argc, char* argv[])
                 }
                 else if (longopt_name == "tss-cluster-distance") {
                     tss_cluster_dist = strtod(optarg, NULL);
+                }
+                else if (longopt_name == "exclude-seqs") {
+                    const char* seq;
+                    for (seq = strtok(optarg, ","); seq; strtok(NULL, ",")) {
+                        excluded_seqs.insert(std::string(seq));
+                    }
                 }
                 else if (longopt_name == "introns") {
                     use_introns = true;
@@ -1465,6 +1473,7 @@ static int isolator_analyze(int argc, char* argv[])
     Analyze analyze(rng_seed, burnin, num_samples, ts, fa_fn,
                     run_gc_correction, run_3p_correction, run_frag_correction,
                     qc_output_file != NULL,
+                    excluded_seqs,
                     bias_training_seqnames,
                     experiment_tgroup_sigma_alpha,
                     experiment_tgroup_sigma_beta,

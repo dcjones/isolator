@@ -117,6 +117,7 @@ struct FragmentModelIntervalPtrCmp
 void sam_scan(std::vector<FragmentModelInterval*>& intervals,
               AlnIndex& alnindex,
               Queue<FragmentModelInterval*>& q,
+              std::set<std::string> excluded_seqs,
               std::vector<FragmentModelInterval*>& seqbias_intervals,
               PosTable& seqbias_sense_pos,
               PosTable& seqbias_antisense_pos,
@@ -175,6 +176,7 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
 
     size_t last_file_pos = 0, file_pos;
     size_t read_num = 0;
+    bool excluded_seq = false;
 
     /* Read the reads. */
     bam1_t* b = bam_init1();
@@ -193,7 +195,10 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
 
         if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) continue;
 
-        // TODO: if the read has a huge number of alignments, skip it.
+        if (b->core.tid != last_tid) {
+            std::string seqname(bam_f->header->target_name[b->core.tid]);
+            excluded_seq = excluded_seqs.find(seqname) != excluded_seqs.end();
+        }
 
         if (b->core.tid < last_tid ||
             (b->core.tid == last_tid && b->core.pos < last_pos)) {
@@ -201,6 +206,8 @@ void sam_scan(std::vector<FragmentModelInterval*>& intervals,
                     "The input SAM/BAM file must be sorted. "
                     "Please run: 'samtools sort'.");
         }
+
+        if (excluded_seq) continue;
 
         last_tid = b->core.tid;
         last_pos = b->core.pos;
@@ -459,6 +466,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
         bool use_3p_correction,
         bool use_frag_correction,
         bool tabulate_bias,
+        std::set<std::string> excluded_seqs,
         std::set<std::string> bias_training_seqnames)
 {
     Queue<FragmentModelInterval*> q(constants::max_estimate_queue_size);
@@ -528,7 +536,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
                             std::string(bam_fn) +
                             std::string(")");
 
-    sam_scan(intervals, alnindex, q,
+    sam_scan(intervals, alnindex, q, excluded_seqs,
              seqbias_intervals, *seqbias_sense_pos, *seqbias_antisense_pos,
              *gcbias_pos, bam_fn, task_name.c_str());
 
