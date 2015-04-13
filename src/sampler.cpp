@@ -1951,6 +1951,7 @@ class InterTranscriptSampler
             axpy(frag_probs_prop + uf0, row_u, tmixu - S.tmix[u], uf1 - uf0);
             axpy(frag_probs_prop + vf0, row_v, tmixv - S.tmix[v], vf1 - vf0);
 
+            d = 0.0;
             d += sumdiv(row_u, frag_probs_prop + uf0, uf1 - uf0);
             d -= sumdiv(row_v, frag_probs_prop + vf0, vf1 - vf0);
 
