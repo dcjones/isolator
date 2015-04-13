@@ -31,7 +31,7 @@ long AlnIndex::add(const char* key)
 {
     value_t* val = hattrie_get(t, key, strlen(key));
     if (*val == 0) {
-        *val = hattrie_size(t) + 1;
+        *val = hattrie_size(t);
     }
     return *val;
 }
