@@ -2299,8 +2299,6 @@ void Analyze::write_output(size_t sample_num)
 
     hsize_t file_start3[3] = {sample_num, 0, 0};
     hsize_t file_count3[3] = {1, 1, T};
-    H5Sselect_hyperslab_checked(h5_condition_tgroup_dataspace, H5S_SELECT_SET,
-                                file_start2, NULL, file_count2, NULL);
 
     for (size_t i = 0; i < C; ++i) {
         file_start3[1] = i;

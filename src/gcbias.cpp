@@ -122,6 +122,9 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
         task.inc();
     }
 
+    free(seq);
+    fai_destroy(ref_file);
+
 #if 0
     FILE* out = fopen("gcbias.tsv", "w");
     fprintf(out, "group\tgc\n");
