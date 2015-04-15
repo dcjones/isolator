@@ -1157,7 +1157,7 @@ float FragWeightEstimationThread::transcript_weight(
     }
 
     // 3' bias
-    {
+    if (fm.tpbias) {
         double omp = 1.0 - fm.tpbias->p;
         double c = 1.0;
         if (t.strand == strand_pos) {
@@ -1171,6 +1171,8 @@ float FragWeightEstimationThread::transcript_weight(
                 tpbias[pos] = c;
             }
         }
+    } else {
+        std::fill(tpbias, tpbias + trans_len, 1.0);
     }
 
     // fragmentation bias
