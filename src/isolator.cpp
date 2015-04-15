@@ -362,6 +362,9 @@ static int isolator_summarize(int argc, char* argv[])
         summarize.differential_feature_splicing(out_file, credible_interval,
                                                 minimum_effect_size);
     }
+    else if (strcmp(strategy, "condition-feature-splicing-samples") == 0) {
+        summarize.condition_feature_splicing_samples(out_file);
+    }
     else if (strcmp(strategy, "differential-gene-expression") == 0) {
         summarize.differential_gene_expression(out_file, credible_interval,
                                                minimum_effect_size);

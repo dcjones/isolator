@@ -68,6 +68,8 @@ class Summarize
                                            double credible_interval,
                                            double effect_size);
 
+        void condition_feature_splicing_samples(FILE* output);
+
         void condition_gene_expression(FILE* output, double credible_interval);
 
         void condition_transcript_expression(FILE* output,
