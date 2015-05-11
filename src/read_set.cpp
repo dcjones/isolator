@@ -573,8 +573,20 @@ pos_t AlignmentPair::frag_len(const Transcript& t) const
         return -1;
     }
 
-    pos_t fraglen = a2->end - a1->start + 1 - intron_len;
-    assert(fraglen > 0);
+    pos_t fraglen =
+        std::max<pos_t>(a2->end, a1->end) -
+        std::min<pos_t>(a1->start, a2->start) + 1 - intron_len;
+
+    // assert(fraglen > 0);
+    // This can be false in the following case:
+    //
+    //        ...-----exon-----]-----------intron------------
+    //  Mate 1:  MMMMMMMMMMMMMMMSSSSSSSSSSSS
+    //  Mate 2:    MMMMMMMMMMMMMSSSSSSSSSSSSSS
+    //
+    // We may want to do some work to handle that correctly, but both mates
+    // soft-clipping into an intron is probably relatively rare.
+
     return fraglen;
 }
 

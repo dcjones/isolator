@@ -151,6 +151,96 @@ class LogNormalTMuSampler : public Shredder
 };
 
 
+class GammaMeanSampler : public Shredder
+{
+    public:
+        GammaMeanSampler(double lower_bound, double upper_bound)
+            : Shredder(lower_bound, upper_bound, 1e-8)
+        {}
+
+        double sample(rng_t& rng, double mean0, double shape,
+                      const double* xs, size_t n,
+                      double prior_mean, double prior_shape)
+        {
+            this->xs = xs;
+            this->n = n;
+            this->shape = shape;
+            this->prior_mean = prior_mean;
+            this->prior_shape = prior_shape;
+
+            double ans = Shredder::sample(rng, mean0);
+
+            return ans;
+        }
+
+    private:
+        AltGammaLogPdf logpdf;
+        double shape;
+        const double* xs;
+        size_t n;
+        double prior_mean;
+        double prior_shape;
+
+    public:
+        double f(double mean, double& d)
+        {
+            d = logpdf.df_dmean(mean, shape, xs, n)
+              + logpdf.df_dx(prior_mean, prior_shape, &mean, 1);
+
+            return logpdf.f(mean, shape, xs, n) +
+                   logpdf.f(prior_mean, prior_shape, &mean, 1);
+        }
+};
+
+
+class GammaShapeSampler : public Shredder
+{
+    public:
+        GammaShapeSampler(double lower_bound, double upper_bound)
+            : Shredder(lower_bound, upper_bound, 1e-2)
+        {}
+
+        double sample(rng_t& rng, const double* means, double shape0,
+                      const double* xs, size_t n, double prior_alpha,
+                      double prior_beta)
+        {
+            this->means = means;
+            this->xs = xs;
+            this->n = n;
+            this->prior_alpha = prior_alpha;
+            this->prior_beta = prior_beta;
+
+            return Shredder::sample(rng, shape0);
+        }
+
+
+    private:
+        const double* means;
+        const double* xs;
+        size_t n;
+        double prior_alpha;
+        double prior_beta;
+
+        AltGammaLogPdf likelihood_logpdf;
+        GammaLogPdf prior_logpdf;
+
+    public:
+        double f(double shape, double& d)
+        {
+            d = 0.0;
+            double lp = 0.0;
+
+            for (size_t i = 0; i < n; ++i) {
+                lp += likelihood_logpdf.f(means[i], shape, xs, n);
+                d += likelihood_logpdf.df_dshape(means[i], shape, xs, n);
+            }
+
+            lp += prior_logpdf.f(prior_alpha, prior_beta, &shape, 1);
+            d += prior_logpdf.df_dx(prior_alpha, prior_beta, &shape, 1);
+
+            return lp;
+        }
+};
 
 
 class NormalTMuSampler : public Shredder
@@ -507,11 +597,10 @@ class ConditionTgroupMuSigmaSamplerThread
     public:
         ConditionTgroupMuSigmaSamplerThread(
                                    const matrix<double>& ts,
-                                   matrix<double>& condition_tgroup_mu,
-                                   std::vector<double>& condition_tgroup_sigma,
-                                   const std::vector<double>& experiment_tgroup_mu,
-                                   double& experiment_tgroup_sigma,
-                                   double experiment_tgroup_nu,
+                                   matrix<double>& condition_tgroup_mean,
+                                   std::vector<double>& condition_tgroup_shape,
+                                   const std::vector<double>& experiment_tgroup_mean,
+                                   double& experiment_tgroup_shape,
                                    const double& condition_tgroup_alpha,
                                    const double& condition_tgroup_beta,
                                    const std::vector<int>& condition,
@@ -520,11 +609,10 @@ class ConditionTgroupMuSigmaSamplerThread
                                    Queue<int>& notify_queue,
                                    std::vector<rng_t>& rng_pool)
             : ts(ts)
-            , condition_tgroup_mu(condition_tgroup_mu)
-            , condition_tgroup_sigma(condition_tgroup_sigma)
-            , experiment_tgroup_mu(experiment_tgroup_mu)
-            , experiment_tgroup_sigma(experiment_tgroup_sigma)
-            , experiment_tgroup_nu(experiment_tgroup_nu)
+            , condition_tgroup_mean(condition_tgroup_mean)
+            , condition_tgroup_shape(condition_tgroup_shape)
+            , experiment_tgroup_mean(experiment_tgroup_mean)
+            , experiment_tgroup_shape(experiment_tgroup_shape)
             , condition_tgroup_alpha(condition_tgroup_alpha)
             , condition_tgroup_beta(condition_tgroup_beta)
             , condition(condition)
@@ -534,10 +622,11 @@ class ConditionTgroupMuSigmaSamplerThread
             , rng_pool(rng_pool)
             , burnin_state(true)
             , thread(NULL)
-            , mu_sampler(-30, 2)
+            , mu_sampler(1e-10, 1)
+            , shape_sampler(1.0, 20.0)
         {
             K = ts.size1();
-            T = condition_tgroup_sigma.size();
+            T = condition_tgroup_shape.size();
             C = condition_samples.size();
             xs.resize(K);
             xs_mu.resize(K);
@@ -564,33 +653,31 @@ class ConditionTgroupMuSigmaSamplerThread
                             xs[l++] = ts(j, tgroup);
                         }
 
-                        condition_tgroup_mu(i, tgroup) = mu_sampler.sample(
-                                rng, condition_tgroup_mu(i, tgroup),
-                                condition_tgroup_sigma[tgroup], &xs.at(0), l,
-                                experiment_tgroup_nu, experiment_tgroup_mu[tgroup],
-                                experiment_tgroup_sigma);
-                        assert_finite(condition_tgroup_mu(i, tgroup));
+                        condition_tgroup_mean(i, tgroup) = mu_sampler.sample(
+                                rng, condition_tgroup_mean(i, tgroup),
+                                condition_tgroup_shape[tgroup], &xs.at(0), l,
+                                experiment_tgroup_mean[tgroup], experiment_tgroup_shape);
+                        assert_finite(condition_tgroup_mean(i, tgroup));
                     }
 
                     for (size_t i = 0; i < K; ++i) {
-                        xs_mu[i] = condition_tgroup_mu(condition[i], tgroup);
+                        xs_mu[i] = condition_tgroup_mean(condition[i], tgroup);
                         xs[i] = ts(i, tgroup);
                     }
 
                     // Force sigma to something rather large to avoid getting
                     // when initialized in an extremely low probability state
-                    if (burnin_state) condition_tgroup_sigma[tgroup] = 5.0;
+                    if (burnin_state) condition_tgroup_shape[tgroup] = 1.0;
                     else {
-                        //condition_tgroup_sigma[tgroup] = 1.0;
-                        condition_tgroup_sigma[tgroup] =
-                            sigma_sampler.sample(
+                        condition_tgroup_shape[tgroup] =
+                            shape_sampler.sample(
                                     rng, &xs_mu.at(0),
-                                    condition_tgroup_sigma[tgroup],
+                                    condition_tgroup_shape[tgroup],
                                     &xs.at(0), K,
                                     condition_tgroup_alpha,
                                     condition_tgroup_beta);
                     }
-                    assert_finite(condition_tgroup_sigma[tgroup]);
+                    assert_finite(condition_tgroup_shape[tgroup]);
                 }
 
                 notify_queue.push(1);
@@ -611,11 +698,10 @@ class ConditionTgroupMuSigmaSamplerThread
 
     private:
         const matrix<double>& ts;
-        matrix<double>& condition_tgroup_mu;
-        std::vector<double>& condition_tgroup_sigma;
-        const std::vector<double>& experiment_tgroup_mu;
-        double& experiment_tgroup_sigma;
-        double experiment_tgroup_nu;
+        matrix<double>& condition_tgroup_mean;
+        std::vector<double>& condition_tgroup_shape;
+        const std::vector<double>& experiment_tgroup_mean;
+        double& experiment_tgroup_shape;
         const double& condition_tgroup_alpha;
         const double& condition_tgroup_beta;
         const std::vector<int>& condition;
@@ -639,8 +725,8 @@ class ConditionTgroupMuSigmaSamplerThread
         // number of conditions
         size_t C;
 
-        LogNormalTMuSampler   mu_sampler;
-        GammaLogNormalSigmaSampler sigma_sampler;
+        GammaMeanSampler mu_sampler;
+        GammaShapeSampler shape_sampler;
 };
 
 
@@ -1138,32 +1224,30 @@ class ExperimentTgroupMuSigmaSamplerThread
 {
     public:
         ExperimentTgroupMuSigmaSamplerThread(
-                std::vector<double>& experiment_tgroup_mu,
-                double& experiment_tgroup_sigma,
-                double experiment_tgroup_nu,
-                double experiment_tgroup_mu0,
-                double experiment_tgroup_sigma0,
-                matrix<double>& condition_tgroup_mu,
+                std::vector<double>& experiment_tgroup_mean,
+                double& experiment_tgroup_shape,
+                double experiment_tgroup_mean0,
+                double experiment_tgroup_shape0,
+                matrix<double>& condition_tgroup_mean,
                 Queue<IdxRange>& tgroup_queue,
                 Queue<int>& notify_queue,
                 std::vector<rng_t>& rng_pool)
-            : experiment_tgroup_mu(experiment_tgroup_mu)
-            , experiment_tgroup_sigma(experiment_tgroup_sigma)
-            , experiment_tgroup_nu(experiment_tgroup_nu)
-            , experiment_tgroup_mu0(experiment_tgroup_mu0)
-            , experiment_tgroup_sigma0(experiment_tgroup_sigma0)
-            , condition_tgroup_mu(condition_tgroup_mu)
+            : experiment_tgroup_mean(experiment_tgroup_mean)
+            , experiment_tgroup_shape(experiment_tgroup_shape)
+            , experiment_tgroup_mean0(experiment_tgroup_mean0)
+            , experiment_tgroup_shape0(experiment_tgroup_shape0)
+            , condition_tgroup_mean(condition_tgroup_mean)
             , tgroup_queue(tgroup_queue)
             , notify_queue(notify_queue)
             , rng_pool(rng_pool)
             , thread(NULL)
-            , mu_sampler(-30, 2)
+            , mu_sampler(1e-10, 1)
         {
         }
 
         void run()
         {
-            size_t C = condition_tgroup_mu.size1();
+            size_t C = condition_tgroup_mean.size1();
             std::vector<double> data(C);
 
             while (true) {
@@ -1172,19 +1256,19 @@ class ExperimentTgroupMuSigmaSamplerThread
 
                 for (int tgroup = tgroups.first; tgroup < tgroups.second; ++tgroup) {
                     for (size_t i = 0; i < C; ++i) {
-                        data[i] = condition_tgroup_mu(i, tgroup);
+                        data[i] = condition_tgroup_mean(i, tgroup);
                     }
 
                     rng_t& rng = rng_pool[tgroup];
 
-                    experiment_tgroup_mu[tgroup] =
+                    experiment_tgroup_mean[tgroup] =
                         mu_sampler.sample(rng,
-                                          experiment_tgroup_mu[tgroup],
-                                          experiment_tgroup_nu,
-                                          experiment_tgroup_sigma,
+                                          experiment_tgroup_mean[tgroup],
+                                          experiment_tgroup_shape,
                                           &data.at(0), C,
-                                          experiment_tgroup_mu0,
-                                          experiment_tgroup_sigma0);
+                                          experiment_tgroup_mean0,
+                                          experiment_tgroup_shape0);
+                    asm("nop");
                 }
 
                 notify_queue.push(1);
@@ -1204,11 +1288,10 @@ class ExperimentTgroupMuSigmaSamplerThread
         }
 
     private:
-        std::vector<double>& experiment_tgroup_mu;
-        double& experiment_tgroup_sigma;
-        double experiment_tgroup_nu;
-        double experiment_tgroup_mu0, experiment_tgroup_sigma0;
-        matrix<double>& condition_tgroup_mu;
+        std::vector<double>& experiment_tgroup_mean;
+        double& experiment_tgroup_shape;
+        double experiment_tgroup_mean0, experiment_tgroup_shape0;
+        matrix<double>& condition_tgroup_mean;
 
         Queue<IdxRange>& tgroup_queue;
         Queue<int>& notify_queue;
@@ -1216,7 +1299,7 @@ class ExperimentTgroupMuSigmaSamplerThread
         boost::thread* thread;
         boost::random::normal_distribution<double> random_normal;
 
-        StudentTMuSampler mu_sampler;
+        GammaMeanSampler mu_sampler;
 };
 
 
@@ -1274,13 +1357,12 @@ Analyze::Analyze(unsigned int rng_seed,
     this->condition_splice_beta_a = condition_splice_beta_a;
     this->condition_splice_beta_b = condition_splice_beta_b;
 
-    experiment_tgroup_mu0    = constants::analyze_experiment_tgroup_mu0;
-    experiment_tgroup_sigma0 = constants::analyze_experiment_tgroup_sigma0;
+    experiment_tgroup_mean0  = constants::analyze_experiment_tgroup_mean0;
+    experiment_tgroup_shape0 = constants::analyze_experiment_tgroup_shape0;
 
     experiment_splice_mu0    = constants::analyze_experiment_splice_mu0;
     experiment_splice_sigma0 = constants::analyze_experiment_splice_sigma0;
 
-    experiment_tgroup_nu = constants::analyze_experiment_tgroup_nu;
     experiment_splice_nu = constants::analyze_experiment_splice_nu;
 
     tgroup_expr.resize(T);
@@ -1290,7 +1372,7 @@ Analyze::Analyze(unsigned int rng_seed,
     gamma_beta_sampler = new GammaBetaSampler();
     invgamma_beta_sampler = new BetaSampler();
     gamma_normal_sigma_sampler = new GammaNormalSigmaSampler();
-    gamma_studentt_sigma_sampler = new GammaStudentTSigmaSampler();
+    gamma_shape_sampler = new GammaShapeSampler(0.01, 20.0);
 
     tgroup_tids = transcripts.tgroup_tids();
 
@@ -1325,7 +1407,7 @@ Analyze::~Analyze()
     delete gamma_beta_sampler;
     delete invgamma_beta_sampler;
     delete gamma_normal_sigma_sampler;
-    delete gamma_studentt_sigma_sampler;
+    delete gamma_shape_sampler;
 }
 
 
@@ -1815,8 +1897,8 @@ void Analyze::qsampler_update_hyperparameters()
 
         size_t c = condition[i];
         for (size_t j = 0; j < T; ++j) {
-            qsamplers[i]->hp.tgroup_mu[j] = condition_tgroup_mu(c, j);
-            qsamplers[i]->hp.tgroup_sigma[j] = condition_tgroup_sigma[j];
+            qsamplers[i]->hp.tgroup_mean[j] = condition_tgroup_mean(c, j);
+            qsamplers[i]->hp.tgroup_shape[j] = condition_tgroup_shape[j];
         }
 
         std::fill(qsamplers[i]->hp.splice_mu.begin(),
@@ -1872,9 +1954,9 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
     ts.resize(K, T);
     xs.resize(K, N);
     scale.resize(K, 1.0);
-    condition_tgroup_mu.resize(C, T);
-    condition_tgroup_sigma.resize(T);
-    experiment_tgroup_mu.resize(T);
+    condition_tgroup_mean.resize(C, T);
+    condition_tgroup_shape.resize(T);
+    experiment_tgroup_mean.resize(T);
 
     condition_splice_mu.resize(C);
     for (size_t i = 0; i < C; ++i) {
@@ -1904,7 +1986,7 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
 
     condition_splice_sigma_work.resize(flattened_sigma_size);
     experiment_splice_sigma_work.resize(C * flattened_sigma_size);
-    experiment_tgroup_sigma_work.resize(C * T);
+    experiment_tgroup_shape_work.resize(C * T);
 
     experiment_splice_mu.resize(spliced_tgroup_indexes.size());
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
@@ -1946,8 +2028,8 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
     BOOST_FOREACH (ConditionTgroupMuSigmaSamplerThread*& thread, musigma_sampler_threads) {
         thread = new ConditionTgroupMuSigmaSamplerThread(
                 ts,
-                condition_tgroup_mu, condition_tgroup_sigma,
-                experiment_tgroup_mu, experiment_tgroup_sigma, experiment_tgroup_nu,
+                condition_tgroup_mean, condition_tgroup_shape,
+                experiment_tgroup_mean, experiment_tgroup_shape,
                 condition_tgroup_alpha, condition_tgroup_beta,
                 condition, condition_samples,
                 musigma_sampler_tick_queue,
@@ -1960,9 +2042,9 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
     BOOST_FOREACH (ExperimentTgroupMuSigmaSamplerThread*& thread,
                    experiment_musigma_sampler_threads) {
         thread = new ExperimentTgroupMuSigmaSamplerThread(
-            experiment_tgroup_mu, experiment_tgroup_sigma, experiment_tgroup_nu,
-            experiment_tgroup_mu0, experiment_tgroup_sigma0,
-            condition_tgroup_mu, experiment_musigma_sampler_tick_queue,
+            experiment_tgroup_mean, experiment_tgroup_shape,
+            experiment_tgroup_mean0, experiment_tgroup_shape0,
+            condition_tgroup_mean, experiment_musigma_sampler_tick_queue,
             experiment_musigma_sampler_notify_queue, tgroup_rng_pool);
 
         thread->start();
@@ -2155,13 +2237,13 @@ void Analyze::warmup()
                   experiment_splice_mu[i].end(), 0.5);
     }
 
-    // ml estimates for experiment_tgroup_mu
+    // ml estimates for experiment_tgroup_mean
     for (size_t j = 0; j < T; ++j) {
         double mu = 0.0;
         for (size_t i = 0; i < C; ++i) {
-            mu += condition_tgroup_mu(i, j);
+            mu += condition_tgroup_mean(i, j);
         }
-        experiment_tgroup_mu[j] = mu / C;
+        experiment_tgroup_mean[j] = mu / C;
     }
 }
 
@@ -2185,7 +2267,7 @@ void Analyze::sample(bool optimize_state)
         gamma_beta_sampler->sample(
                 rng, condition_tgroup_beta, condition_tgroup_alpha,
                 condition_tgroup_beta_a, condition_tgroup_beta_b,
-                &condition_tgroup_sigma.at(0), T);
+                &condition_tgroup_shape.at(0), T);
     assert_finite(condition_tgroup_beta);
 
     for (size_t i = 0, j = 0; j < condition_splice_sigma.size(); ++j) {
@@ -2217,18 +2299,22 @@ void Analyze::sample(bool optimize_state)
             experiment_splice_sigma_work.size(),
             experiment_splice_sigma_alpha, experiment_splice_sigma_beta);
 
-    for (size_t i = 0, c = 0; c < C; ++c) {
-        for (size_t j = 0; j < T; ++j) {
-            experiment_tgroup_sigma_work[i++] =
-                condition_tgroup_mu(c, j) - experiment_tgroup_mu[j];
-        }
-    }
+    // TODO: sampling experiment_tgroup_shape is currently to slow,
+    // and not important enough to bother with.
 
-    experiment_tgroup_sigma = gamma_studentt_sigma_sampler->sample(
-            rng, experiment_tgroup_sigma, experiment_tgroup_nu,
-            experiment_tgroup_sigma_work.empty() ? NULL : &experiment_tgroup_sigma_work.at(0),
-            experiment_tgroup_sigma_work.size(), experiment_tgroup_sigma_alpha,
-            experiment_tgroup_sigma_beta);
+    // for (size_t i = 0, c = 0; c < C; ++c) {
+    //     for (size_t j = 0; j < T; ++j) {
+    //         experiment_tgroup_shape_work[i++] = experiment_tgroup_mean[j];
+    //     }
+    // }
+
+    // experiment_tgroup_shape = gamma_shape_sampler->sample(
+    //     rng, experiment_tgroup_shape_work.empty() ? NULL : &experiment_tgroup_shape_work.at(0),
+    //     experiment_tgroup_shape, &condition_tgroup_mean.data()[0],
+    //     condition_tgroup_mean.data().size(),
+    //     experiment_tgroup_sigma_alpha, experiment_tgroup_sigma_beta);
+
+    experiment_tgroup_shape = constants::analyze_experiment_tgroup_shape;
 
     for (size_t i = 0; i < K; ++i) {
         qsampler_notify_queue.pop();
@@ -2291,7 +2377,7 @@ void Analyze::write_output(size_t sample_num)
 
     H5Sselect_hyperslab_checked(h5_experiment_tgroup_dataspace, H5S_SELECT_SET,
                                 file_start2, NULL, file_count2, NULL);
-    std::copy(experiment_tgroup_mu.begin(), experiment_tgroup_mu.end(),
+    std::copy(experiment_tgroup_mean.begin(), experiment_tgroup_mean.end(),
               tgroup_row_data.begin());
     H5Dwrite_checked(h5_experiment_mean_dataset, H5T_NATIVE_FLOAT,
                               h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
@@ -2305,7 +2391,7 @@ void Analyze::write_output(size_t sample_num)
         H5Sselect_hyperslab_checked(h5_condition_tgroup_dataspace, H5S_SELECT_SET,
                                     file_start3, NULL, file_count3, NULL);
 
-        matrix_row<matrix<double > > mu_row(condition_tgroup_mu, i);
+        matrix_row<matrix<double > > mu_row(condition_tgroup_mean, i);
         std::copy(mu_row.begin(), mu_row.end(), tgroup_row_data.begin());
         H5Dwrite_checked(h5_condition_mean_dataset, H5T_NATIVE_FLOAT,
                                   h5_tgroup_row_mem_dataspace, h5_condition_tgroup_dataspace,
@@ -2431,12 +2517,12 @@ void Analyze::compute_ts_scaling()
 
 void Analyze::choose_initial_values()
 {
-    std::fill(experiment_tgroup_mu.begin(), experiment_tgroup_mu.end(), -20);
-    std::fill(condition_tgroup_mu.data().begin(), condition_tgroup_mu.data().end(), -20);
-    std::fill(condition_tgroup_sigma.begin(), condition_tgroup_sigma.end(), 1.0);
+    std::fill(experiment_tgroup_mean.begin(), experiment_tgroup_mean.end(), -20);
+    std::fill(condition_tgroup_mean.data().begin(), condition_tgroup_mean.data().end(), 1e-6);
+    std::fill(condition_tgroup_shape.begin(), condition_tgroup_shape.end(), 1.0);
 
     experiment_splice_sigma = 0.5;
-    experiment_tgroup_sigma = 0.5;
+    experiment_tgroup_shape = 2.0;
 
     condition_tgroup_beta = 1.0;
     condition_splice_beta = 1.0;

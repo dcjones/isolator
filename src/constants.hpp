@@ -120,9 +120,6 @@ namespace constants
      * minimum transcript weight that is applied to avoid these situations. */
     extern float min_transcript_weight;
 
-    /* Symmetric-dirchlet prior precision for transcript mixtures. */
-    extern float tmix_prior_prec;
-
     /* Worker threads for the sampler process blocks of this many components and
      * multireads, respectively, at a time. */
     extern unsigned int sampler_component_block_size;
@@ -144,9 +141,10 @@ namespace constants
      * scale changes are meaningless. */
     extern float min_expr;
 
-    /* Hyperparameters for the normal prior on experiment_tgroup_mu values. */
-    extern double analyze_experiment_tgroup_mu0;
-    extern double analyze_experiment_tgroup_sigma0;
+    /* Hyperparameters for the gamma prior on experiment_tgroup_mu values. */
+    extern double analyze_experiment_tgroup_mean0;
+    extern double analyze_experiment_tgroup_shape0;
+    extern double analyze_experiment_tgroup_shape;
 
     /* Hyperparameters for the normal prior on experiment_splice_mu values. */
     extern double analyze_experiment_splice_mu0;

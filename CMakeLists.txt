@@ -29,8 +29,8 @@ if(BUILD_STATIC_EXECUTABLES)
     set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
 endif(BUILD_STATIC_EXECUTABLES)
 
-set(CMAKE_C_FLAGS "-std=gnu99 -g -O3 -Wall -Wextra -DNDEBUG")
-set(CMAKE_CXX_FLAGS "-std=gnu++98 -g -O3 -Wall -Wextra -DNDEBUG")
+set(CMAKE_C_FLAGS_RELEASE "-std=gnu99 -g -O3 -Wall -Wextra -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE "-std=gnu++98 -g -O3 -Wall -Wextra -DNDEBUG")
 set(CMAKE_C_FLAGS_DEBUG "-std=gnu99 -g -O0 -Wall -Wextra")
 set(CMAKE_CXX_FLAGS_DEBUG "-std=gnu++98 -g -O0 -Wall -Wextra")
 

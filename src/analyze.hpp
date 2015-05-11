@@ -25,6 +25,7 @@ class GammaNormalSigmaSampler;
 class GammaStudentTSigmaSampler;
 class ConditionSpliceMuSigmaEtaSamplerThread;
 class ExperimentSpliceMuSigmaSamplerThread;
+class GammaShapeSampler;
 typedef std::pair<int, int> IdxRange;
 
 
@@ -127,7 +128,8 @@ class Analyze
         GammaBetaSampler* gamma_beta_sampler;
         BetaSampler* invgamma_beta_sampler;
         GammaNormalSigmaSampler* gamma_normal_sigma_sampler;
-        GammaStudentTSigmaSampler* gamma_studentt_sigma_sampler;
+        GammaShapeSampler* gamma_shape_sampler;
+
         std::vector<ConditionSpliceMuSigmaEtaSamplerThread*> splice_mu_sigma_sampler_threads;
         std::vector<ExperimentSpliceMuSigmaSamplerThread*>
             experiment_splice_mu_sigma_sampler_threads;
@@ -164,11 +166,11 @@ class Analyze
         // tgroup. Indexed by replicate -> tid.
         boost::numeric::ublas::matrix<double> xs;
 
-        // tgroup position parameter, indexed by condition -> tgroup
-        boost::numeric::ublas::matrix<double> condition_tgroup_mu;
+        // tgroup mean parameter, indexed by condition -> tgroup
+        boost::numeric::ublas::matrix<double> condition_tgroup_mean;
 
-        // tgroup scale parameter, indexed by tgroup
-        std::vector<double> condition_tgroup_sigma;
+        // tgroup shape parameter, indexed by tgroup
+        std::vector<double> condition_tgroup_shape;
 
         // parameters of the inverse gamma prior on condition_tgroup_sigma
         double condition_tgroup_alpha, condition_tgroup_beta;
@@ -177,20 +179,17 @@ class Analyze
         double condition_splice_alpha, condition_splice_beta;
 
         // experiment-wise tgroup position paremeter, indexed by tgroup
-        std::vector<double> experiment_tgroup_mu;
+        std::vector<double> experiment_tgroup_mean;
 
         // experiment-wide tgroup scale parameter
-        double experiment_tgroup_sigma;
+        double experiment_tgroup_shape;
 
         // gamma hypeparameters for prior on experiment_tgroup_sigma
         double experiment_tgroup_sigma_alpha;
         double experiment_tgroup_sigma_beta;
 
-        // degrees of freedom parameter for experiment tgroup mu prior
-        double experiment_tgroup_nu;
-
         // parameters for normal prior over experiment_tgroup_mu
-        double experiment_tgroup_mu0, experiment_tgroup_sigma0;
+        double experiment_tgroup_mean0, experiment_tgroup_shape0;
 
         // temporary space used by compute_xs
         std::vector<double> tgroup_expr;
@@ -228,7 +227,7 @@ class Analyze
         // params.
         std::vector<double> condition_splice_sigma_work;
         std::vector<double> experiment_splice_sigma_work;
-        std::vector<double> experiment_tgroup_sigma_work;
+        std::vector<double> experiment_tgroup_shape_work;
 
         // paramaters for the inverse gamma priors on splice_alpha and
         // splice_beta

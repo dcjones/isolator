@@ -42,12 +42,9 @@ static double sq(double x)
 }
 
 
-static double gamma_lnpdf(double alpha, double beta, double x)
+static double poisson_lnpdf(double lambda, unsigned int k)
 {
-    return alpha * fastlog(beta) -
-           lgamma(alpha) +
-           (alpha - 1) * fastlog(x) -
-           beta * x;
+    return k * fastlog(lambda) - lgamma(k + 1) - lambda;
 }
 
 
@@ -1592,26 +1589,45 @@ class InterTgroupSampler : public Shredder
             // prior probability
             double prior_lp = 0.0;
             if (S.use_priors) {
-                double xu = S.cmix[c] * tgroupmix_u;
-                double logxu = fastlog(xu) - fastlog(S.tgroup_scaling[u]);
-                double mu_u = S.hp.tgroup_mu[u];
-                prior_lp += tgroup_prior.f(mu_u, S.hp.tgroup_sigma[u], logxu);
-                prior_lp -= fastlog(x); // jacobian
+                double xu = S.cmix[c] * tgroupmix_u / S.tgroup_scaling[u];
+                prior_lp += tgroup_prior.f(S.hp.tgroup_mean[u],
+                                           S.hp.tgroup_shape[u], &xu, 1);
 
-                double xv = S.cmix[c] * tgroupmix_v;
-                double logxv = fastlog(xv) - fastlog(S.tgroup_scaling[v]);
-                double mu_v = S.hp.tgroup_mu[v];
-                prior_lp += tgroup_prior.f(mu_v, S.hp.tgroup_sigma[v], logxv);
-                prior_lp -= fastlog(1 - x); // jacobian
+                double xv = S.cmix[c] * tgroupmix_v / S.tgroup_scaling[v];
+                prior_lp += tgroup_prior.f(S.hp.tgroup_mean[v],
+                                           S.hp.tgroup_shape[v], &xv, 1);
 
-                // derivative of normal log-pdf
-                d += (mu_u - logxu) / (sq(S.hp.tgroup_sigma[u]) * x);
-                // XXX: Should this be +=, that makes more intuitive sense
-                d -= (mu_v - logxv) / (sq(S.hp.tgroup_sigma[v]) * (1 - x));
+                d += (S.cmix[c] * tgroupmix_uv / S.tgroup_scaling[u]) *
+                     tgroup_prior.df_dx(S.hp.tgroup_mean[u],
+                                        S.hp.tgroup_shape[u],
+                                        &xv, 1);
 
-                // derivative of jacobian
-                d -= 1/x;
-                d += 1/(1-x);
+                d += -(S.cmix[c] * tgroupmix_uv / S.tgroup_scaling[v]) *
+                     tgroup_prior.df_dx(S.hp.tgroup_mean[u],
+                                        S.hp.tgroup_shape[u],
+                                        &xv, 1);
+
+                //////////////////////////////////
+                // double xu = S.cmix[c] * tgroupmix_u;
+                // double logxu = fastlog(xu) - fastlog(S.tgroup_scaling[u]);
+                // double mu_u = S.hp.tgroup_mu[u];
+                // prior_lp += tgroup_prior.f(mu_u, S.hp.tgroup_sigma[u], logxu);
+                // prior_lp -= fastlog(x); // jacobian
+
+                // double xv = S.cmix[c] * tgroupmix_v;
+                // double logxv = fastlog(xv) - fastlog(S.tgroup_scaling[v]);
+                // double mu_v = S.hp.tgroup_mu[v];
+                // prior_lp += tgroup_prior.f(mu_v, S.hp.tgroup_sigma[v], logxv);
+                // prior_lp -= fastlog(1 - x); // jacobian
+
+                // // derivative of normal log-pdf
+                // d += (mu_u - logxu) / (sq(S.hp.tgroup_sigma[u]) * x);
+                // // XXX: Should this be +=, that makes more intuitive sense
+                // d -= (mu_v - logxv) / (sq(S.hp.tgroup_sigma[v]) * (1 - x));
+
+                // // derivative of jacobian
+                // d -= 1/x;
+                // d += 1/(1-x);
             }
 
             // optimization can fail if d is huge
@@ -1622,7 +1638,7 @@ class InterTgroupSampler : public Shredder
         }
 
     private:
-        NormalLogPdf tgroup_prior;
+        AltGammaLogPdf tgroup_prior;
         float *row_u, *row_v;
         unsigned int *idxs, *idxs_work;
         unsigned int idxlen;
@@ -2165,7 +2181,7 @@ class AbundanceSamplerThread
                                              double wtgroupmix_u,
                                              double wtgroupmix_v);
 
-        LogNormalLogPdf cmix_prior;
+        AltGammaLogPdf tgroup_prior;
 
         InterTgroupSampler inter_tgroup_sampler;
         InterTranscriptSampler inter_transcript_sampler;
@@ -2204,7 +2220,7 @@ float AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 {
     float component_epsilon = S.component_num_transcripts[c] * constants::zero_eps;
 
-    const float eps = 1e-4;
+    const float eps = 1e-8;
     double x, y;
     do {
         x = std::max<float>(component_epsilon, x0 + step);
@@ -2244,19 +2260,17 @@ float AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
 
 double AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
 {
-    double lp = gamma_lnpdf((S.component_frag[c + 1] - S.component_frag[c]) +
-                           constants::tmix_prior_prec,
-                           1.0, cmixc);
+    double lp = poisson_lnpdf(cmixc, S.component_frag[c + 1] - S.component_frag[c]);
 
     if (S.use_priors) {
         // prior
         BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
             double x = S.tgroupmix[tgroup] * cmixc;
             double scaledx = x / S.tgroup_scaling[tgroup];
-            double mu = S.hp.tgroup_mu[tgroup];
-            double sigma = S.hp.tgroup_sigma[tgroup];
 
-            double prior_lp = cmix_prior.f(mu, sigma, &scaledx, 1);
+            double prior_lp = tgroup_prior.f(S.hp.tgroup_mean[tgroup],
+                                           S.hp.tgroup_shape[tgroup],
+                                           &scaledx, 1);
             lp += prior_lp;
 
             if (!boost::math::isfinite(lp)) {
@@ -2324,7 +2338,6 @@ void AbundanceSamplerThread::sample_intra_component(unsigned int c)
         }
     }
 }
-
 
 
 void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u, unsigned int v)
@@ -2437,7 +2450,7 @@ void AbundanceSamplerThread::sample_inter_transcript(unsigned int u, unsigned in
     assert(c == S.transcript_component[v]);
 
     unsigned int tgroup = S.transcript_tgroup[u];
-    assert(tgroup = S.transcript_tgroup[v]);
+    assert(tgroup == S.transcript_tgroup[v]);
 
     asxpy(S.frag_probs[c],
           S.weight_matrix->rows[u],
@@ -2522,8 +2535,7 @@ void AbundanceSamplerThread::optimize_component(unsigned int c)
     }
 
     this->c = c;
-    double x0 = (S.component_frag[c + 1] - S.component_frag[c]) +
-                constants::tmix_prior_prec;
+    double x0 = 1.0 + (S.component_frag[c + 1] - S.component_frag[c]);
     double x = x0;
 
     double maxf;
@@ -2742,8 +2754,8 @@ Sampler::Sampler(unsigned int rng_seed,
 
     // initialize hyperparameters
     hp.scale = 1.0;
-    hp.tgroup_mu.resize(ts.num_tgroups(), 0.0);
-    hp.tgroup_sigma.resize(ts.num_tgroups(), 0.0);
+    hp.tgroup_mean.resize(ts.num_tgroups(), 0.0);
+    hp.tgroup_shape.resize(ts.num_tgroups(), 0.0);
     hp.splice_mu.resize(ts.size());
     hp.splice_sigma.resize(ts.size());
     std::fill(hp.splice_mu.begin(), hp.splice_mu.end(), 0.5);
@@ -2827,9 +2839,7 @@ void Sampler::start()
 
     /* Initial cmix */
     for (unsigned int c = 0; c < num_components; ++c) {
-        cmix[c] =
-            constants::tmix_prior_prec +
-            (component_frag[c + 1] - component_frag[c]);
+        cmix[c] = 1.0 + (component_frag[c + 1] - component_frag[c]);
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {

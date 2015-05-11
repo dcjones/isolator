@@ -84,11 +84,11 @@ class Sampler
             // Normalization factor accounting for sequencing depth
             double scale;
 
-            // Location parameter for tgroup abundance prior
-            std::vector<double> tgroup_mu;
+            // Mean parameter for tgroup abundance prior
+            std::vector<double> tgroup_mean;
 
-            // Scale parameter for the tgroup abundance prior
-            std::vector<double> tgroup_sigma;
+            // Shape parameter for tgroup abundance prior
+            std::vector<double> tgroup_shape;
 
             // Logisitic-normal mean
             std::vector<double> splice_mu;

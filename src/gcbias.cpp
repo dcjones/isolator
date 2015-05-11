@@ -84,7 +84,9 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
 
         if (seq == NULL || (pos_t) tbseq.size() < median_frag_len) continue;
 
-        if (i->count > 16 || i->count < 3) continue;
+        // fragments with many copies tend to have too much weight when training
+        // leading to somewhat less than stable results.
+        if (i->count > 4) continue;
 
         if (i->end >= (pos_t) tbseq.size()) {
             fprintf(stderr, "here!\n");

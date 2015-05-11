@@ -92,8 +92,6 @@ double Shredder::sample(rng_t& rng, double x0)
         else             x_min = x;
     }
 
-    assert(lower_bound <= x && x <= upper_bound);
-
     return x;
 }
 
@@ -418,7 +416,54 @@ double GammaLogPdf::df_dbeta(double alpha, double beta, const double* xs, size_t
         part += xs[i];
     }
 
-    return n * (alpha / beta) - part;
+    return (double) n * (alpha / beta) - part;
+}
+
+
+double AltGammaLogPdf::f(double mean, double shape, const double* xs, size_t n)
+{
+    double scale =  mean / shape;
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += (shape - 1.0) * fastlog(xs[i]) - xs[i] / scale;
+    }
+
+    return -(double) n * (lgamma(shape) + shape * log(scale)) + part;
+}
+
+
+double AltGammaLogPdf::df_dx(double mean, double shape, const double* xs, size_t n)
+{
+    double scale = mean / shape;
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += (shape - 1.0) / xs[i];
+    }
+
+    return part - (double) n / scale;
+}
+
+
+double AltGammaLogPdf::df_dmean(double mean, double shape, const double* xs, size_t n)
+{
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += xs[i];
+    }
+    part *= shape / sq(mean);
+    return part - (double) n * shape / mean;
+}
+
+
+double AltGammaLogPdf::df_dshape(double mean, double shape, const double* xs, size_t n)
+{
+    double scale = mean / shape;
+    double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += fastlog(xs[i]) - xs[i] / mean;
+    }
+
+    return (double) n * (-boost::math::digamma(shape) + fastlog(scale) * (mean/sq(shape))) + part;
 }
 
 

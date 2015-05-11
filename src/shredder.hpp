@@ -95,6 +95,17 @@ class GammaLogPdf
 };
 
 
+// Gamma parameterized by mean and shape
+class AltGammaLogPdf
+{
+    public:
+        double f(double mean, double shape, const double* xs, size_t n);
+        double df_dx(double mean, double shape, const double* xs, size_t n);
+        double df_dmean(double mean, double shape, const double* xs, size_t n);
+        double df_dshape(double shape, double mean, const double* xs, size_t n);
+};
+
+
 class InvGammaLogPdf
 {
     public:

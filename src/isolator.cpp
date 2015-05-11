@@ -997,7 +997,7 @@ void compare_seqbias(std::vector<FragmentModel*>& fms,
 
             for (size_t j = 0; j < fms.size(); ++j) {
                 for (size_t k = 0; k < fms.size(); ++k) {
-                    mean_abs_ratio(j, k) += abs(log2(bias[j]) - log2(bias[k]));
+                    mean_abs_ratio(j, k) += fabs(log2(bias[j]) - log2(bias[k]));
                 }
             }
 
@@ -1009,7 +1009,7 @@ void compare_seqbias(std::vector<FragmentModel*>& fms,
 
             for (size_t j = 0; j < fms.size(); ++j) {
                 for (size_t k = 0; k < fms.size(); ++k) {
-                    mean_abs_ratio(j, k) += abs(log2(bias[j]) - log2(bias[k]));
+                    mean_abs_ratio(j, k) += fabs(log2(bias[j]) - log2(bias[k]));
                 }
             }
         }
