@@ -88,12 +88,6 @@ class Summarize
         std::vector<std::vector<float> > transcript_condition_splicing(const char* transcript_id);
 
 
-        // TODO: these are not exposed. Either get rid of them, or make them
-        // accessable.
-        void median_condition_tgroup_expression(FILE* output);
-
-        void median_experiment_tgroup_sd(FILE* output);
-
         void tgroup_fold_change(FILE* output,
                                 unsigned int condition_a,
                                 unsigned int condition_b);

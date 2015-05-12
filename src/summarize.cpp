@@ -157,176 +157,6 @@ Summarize::Summarize(const char* filename)
 }
 
 
-void Summarize::median_condition_tgroup_expression(FILE* output)
-{
-    typedef std::vector<std::set<std::string> > string_set_vector;
-
-    string_set_vector tgroup_gene_ids(T);
-    string_set_vector tgroup_transcript_ids(T);
-
-    for (size_t i = 0; i < N; ++i) {
-        tgroup_gene_ids[tgroup[i]].insert(gene_ids[i]);
-        tgroup_transcript_ids[tgroup[i]].insert(transcript_ids[i]);
-    }
-
-    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/tgroup_mean", H5P_DEFAULT);
-
-    hid_t dataspace = H5Dget_space(dataset);
-    hsize_t dims[3]; // dims are: num_samples, C, T
-    H5Sget_simple_extent_dims(dataspace, dims, NULL);
-    size_t C = dims[1];
-    size_t num_samples = dims[0];
-
-    hsize_t mem_dataspace_dims[1] = { T };
-    hsize_t mem_dataspace_start[1] = { 0 };
-    hid_t mem_dataspace = H5Screate_simple(1, mem_dataspace_dims, NULL);
-    H5Sselect_hyperslab(mem_dataspace, H5S_SELECT_SET, mem_dataspace_start,
-                        NULL, mem_dataspace_dims, NULL);
-
-    // temporary vector for computing medians
-    std::vector<float> median_work(num_samples);
-
-    hsize_t file_dataspace_dims[3] = {1, 1, T};
-    hsize_t file_dataspace_start[3] = {0, 0, 0};
-
-    // tgroup_mean posterior medians indexed by tgroup and condition
-    matrix<float> tgroup_medians(T, C);
-
-    // all tgroup_mean data indexed by sample_num and tgroup
-    std::vector<std::vector<float> > condition_data(num_samples);
-    for (size_t i = 0; i < num_samples; ++i) {
-        condition_data[i].resize(T);
-    }
-
-    for (size_t i = 0; i < C; ++i) {
-        for (size_t j = 0; j < num_samples; ++j) {
-            file_dataspace_start[0] = j;
-            file_dataspace_start[1] = i;
-            H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
-                                file_dataspace_start, NULL,
-                                file_dataspace_dims, NULL);
-
-            H5Dread_checked(dataset, H5T_NATIVE_FLOAT,
-                            mem_dataspace, dataspace, H5P_DEFAULT,
-                            &condition_data[j].at(0));
-        }
-
-        for (size_t j = 0; j < T; ++j) {
-            for (size_t k = 0; k < num_samples; ++k) {
-                median_work[k] = condition_data[k][j];
-            }
-            std::sort(median_work.begin(), median_work.end());
-            tgroup_medians(j, i) = median_work[median_work.size() / 2];
-        }
-    }
-
-    H5Sclose(mem_dataspace);
-    H5Sclose(dataspace);
-    H5Dclose(dataset);
-
-    fprintf(output, "transcript_ids\tgene_ids");
-    for (unsigned int i = 0; i < C; ++i) {
-        fprintf(output, "\tcondition%u_mean_expr", i + 1);
-    }
-    fputc('\n', output);
-
-    for (size_t i = 0; i < T; ++i) {
-        bool firstid = true;
-        BOOST_FOREACH (const std::string& transcript_id, tgroup_transcript_ids[i]) {
-            fprintf(output, firstid ? "%s" : ",%s", transcript_id.c_str());
-            firstid = false;
-        }
-        fputc('\t', output);
-
-        firstid = true;
-        BOOST_FOREACH (const std::string& gene_id, tgroup_gene_ids[i]) {
-            fprintf(output, firstid ? "%s" : ",%s", gene_id.c_str());
-            firstid = false;
-        }
-
-        for (size_t j = 0; j < C; ++j) {
-            fprintf(output, "\t%f", tgroup_medians(i, j));
-        }
-        fputc('\n', output);
-    }
-}
-
-
-void Summarize::median_experiment_tgroup_sd(FILE* output)
-{
-    typedef std::vector<std::set<std::string> > string_set_vector;
-
-    string_set_vector tgroup_gene_ids(T);
-    string_set_vector tgroup_transcript_ids(T);
-
-    for (size_t i = 0; i < N; ++i) {
-        tgroup_gene_ids[tgroup[i]].insert(gene_ids[i]);
-        tgroup_transcript_ids[tgroup[i]].insert(transcript_ids[i]);
-    }
-
-    hid_t dataset = H5Dopen2_checked(h5_file, "/experiment/tgroup_sd", H5P_DEFAULT);
-
-    hid_t dataspace = H5Dget_space(dataset);
-    hsize_t dims[2]; // dims are: num_samples, T
-    H5Sget_simple_extent_dims(dataspace, dims, NULL);
-    size_t num_samples = dims[0];
-    T = dims[1];
-
-    hsize_t mem_dataspace_dims[1] = {T};
-    hsize_t mem_dataspace_start[1] = {0};
-    hid_t mem_dataspace = H5Screate_simple(1, mem_dataspace_dims, NULL);
-    H5Sselect_hyperslab(mem_dataspace, H5S_SELECT_SET, mem_dataspace_start,
-                        NULL, mem_dataspace_dims, NULL);
-
-    std::vector<std::vector<float> > data(num_samples);
-    for (size_t i = 0; i < num_samples; ++i) {
-        data[i].resize(T);
-    }
-
-    hsize_t file_dataspace_start[2] = {0, 0};
-    hsize_t file_dataspace_dims[2] = {1, T};
-
-    for (size_t i = 0; i < num_samples; ++i) {
-        file_dataspace_start[0] = i;
-        H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
-                            file_dataspace_start, NULL,
-                            file_dataspace_dims, NULL);
-
-        H5Dread_checked(dataset, H5T_NATIVE_FLOAT, mem_dataspace,
-                        dataspace, H5P_DEFAULT, &data[i].at(0));
-    }
-
-    H5Sclose(mem_dataspace);
-    H5Sclose(dataspace);
-    H5Dclose(dataset);
-
-    // temporary vector for computing medians
-    std::vector<float> median_work(num_samples);
-
-    fprintf(output, "transcript_ids\tgene_ids\tsd\n");
-    for (size_t i = 0; i < T; ++i) {
-        bool firstid = true;
-        BOOST_FOREACH (const std::string& transcript_id, tgroup_transcript_ids[i]) {
-            fprintf(output, firstid ? "%s" : ",%s", transcript_id.c_str());
-            firstid = false;
-        }
-        fputc('\t', output);
-
-        firstid = true;
-        BOOST_FOREACH (const std::string& gene_id, tgroup_gene_ids[i]) {
-            fprintf(output, firstid ? "%s" : ",%s", gene_id.c_str());
-            firstid = false;
-        }
-
-        for (size_t j = 0; j < num_samples; ++j) {
-            median_work[j] = data[j][i];
-        }
-        std::sort(median_work.begin(), median_work.end());
-        fprintf(output, "\t%f\n", median_work[median_work.size() / 2]);
-    }
-}
-
-
 void Summarize::point_ci_transcript_expression(
         matrix<float>* point, matrix<float>* lower, matrix<float>* upper,
         double interval, bool unnormalized, bool splicing_rate)
@@ -402,19 +232,19 @@ void Summarize::point_ci_transcript_expression(
         for (size_t j = 0; j < N; ++j) {
             matrix_column<matrix<float> > col(Qi, j);
 
-            // TODO: maximum posterior. there should be a switch to use this
+            // maximum posterior
             //(*point)(i, j) = col[0];
 
             // posterior median
             std::sort(col.begin(), col.end());
-            (*point)(i, j) = col[col.size() / 2];
+            // (*point)(i, j) = col[col.size() / 2];
 
             // posterior mean
-            //double accum = 0.0;
-            //BOOST_FOREACH (float val, col) {
-                //accum += val;
-            //}
-            //(*point)(i, j) = accum / col.size();
+            double accum = 0.0;
+            BOOST_FOREACH (float val, col) {
+                accum += val;
+            }
+            (*point)(i, j) = accum / col.size();
 
             if (lower) {
                 (*lower)(i, j) = col[lround((col.size() - 1) * lower_quantile)];
@@ -493,9 +323,16 @@ void Summarize::point_ci_gene_expression(
                 work[k] = std::max<float>(constants::min_expr, work[k]);
             }
 
+            // posterior median
             std::sort(work.begin(), work.end());
+            // (*point)(i, j) = work[work.size() / 2];
 
-            (*point)(i, j) = work[work.size() / 2];
+            // posterior mean
+            double accum = 0.0;
+            for (size_t k = 0; k < num_samples; ++k) {
+                accum += work[k];
+            }
+            (*point)(i, j) = accum / num_samples;
 
             if (lower) {
                 (*lower)(i, j) = work[lround((num_samples - 1) * lower_quantile)];
@@ -1987,7 +1824,18 @@ void Summarize::condition_transcript_expression(FILE* output,
                 work[k] = expr_data[k][j][i];
             }
             std::sort(work.begin(), work.end());
-            fprintf(output, "\t%e", 1e6 * work[num_samples / 2]);
+
+            // posterior median
+            // fprintf(output, "\t%e", 1e6 * work[num_samples / 2]);
+
+            double accum = 0.0;
+            for (unsigned int k = 0; k < num_samples; ++k) {
+                accum += work[k];
+            }
+
+            // posterior mean
+            fprintf(output, "\t%e", 1e6 * accum / num_samples);
+
             if (print_credible_interval) {
                 fprintf(output, "\t%e\t%e",
                         1e6 * work[lround((num_samples - 1) * lower_quantile)],
@@ -2095,8 +1943,19 @@ void Summarize::condition_gene_expression(FILE* output,
             for (unsigned int k = 0; k < num_samples; ++k) {
                 work[k] = expr_data[k][j][i];
             }
+
             std::sort(work.begin(), work.end());
-            fprintf(output, "\t%e", 1e6 * work[num_samples / 2]);
+
+            // posterior median
+            // fprintf(output, "\t%e", 1e6 * work[num_samples / 2]);
+
+            // posterior mean
+            double accum = 0.0;
+            for (unsigned int k = 0; k < num_samples; ++k) {
+                accum += work[k];
+            }
+            fprintf(output, "\t%e", 1e6 * accum / num_samples);
+
             if (print_credible_interval) {
                 fprintf(output, "\t%e\t%e",
                         1e6 * work[lround((num_samples - 1) * lower_quantile)],
