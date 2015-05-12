@@ -242,7 +242,7 @@ static int isolator_summarize(int argc, char* argv[])
         {"out",          required_argument, NULL, 'o'},
         {"list",         no_argument,       NULL, 'l'},
         {"strategy",     required_argument, NULL, 's'},
-        {"unnormalized", no_argument,       NULL, 'u'},
+        {"normalize",    no_argument,       NULL, 'n'},
         {"credible",     required_argument, NULL, 'c'},
         {"effect-size",  required_argument, NULL, 'e'},
         {0, 0, 0, 0}
@@ -254,7 +254,7 @@ static int isolator_summarize(int argc, char* argv[])
     int opt_idx;
     double credible_interval = NAN;
     double minimum_effect_size = NAN;
-    bool unnormalized = false;
+    bool unnormalized = true;
 
     while (true) {
         opt = getopt_long(argc, argv, "ho:s:l", long_options, &opt_idx);
@@ -274,8 +274,8 @@ static int isolator_summarize(int argc, char* argv[])
                 print_summarize_strategies(stdout);
                 return 0;
 
-            case 'u':
-                unnormalized = true;
+            case 'n':
+                unnormalized = false;
                 break;
 
             case 'c':
@@ -1167,7 +1167,7 @@ static void print_analyze_help(FILE* fout)
         "    --bias-training-seqs=FILE   a filename containing names (one per line) of sequences\n"
         "                                to use to train sequence and GC bias models. By default\n"
         "                                all sequences are used.\n"
-        "-N, --num-samples         generate this many samples (default: 250)\n"
+        "-N, --num-samples         generate this many samples (default: 350)\n"
         "-B, --burnin              warmup for this many samples before collecting data (default: 10)\n\n"
         "    --min-align-pr CUTOFF supress alignments with estimated probabilities below\n"
         "                          this number (default: 0.1)\n"
@@ -1229,7 +1229,7 @@ static int isolator_analyze(int argc, char* argv[])
 
     Logger::level logger_level = Logger::INFO;
     unsigned int burnin = 50;
-    unsigned int num_samples = 250;
+    unsigned int num_samples = 350;
     pos_t tss_cluster_dist = 150;
     bool run_gc_correction = true;
     bool run_3p_correction = true;
