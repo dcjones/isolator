@@ -155,7 +155,7 @@ class GammaMeanSampler : public Shredder
 {
     public:
         GammaMeanSampler(double lower_bound, double upper_bound)
-            : Shredder(lower_bound, upper_bound, 1e-8)
+            : Shredder(lower_bound, upper_bound, 1e-15)
         {}
 
         double sample(rng_t& rng, double mean0, double shape,
