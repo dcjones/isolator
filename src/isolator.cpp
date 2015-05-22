@@ -1210,6 +1210,7 @@ static int isolator_analyze(int argc, char* argv[])
         {"min-align-pr",         required_argument, NULL, 0},
         {"tss-cluster-distance", required_argument, NULL, 0},
         {"exclude-seqs",         required_argument, NULL, 0},
+        {"no-priors",            no_argument,       NULL, 0},
 
         {"experiment_tgroup_sigma_alpha",  required_argument, NULL, 0},
         {"experiment_tgroup_sigma_beta",   required_argument, NULL, 0},
@@ -1242,6 +1243,7 @@ static int isolator_analyze(int argc, char* argv[])
     unsigned int rng_seed = 0xaca430b9;
     bool dryrun = false;
     bool use_tss = false;
+    bool nopriors = false;
     const char* qc_filename = NULL;
     std::set<std::string> bias_training_seqnames;
     std::set<std::string> excluded_seqs;
@@ -1333,6 +1335,9 @@ static int isolator_analyze(int argc, char* argv[])
                     for (seq = strtok(optarg, ","); seq; seq = strtok(NULL, ",")) {
                         excluded_seqs.insert(std::string(seq));
                     }
+                }
+                else if (longopt_name == "no-priors") {
+                    nopriors = true;
                 }
                 else if (longopt_name == "introns") {
                     use_introns = true;
@@ -1475,7 +1480,7 @@ static int isolator_analyze(int argc, char* argv[])
 
     Analyze analyze(rng_seed, burnin, num_samples, ts, fa_fn,
                     run_gc_correction, run_3p_correction, run_frag_correction,
-                    qc_output_file != NULL,
+                    qc_output_file != NULL, nopriors,
                     excluded_seqs,
                     bias_training_seqnames,
                     experiment_tgroup_sigma_alpha,

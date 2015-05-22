@@ -41,6 +41,7 @@ class Analyze
                 bool run_3p_correction,
                 bool run_frag_correction,
                 bool collect_qc_data,
+                bool nopriors,
                 std::set<std::string> excluded_seqs,
                 std::set<std::string> bias_training_seqnames,
                 double experiment_tgroup_sigma_alpha,
@@ -108,6 +109,9 @@ class Analyze
 
         // True if extra extra QC data should be collected
         bool collect_qc_data;
+
+        // True if priors should not be applie during quantification
+        bool nopriors;
 
         // file names for the BAM/SAM file corresponding to each
         std::vector<std::string> filenames;

@@ -1312,6 +1312,7 @@ Analyze::Analyze(unsigned int rng_seed,
                  bool run_3p_correction,
                  bool run_frag_correction,
                  bool collect_qc_data,
+                 bool nopriors,
                  std::set<std::string> excluded_seqs,
                  std::set<std::string> bias_training_seqnames,
                  double experiment_tgroup_sigma_alpha,
@@ -1334,6 +1335,7 @@ Analyze::Analyze(unsigned int rng_seed,
     , excluded_seqs(excluded_seqs)
     , bias_training_seqnames(bias_training_seqnames)
     , collect_qc_data(collect_qc_data)
+    , nopriors(nopriors)
     , K(0)
     , C(0)
     , N(0)
@@ -2094,8 +2096,10 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
         Logger::get_task(optimize_task_name).inc();
     }
 
-    BOOST_FOREACH (Sampler* sampler, qsamplers) {
-        sampler->engage_priors();
+    if (!nopriors) {
+        BOOST_FOREACH (Sampler* sampler, qsamplers) {
+            sampler->engage_priors();
+        }
     }
 
     // write the maximum posterior state as sample 0
