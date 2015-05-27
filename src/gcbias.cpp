@@ -88,10 +88,6 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
         // leading to somewhat less than stable results.
         if (i->count > 4) continue;
 
-        if (i->end >= (pos_t) tbseq.size()) {
-            fprintf(stderr, "here!\n");
-        }
-
         // sample background position
         boost::random::uniform_int_distribution<pos_t> random_uniform(
                 i->start, i->end - median_frag_len + 1);
@@ -129,12 +125,12 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
 
 #if 0
     FILE* out = fopen("gcbias.tsv", "w");
-    fprintf(out, "group\tgc\n");
-    BOOST_FOREACH (float value, foreground_gc) {
-    	fprintf(out, "foreground\t%f\n", value);
+    fprintf(out, "group\tgc\tweight\n");
+    BOOST_FOREACH (WeightedGC& value, foreground_gc) {
+        fprintf(out, "foreground\t%f\t%f\n", (double) value.first, (double) value.second);
     }
-    BOOST_FOREACH (float value, background_gc) {
-    	fprintf(out, "background\t%f\n", value);
+    BOOST_FOREACH (WeightedGC& value, background_gc) {
+        fprintf(out, "background\t%f\t%f\n", (double) value.first, (double) value.second);
     }
     fclose(out);
 #endif
@@ -144,11 +140,13 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
     std::sort(foreground_gc.begin(), foreground_gc.end());
     std::sort(background_gc.begin(), background_gc.end());
 
+#if 0
     bins.resize(constants::gcbias_num_bins);
     for (size_t i = 0; i < constants::gcbias_num_bins; ++i) {
     	bins[i] = foreground_gc[(i+1) * (foreground_gc.size() / constants::gcbias_num_bins)].first;
     }
     bins.back() = 1.0;
+#endif
 
     double fore_total_weight = 0.0, back_total_weight = 0.0;
     BOOST_FOREACH (const WeightedGC& gc, foreground_gc) {
@@ -163,18 +161,19 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
     size_t j_fore = 0, j_back = 0;
     for (size_t i = 0; i < constants::gcbias_num_bins; ++i) {
     	double fore_weight = 0.0;
-        while (j_fore < foreground_gc.size() && foreground_gc[j_fore].first < bins[i]) {
+        float gc_upper = constants::gcbias_bins[i];
+        while (j_fore < foreground_gc.size() && foreground_gc[j_fore].first <= gc_upper) {
             fore_weight += foreground_gc[j_fore].second;
             ++j_fore;
         }
-        fore_weight = fore_weight / fore_total_weight;
+        fore_weight /= fore_total_weight;
 
         double back_weight = 0.0;
-        while (j_back < background_gc.size() && background_gc[j_back].first < bins[i]) {
+        while (j_back < background_gc.size() && background_gc[j_back].first <= gc_upper) {
             back_weight += background_gc[j_back].second;
             ++j_back;
         }
-        back_weight = back_weight / back_total_weight;
+        back_weight /= back_total_weight;
 
     	bin_bias[i] = fore_weight / back_weight;
 

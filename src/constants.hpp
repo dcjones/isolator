@@ -49,6 +49,9 @@ namespace constants
     /* Number of bins to use to model GC bias. */
     extern size_t gcbias_num_bins;
 
+    /* GC upper bounds defining bins for GC content bias. */
+    extern float gcbias_bins[];
+
     /* Don't let the gcbias correction get out of hand to the point of
      * risking over/underflow. */
     extern double gcbias_max_bias;

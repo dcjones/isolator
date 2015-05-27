@@ -10,6 +10,9 @@ size_t               constants::seqbias_left_pos             = 15;
 size_t               constants::seqbias_right_pos            = 15;
 pos_t                constants::gcbias_min_seq_len           = 500;
 size_t               constants::gcbias_num_bins              = 15;
+float                constants::gcbias_bins[]                = {0.29, 0.32, 0.35, 0.37, 0.39,
+                                                                0.41, 0.43, 0.45, 0.48, 0.51,
+                                                                0.53, 0.57, 0.60, 0.64, 1.00};
 double               constants::gcbias_max_bias              = 100.0;
 pos_t                constants::tpbias_min_tlen              = 5000;
 pos_t                constants::tpbias_max_tlen              = 10000;

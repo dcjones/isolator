@@ -1191,7 +1191,7 @@ float FragWeightEstimationThread::transcript_weight(
 
     /* Set ws[k] to be the the number of fragmens of length k, weighted by
      * sequence bias. */
-    memset(posbias, 1.0, trans_len * sizeof(float));
+    std::fill(posbias, posbias + trans_len, 1.0);
     for (pos_t frag_len = 1; frag_len <= trans_len; ++frag_len) {
         float frag_len_pr = frag_len_p(frag_len);
 
