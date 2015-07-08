@@ -111,6 +111,15 @@ class WeightMatrix
             compacted = false;
         }
 
+        size_t size() const
+        {
+            size_t s = 0;
+            for (unsigned int i = 0; i < nrow; ++i) {
+                s += rowlens[i];
+            }
+            return s;
+        }
+
         size_t memory_used() const
         {
             size_t nbytes = sizeof(float) * max_ncol +
@@ -2387,6 +2396,7 @@ Sampler::Sampler(unsigned int rng_seed,
             (unsigned long) weight_matrix->nrow,
             (unsigned long) weight_matrix->ncol);
     delete [] idxmap;
+    Logger::debug("Weight matrix size: %lu", (unsigned long) weight_matrix->size());
 
     Logger::debug("weight matrix is %0.2fMB after compact",
                   (double) weight_matrix->memory_used() / 1e6);
