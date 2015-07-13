@@ -14,7 +14,9 @@
 
 #include "analyze.hpp"
 #include "constants.hpp"
+#include "distributions.hpp"
 #include "shredder.hpp"
+#include "fastmath.hpp"
 
 using namespace boost::numeric::ublas;
 using namespace boost::accumulators;
@@ -105,68 +107,31 @@ class NormalMuSampler
 };
 
 
-class LogNormalTMuSampler : public Shredder
-{
-    public:
-        LogNormalTMuSampler(double lower_bound, double upper_bound)
-            : Shredder(lower_bound, upper_bound, 1e-5)
-        {
-        }
-
-        double sample(rng_t& rng, double mu0, double sigma, const double* xs,
-                      size_t n, double prior_nu, double prior_mu,
-                      double prior_sigma)
-        {
-            this->sigma = sigma;
-            this->prior_nu = prior_nu;
-            this->prior_mu = prior_mu;
-            this->prior_sigma = prior_sigma;
-            this->xs = xs;
-            this->n = n;
-
-            double ans = Shredder::sample(rng, mu0);
-
-            return ans;
-        }
-
-    private:
-        StudentsTLogPdf prior_logpdf;
-        LogNormalLogPdf likelihood_logpdf;
-        double sigma;
-        double prior_nu;
-        double prior_mu;
-        double prior_sigma;
-        const double* xs;
-        size_t n;
-
-    public:
-        double f(double mu, double& d)
-        {
-            d = likelihood_logpdf.df_dmu(mu, sigma, xs, n) +
-                prior_logpdf.df_dx(prior_nu, prior_mu, prior_sigma, &mu, 1);
-
-            return likelihood_logpdf.f(mu, sigma, xs, n) +
-                   prior_logpdf.f(prior_nu, prior_mu, prior_sigma, &mu, 1);
-        }
-};
-
-
 class GammaMeanSampler : public Shredder
 {
     public:
         GammaMeanSampler(double lower_bound, double upper_bound)
-            : Shredder(lower_bound, upper_bound, 1e-15)
+            : Shredder(lower_bound, upper_bound, 1e-10)
         {}
 
         double sample(rng_t& rng, double mean0, double shape,
-                      const double* xs, size_t n,
+                      const float* xs, const float* log_xs, size_t n,
                       double prior_mean, double prior_shape)
         {
             this->xs = xs;
+            this->log_xs = log_xs;
             this->n = n;
             this->shape = shape;
             this->prior_mean = prior_mean;
             this->prior_shape = prior_shape;
+
+            lgamma_shape = lgammaf(shape);
+
+            likelihood_dmean.shape(shape);
+            prior.mean(prior_mean);
+            prior.shape(prior_shape);
+            prior_dx.mean(prior_mean);
+            prior_dx.shape(prior_shape);
 
             double ans = Shredder::sample(rng, mean0);
 
@@ -174,21 +139,39 @@ class GammaMeanSampler : public Shredder
         }
 
     private:
-        AltGammaLogPdf logpdf;
+        AltGammaLogPdfDMean likelihood_dmean;
+        AltGammaLogPdf prior;
+        AltGammaLogPdfDx prior_dx;
+
+
         double shape;
-        const double* xs;
+        const float* xs;
+        const float* log_xs;
         size_t n;
         double prior_mean;
         double prior_shape;
 
+        // precompute lgamma(shape)
+        double lgamma_shape;
+
     public:
         double f(double mean, double& d)
         {
-            d = logpdf.df_dmean(mean, shape, xs, n)
-              + logpdf.df_dx(prior_mean, prior_shape, &mean, 1);
+            // TODO: rewrite this stuff with AltGammaLogPdf somehow
+            double lp = 0.0;
+            d = 0.0;
+            double scale = mean / shape;
+            likelihood_dmean.mean(mean);
+            for (size_t i = 0; i < n; ++i) {
+                lp += -(lgamma_shape + shape * fastlog(scale)) +
+                      ((shape - 1.0) * log_xs[i] - xs[i] / scale);
+                d += likelihood_dmean.x(xs[i]);
+            }
 
-            return logpdf.f(mean, shape, xs, n) +
-                   logpdf.f(prior_mean, prior_shape, &mean, 1);
+            lp += prior.x(mean);
+            d += prior_dx.x(mean);
+
+            return lp;
         }
 };
 
@@ -200,8 +183,8 @@ class GammaShapeSampler : public Shredder
             : Shredder(lower_bound, upper_bound, 1e-2)
         {}
 
-        double sample(rng_t& rng, const double* means, double shape0,
-                      const double* xs, size_t n, double prior_alpha,
+        double sample(rng_t& rng, const float* means, double shape0,
+                      const float* xs, size_t n, double prior_alpha,
                       double prior_beta)
         {
             this->means = means;
@@ -210,19 +193,30 @@ class GammaShapeSampler : public Shredder
             this->prior_alpha = prior_alpha;
             this->prior_beta = prior_beta;
 
-            return Shredder::sample(rng, shape0);
+            prior.set_alpha(prior_alpha);
+            prior.set_beta(prior_beta);
+            prior_dx.set_alpha(prior_alpha);
+            prior_dx.set_beta(prior_beta);
+
+            double shape = Shredder::sample(rng, shape0);
+            assert_finite(shape);
+            //return std::max<double>(lower_limit, std::min<double>(upper_limit, shape));
+            return shape;
         }
 
 
     private:
-        const double* means;
-        const double* xs;
+        const float* means;
+        const float* xs;
         size_t n;
         double prior_alpha;
         double prior_beta;
 
-        AltGammaLogPdf likelihood_logpdf;
-        GammaLogPdf prior_logpdf;
+        AltGammaLogPdf likelihood;
+        AltGammaLogPdfDShape likelihood_dshape;
+
+        GammaLogPdf prior;
+        GammaLogPdfDx prior_dx;
 
     public:
         double f(double shape, double& d)
@@ -230,13 +224,15 @@ class GammaShapeSampler : public Shredder
             d = 0.0;
             double lp = 0.0;
 
+            likelihood.set_shape(shape);
+            likelihood_dshape.set_shape(shape);
             for (size_t i = 0; i < n; ++i) {
-                lp += likelihood_logpdf.f(means[i], shape, xs, n);
-                d += likelihood_logpdf.df_dshape(means[i], shape, xs, n);
+                lp += likelihood.mean_x(means[i], xs[i]);
+                d += likelihood_dshape.mean_x(means[i], xs[i]);
             }
 
-            lp += prior_logpdf.f(prior_alpha, prior_beta, &shape, 1);
-            d += prior_logpdf.df_dx(prior_alpha, prior_beta, &shape, 1);
+            lp += prior.x(shape);
+            d += prior_dx.x(shape);
 
             return lp;
         }
@@ -251,7 +247,7 @@ class NormalTMuSampler : public Shredder
         {
         }
 
-        double sample(rng_t& rng, double mu0, double sigma, const double* xs,
+        double sample(rng_t& rng, double mu0, double sigma, const float* xs,
                       size_t n, double prior_nu, double prior_mu,
                       double prior_sigma)
         {
@@ -262,29 +258,39 @@ class NormalTMuSampler : public Shredder
             this->xs = xs;
             this->n = n;
 
+            prior.set_nu(prior_nu);
+            prior.set_mu(prior_mu);
+            prior.set_sigma(prior_sigma);
+            prior_dx.set_nu(prior_nu);
+            prior_dx.set_mu(prior_mu);
+            prior_dx.set_sigma(prior_sigma);
+
             double ans = Shredder::sample(rng, mu0);
 
             return ans;
         }
 
     private:
-        StudentsTLogPdf prior_logpdf;
+        StudentsTLogPdf prior;
+        StudentsTLogPdfDx prior_dx;
         NormalLogPdf likelihood_logpdf;
         double sigma;
         double prior_nu;
         double prior_mu;
         double prior_sigma;
-        const double* xs;
+        const float* xs;
         size_t n;
 
     public:
         double f(double mu, double& d)
         {
-            d = likelihood_logpdf.df_dmu(mu, sigma, xs, n) +
-                prior_logpdf.df_dx(prior_nu, prior_mu, prior_sigma, &mu, 1);
+            double lp = prior.x(mu);
+            d = prior_dx.x(mu);
 
-            return likelihood_logpdf.f(mu, sigma, xs, n) +
-                   prior_logpdf.f(prior_nu, prior_mu, prior_sigma, &mu, 1);
+            d += likelihood_logpdf.df_dmu(mu, sigma, xs, n);
+            lp += likelihood_logpdf.f(mu, sigma, xs, n);
+
+            return lp;
         }
 };
 
@@ -299,7 +305,7 @@ class StudentTMuSampler : public Shredder
         }
 
         double sample(rng_t& rng,
-                      double mu0, double nu, double sigma, const double* xs, size_t n,
+                      double mu0, double nu, double sigma, const float* xs, size_t n,
                       double prior_mu, double prior_sigma)
         {
             this->nu = nu;
@@ -309,19 +315,25 @@ class StudentTMuSampler : public Shredder
             this->xs = xs;
             this->n = n;
 
+            likelihood.set_nu(nu);
+            likelihood.set_sigma(sigma);
+            likelihood_dmu.set_nu(nu);
+            likelihood_dmu.set_sigma(sigma);
+
             return Shredder::sample(rng, mu0);
-            //return Shredder::optimize(mu0);
         }
 
 
     private:
-        StudentsTLogPdf likelihood_logpdf;
+        StudentsTLogPdf likelihood;
+        StudentsTLogPdfDMu likelihood_dmu;
+
         NormalLogPdf prior_logpdf;
         double nu;
         double sigma;
         double prior_mu;
         double prior_sigma;
-        const double* xs;
+        const float* xs;
         size_t n;
 
 
@@ -329,15 +341,19 @@ class StudentTMuSampler : public Shredder
         double f(double mu, double& d)
         {
             d = 0;
-            double fx = 0.0;
+            double lp = 0.0;
 
             d += prior_logpdf.df_dx(prior_mu, prior_sigma, &mu, 1);
-            fx += prior_logpdf.f(prior_mu, prior_sigma, &mu, 1);
+            lp += prior_logpdf.f(prior_mu, prior_sigma, &mu, 1);
 
-            d += likelihood_logpdf.df_dmu(nu, mu, sigma, xs, n);
-            fx += likelihood_logpdf.f(nu, mu, sigma, xs, n);
+            likelihood.set_mu(mu);
+            likelihood_dmu.set_mu(mu);
+            for (size_t i = 0; i < n; ++i) {
+                d += likelihood_dmu.x(xs[i]);
+                lp += likelihood.x(xs[i]);
+            }
 
-            return fx;
+            return lp;
         }
 };
 
@@ -349,7 +365,7 @@ class NormalSigmaSampler
         {
         }
 
-        double sample(rng_t& rng, const double* xs, size_t n,
+        double sample(rng_t& rng, const float* xs, size_t n,
                       double prior_alpha, double prior_beta)
         {
             double posterior_alpha = prior_alpha + n / 2.0;
@@ -366,51 +382,6 @@ class NormalSigmaSampler
 };
 
 
-
-class GammaStudentTSigmaSampler : public Shredder
-{
-    public:
-        GammaStudentTSigmaSampler()
-            : Shredder(1e-8, 1e5, 1e-5)
-        {
-        }
-
-        double sample(rng_t& rng, double sigma0, double nu, const double* xs, size_t n,
-                      double prior_alpha, double prior_beta)
-        {
-            this->nu = nu;
-            this->prior_alpha = prior_alpha;
-            this->prior_beta = prior_beta;
-            this->xs = xs;
-            this->n = n;
-            return Shredder::sample(rng, sigma0);
-        }
-
-    private:
-        double nu, prior_alpha, prior_beta;
-        const double* xs;
-        size_t n;
-
-        StudentsTLogPdf likelihood_logpdf;
-        GammaLogPdf prior_logpdf;
-
-    protected:
-        double f(double sigma, double& d)
-        {
-            d = 0.0;
-            double fx = 0.0;
-
-            d += likelihood_logpdf.df_dsigma(nu, 0.0, sigma, xs, n);
-            fx += likelihood_logpdf.f(nu, 0.0, sigma, xs, n);
-
-            d += prior_logpdf.df_dx(prior_alpha, prior_beta, &sigma, 1);
-            fx += prior_logpdf.f(prior_alpha, prior_beta, &sigma, 1);
-
-            return fx;
-        }
-};
-
-
 class GammaNormalSigmaSampler : public Shredder
 {
     public:
@@ -419,38 +390,45 @@ class GammaNormalSigmaSampler : public Shredder
         {
         }
 
-        double sample(rng_t& rng, double sigma0, const double* xs, size_t n,
+        double sample(rng_t& rng, double sigma0, const float* xs, size_t n,
                       double prior_alpha, double prior_beta)
         {
             this->prior_alpha = prior_alpha;
             this->prior_beta = prior_beta;
             this->xs = xs;
             this->n = n;
+
+            prior.set_alpha(prior_alpha);
+            prior.set_beta(prior_beta);
+            prior_dx.set_alpha(prior_alpha);
+            prior_dx.set_beta(prior_beta);
+
             return Shredder::sample(rng, sigma0);
         }
 
 
     private:
         double prior_alpha, prior_beta;
-        const double* xs;
+        const float* xs;
         size_t n;
 
         NormalLogPdf likelihood_logpdf;
-        GammaLogPdf prior_logpdf;
+        GammaLogPdf prior;
+        GammaLogPdf prior_dx;
 
     protected:
         double f(double sigma, double& d)
         {
             d = 0.0;
-            double fx = 0.0;
+            double lp = 0.0;
 
+            lp += likelihood_logpdf.f(0.0, sigma, xs, n);
             d += likelihood_logpdf.df_dsigma(0.0, sigma, xs, n);
-            fx += likelihood_logpdf.f(0.0, sigma, xs, n);
 
-            d += prior_logpdf.df_dx(prior_alpha, prior_beta, &sigma, 1);
-            fx += prior_logpdf.f(prior_alpha, prior_beta, &sigma, 1);
+            lp += prior.x(sigma);
+            d += prior_dx.x(sigma);
 
-            return fx;
+            return lp;
         }
 };
 
@@ -472,6 +450,12 @@ class GammaLogNormalSigmaSampler : public Shredder
             this->mu = mu;
             this->xs = xs;
             this->n = n;
+
+            prior.set_alpha(prior_alpha);
+            prior.set_beta(prior_beta);
+            prior_dx.set_alpha(prior_alpha);
+            prior_dx.set_beta(prior_beta);
+
             return Shredder::sample(rng, sigma0);
         }
 
@@ -483,23 +467,24 @@ class GammaLogNormalSigmaSampler : public Shredder
         size_t n;
 
         LogNormalLogPdf likelihood_logpdf;
-        GammaLogPdf prior_logpdf;
+        GammaLogPdf prior;
+        GammaLogPdfDx prior_dx;
 
     protected:
         double f(double sigma, double& d)
         {
             d = 0.0;
-            double fx = 0.0;
+            double lp = 0.0;
 
             for (size_t i = 0; i < n; ++i) {
+                lp += likelihood_logpdf.f(mu[i], sigma, &xs[i], 1);
                 d += likelihood_logpdf.df_dsigma(mu[i], sigma, &xs[i], 1);
-                fx += likelihood_logpdf.f(mu[i], sigma, &xs[i], 1);
             }
 
-            d += prior_logpdf.df_dx(prior_alpha, prior_beta, &sigma, 1);
-            fx += prior_logpdf.f(prior_alpha, prior_beta, &sigma, 1);
+            lp += prior.x(sigma);
+            d += prior_dx.x(sigma);
 
-            return fx;
+            return lp;
         }
 };
 
@@ -513,10 +498,10 @@ class ConditionSpliceEtaSampler : public Shredder
 
         double sample(rng_t& rng,
                       double condition_splice_eta,
-                      const std::vector<double>& unadj_condition_splice_mu,
+                      const std::vector<float>& unadj_condition_splice_mu,
                       double unadj_condition_splice_sigma,
-                      const matrix_column<matrix<double> >& splice_data,
-                      const std::vector<double>& sample_mu,
+                      const matrix_column<matrix<float> >& splice_data,
+                      const std::vector<float>& sample_mu,
                       const std::vector<std::vector<int> >& condition_samples,
                       double experiment_splice_nu,
                       double experiment_splice_mu,
@@ -535,6 +520,10 @@ class ConditionSpliceEtaSampler : public Shredder
             this->condition_splice_alpha = condition_splice_alpha;
             this->condition_splice_beta = condition_splice_beta;
 
+            mu_prior.set_nu(experiment_splice_nu);
+            sigma_prior.set_alpha(condition_splice_alpha);
+            sigma_prior.set_beta(condition_splice_beta);
+
             if (data_tmp.size() < splice_data.size()) {
                 data_tmp.resize(splice_data.size());
             }
@@ -544,13 +533,13 @@ class ConditionSpliceEtaSampler : public Shredder
 
     private:
         NormalLogPdf likelihood_logpdf;
-        StudentsTLogPdf mu_prior_logpdf;
-        GammaLogPdf sigma_prior_logpdf;
+        StudentsTLogPdf mu_prior;
+        GammaLogPdf sigma_prior;
 
-        const std::vector<double>* unadj_condition_splice_mu;
-        const matrix_column<matrix<double> >* splice_data;
+        const std::vector<float>* unadj_condition_splice_mu;
+        const matrix_column<matrix<float> >* splice_data;
         const std::vector<std::vector<int> >* condition_samples;
-        const std::vector<double>* sample_mu;
+        const std::vector<float>* sample_mu;
 
         double unadj_condition_splice_sigma,
                experiment_splice_mu,
@@ -559,14 +548,15 @@ class ConditionSpliceEtaSampler : public Shredder
                condition_splice_alpha,
                condition_splice_beta;
 
-        std::vector<double> data_tmp;
+        std::vector<float> data_tmp;
 
     protected:
         double f(double eta, double& d)
         {
-            double fx = 0.0;
+            double lp = 0.0;
             d = 0.0;
             double condition_splice_sigma = fabs(eta) * unadj_condition_splice_sigma;
+            mu_prior.set_sigma(condition_splice_sigma);
 
             for (size_t i = 0; i < unadj_condition_splice_mu->size(); ++i) {
                 for (size_t l = 0; l < (*condition_samples)[i].size(); ++l) {
@@ -576,157 +566,18 @@ class ConditionSpliceEtaSampler : public Shredder
 
                 double condition_splice_mu =
                     eta * (*unadj_condition_splice_mu)[i] + (*sample_mu)[i];
+                mu_prior.set_mu(condition_splice_mu);
 
-                fx += mu_prior_logpdf.f(experiment_splice_nu, experiment_splice_mu,
-                                        experiment_splice_sigma, &condition_splice_mu, 1);
+                lp += mu_prior.x(condition_splice_mu);
 
-                fx += likelihood_logpdf.f(condition_splice_mu, condition_splice_sigma,
+                lp += likelihood_logpdf.f(condition_splice_mu, condition_splice_sigma,
                                           &data_tmp.at(0), (*condition_samples)[i].size());
             }
 
-            fx += sigma_prior_logpdf.f(condition_splice_alpha, condition_splice_beta,
-                                       &condition_splice_sigma, 1);
+            lp += sigma_prior.x(condition_splice_sigma);
 
-            return fx;
+            return lp;
         }
-};
-
-
-class ConditionTgroupMuSigmaSamplerThread
-{
-    public:
-        ConditionTgroupMuSigmaSamplerThread(
-                                   const matrix<double>& ts,
-                                   matrix<double>& condition_tgroup_mean,
-                                   std::vector<double>& condition_tgroup_shape,
-                                   const std::vector<double>& experiment_tgroup_mean,
-                                   double& experiment_tgroup_shape,
-                                   const double& condition_tgroup_alpha,
-                                   const double& condition_tgroup_beta,
-                                   const std::vector<int>& condition,
-                                   const std::vector<std::vector<int> >& condition_samples,
-                                   Queue<IdxRange>& tgroup_queue,
-                                   Queue<int>& notify_queue,
-                                   std::vector<rng_t>& rng_pool)
-            : ts(ts)
-            , condition_tgroup_mean(condition_tgroup_mean)
-            , condition_tgroup_shape(condition_tgroup_shape)
-            , experiment_tgroup_mean(experiment_tgroup_mean)
-            , experiment_tgroup_shape(experiment_tgroup_shape)
-            , condition_tgroup_alpha(condition_tgroup_alpha)
-            , condition_tgroup_beta(condition_tgroup_beta)
-            , condition(condition)
-            , condition_samples(condition_samples)
-            , tgroup_queue(tgroup_queue)
-            , notify_queue(notify_queue)
-            , rng_pool(rng_pool)
-            , burnin_state(true)
-            , thread(NULL)
-            , mu_sampler(1e-10, 1)
-            , shape_sampler(1.0, 20.0)
-        {
-            K = ts.size1();
-            T = condition_tgroup_shape.size();
-            C = condition_samples.size();
-            xs.resize(K);
-            xs_mu.resize(K);
-        }
-
-        void end_burnin()
-        {
-            burnin_state = false;
-        }
-
-        void run()
-        {
-            while (true) {
-                IdxRange tgroups = tgroup_queue.pop();
-                if (tgroups.first == -1) break;
-
-                for (int tgroup = tgroups.first; tgroup < tgroups.second; ++tgroup) {
-                    rng_t& rng = rng_pool[tgroup];
-
-                    // sample mu
-                    for (size_t i = 0; i < C; ++i) {
-                        size_t l = 0;
-                        BOOST_FOREACH (int j, condition_samples[i]) {
-                            xs[l++] = ts(j, tgroup);
-                        }
-
-                        condition_tgroup_mean(i, tgroup) = mu_sampler.sample(
-                                rng, condition_tgroup_mean(i, tgroup),
-                                condition_tgroup_shape[tgroup], &xs.at(0), l,
-                                experiment_tgroup_mean[tgroup], experiment_tgroup_shape);
-                        assert_finite(condition_tgroup_mean(i, tgroup));
-                    }
-
-                    for (size_t i = 0; i < K; ++i) {
-                        xs_mu[i] = condition_tgroup_mean(condition[i], tgroup);
-                        xs[i] = ts(i, tgroup);
-                    }
-
-                    // Force sigma to something rather large to avoid getting
-                    // when initialized in an extremely low probability state
-                    if (burnin_state) condition_tgroup_shape[tgroup] = 1.0;
-                    else {
-                        condition_tgroup_shape[tgroup] =
-                            shape_sampler.sample(
-                                    rng, &xs_mu.at(0),
-                                    condition_tgroup_shape[tgroup],
-                                    &xs.at(0), K,
-                                    condition_tgroup_alpha,
-                                    condition_tgroup_beta);
-                    }
-                    assert_finite(condition_tgroup_shape[tgroup]);
-                }
-
-                notify_queue.push(1);
-            }
-        }
-
-        void start()
-        {
-            thread = new boost::thread(boost::bind(&ConditionTgroupMuSigmaSamplerThread::run, this));
-        }
-
-        void join()
-        {
-            thread->join();
-            delete thread;
-            thread = NULL;
-        }
-
-    private:
-        const matrix<double>& ts;
-        matrix<double>& condition_tgroup_mean;
-        std::vector<double>& condition_tgroup_shape;
-        const std::vector<double>& experiment_tgroup_mean;
-        double& experiment_tgroup_shape;
-        const double& condition_tgroup_alpha;
-        const double& condition_tgroup_beta;
-        const std::vector<int>& condition;
-        const std::vector<std::vector<int> >& condition_samples;
-        Queue<IdxRange>& tgroup_queue;
-        Queue<int>& notify_queue;
-        std::vector<rng_t>& rng_pool;
-        bool burnin_state;
-        boost::thread* thread;
-
-        // temporary data vector
-        std::vector<double> xs;
-        std::vector<double> xs_mu;
-
-        // number of replicates
-        size_t K;
-
-        // number of tgroups
-        size_t T;
-
-        // number of conditions
-        size_t C;
-
-        GammaMeanSampler mu_sampler;
-        GammaShapeSampler shape_sampler;
 };
 
 
@@ -736,15 +587,15 @@ class ConditionSpliceMuSigmaEtaSamplerThread
 {
     public:
         ConditionSpliceMuSigmaEtaSamplerThread(
-                        std::vector<std::vector<std::vector<double> > >& condition_splice_mu,
-                        std::vector<std::vector<double> >& condition_splice_sigma,
-                        std::vector<std::vector<double> >& condition_splice_eta,
-                        const std::vector<std::vector<double> >& experiment_splice_mu,
+                        std::vector<std::vector<std::vector<float> > >& condition_splice_mu,
+                        std::vector<std::vector<float> >& condition_splice_sigma,
+                        std::vector<std::vector<float> >& condition_splice_eta,
+                        const std::vector<std::vector<float> >& experiment_splice_mu,
                         double& experiment_splice_sigma,
                         double experiment_splice_nu,
                         const double& condition_splice_alpha,
                         const double& condition_splice_beta,
-                        const matrix<double>& Q,
+                        const matrix<float>& Q,
                         const std::vector<unsigned int>& spliced_tgroup_indexes,
                         const std::vector<std::vector<unsigned int> >& tgroup_tids,
                         const std::vector<int>& condition,
@@ -786,17 +637,17 @@ class ConditionSpliceMuSigmaEtaSamplerThread
         void run()
         {
             // temporary array for storing observation marginals
-            std::vector<double> data(K);
+            std::vector<float> data(K);
 
             // temporary space for sampling precision
             size_t max_size2 = 0;
             BOOST_FOREACH (const std::vector<unsigned int>& tids, tgroup_tids) {
                 max_size2 = std::max<size_t>(tids.size(), max_size2);
             }
-            matrix<double> dataj(K, max_size2);
+            matrix<float> dataj(K, max_size2);
 
-            std::vector<double> unadj_mu(C);
-            std::vector<double> sample_mu(C);
+            std::vector<float> unadj_mu(C);
+            std::vector<float> sample_mu(C);
 
             while (true) {
                 IdxRange js = spliced_tgroup_queue.pop();
@@ -836,7 +687,7 @@ class ConditionSpliceMuSigmaEtaSamplerThread
                                 condition_splice_eta[j][k];
                         }
 
-                        matrix_column<matrix<double> > col(dataj, k);
+                        matrix_column<matrix<float> > col(dataj, k);
 
                         condition_splice_eta[j][k] = eta_sampler.sample(
                                 rng, condition_splice_eta[j][k],
@@ -885,7 +736,7 @@ class ConditionSpliceMuSigmaEtaSamplerThread
 
                     // sample sigma
                     for (size_t k = 0; k < tgroup_tids[tgroup].size(); ++k) {
-                        matrix_column<matrix<double> > col(dataj, k);
+                        matrix_column<matrix<float> > col(dataj, k);
                         std::copy(col.begin(), col.end(), data.begin());
 
                         for (size_t i = 0; i < K; ++i) {
@@ -932,11 +783,11 @@ class ConditionSpliceMuSigmaEtaSamplerThread
 
     private:
         // what we are sampling over
-        std::vector<std::vector<std::vector<double> > >& condition_splice_mu;
-        std::vector<std::vector<double> >& condition_splice_sigma;
-        std::vector<std::vector<double> >& condition_splice_eta;
+        std::vector<std::vector<std::vector<float> > >& condition_splice_mu;
+        std::vector<std::vector<float> >& condition_splice_sigma;
+        std::vector<std::vector<float> >& condition_splice_eta;
 
-        const std::vector<std::vector<double> >& experiment_splice_mu;
+        const std::vector<std::vector<float> >& experiment_splice_mu;
         double& experiment_splice_sigma;
         double experiment_splice_nu;
 
@@ -944,7 +795,7 @@ class ConditionSpliceMuSigmaEtaSamplerThread
         const double& condition_splice_beta;
 
         // current transcript quantification
-        const matrix<double>& Q;
+        const matrix<float>& Q;
 
         const std::vector<unsigned int>& spliced_tgroup_indexes;
         const std::vector<std::vector<unsigned int> >& tgroup_tids;
@@ -970,10 +821,10 @@ class ExperimentSpliceMuSigmaSamplerThread
 {
     public:
         ExperimentSpliceMuSigmaSamplerThread(
-                std::vector<std::vector<double> >& experiment_splice_mu,
+                std::vector<std::vector<float> >& experiment_splice_mu,
                 double& experiment_splice_sigma,
                 double experiment_splice_nu,
-                const std::vector<std::vector<std::vector<double> > >&
+                const std::vector<std::vector<std::vector<float> > >&
                     condition_splice_mu,
                 const std::vector<unsigned int>& spliced_tgroup_indexes,
                 const std::vector<std::vector<unsigned int> >& tgroup_tids,
@@ -1009,7 +860,7 @@ class ExperimentSpliceMuSigmaSamplerThread
 
         void run()
         {
-            std::vector<double> data(C);
+            std::vector<float> data(C);
 
             while (true) {
                 IdxRange js = spliced_tgroup_queue.pop();
@@ -1054,10 +905,10 @@ class ExperimentSpliceMuSigmaSamplerThread
         }
 
     private:
-        std::vector<std::vector<double> >& experiment_splice_mu;
+        std::vector<std::vector<float> >& experiment_splice_mu;
         double& experiment_splice_sigma;
         double experiment_splice_nu;
-        const std::vector<std::vector<std::vector<double> > >&
+        const std::vector<std::vector<std::vector<float> > >&
             condition_splice_mu;
         const std::vector<unsigned int>& spliced_tgroup_indexes;
         const std::vector<std::vector<unsigned int> >& tgroup_tids;
@@ -1076,6 +927,142 @@ class ExperimentSpliceMuSigmaSamplerThread
 };
 
 
+class ConditionMeanShapeSamplerThread
+{
+    public:
+        ConditionMeanShapeSamplerThread(
+                                   matrix<float>& Q,
+                                   matrix<float>& condition_mean,
+                                   std::vector<float>& condition_shape,
+                                   std::vector<float>& experiment_mean,
+                                   double& experiment_shape,
+                                   const double& condition_shape_alpha,
+                                   const double& condition_shape_beta,
+                                   const std::vector<int>& condition,
+                                   const std::vector<std::vector<int> >& condition_samples,
+                                   Queue<IdxRange>& transcript_queue,
+                                   Queue<int>& notify_queue,
+                                   std::vector<rng_t>& rng_pool)
+            : Q(Q)
+            , condition_mean(condition_mean)
+            , condition_shape(condition_shape)
+            , experiment_mean(experiment_mean)
+            , experiment_shape(experiment_shape)
+            , condition_shape_alpha(condition_shape_alpha)
+            , condition_shape_beta(condition_shape_beta)
+            , condition(condition)
+            , condition_samples(condition_samples)
+            , transcript_queue(transcript_queue)
+            , notify_queue(notify_queue)
+            , rng_pool(rng_pool)
+            , burnin_state(true)
+            , thread(NULL)
+            , mu_sampler(1e-12, 1)
+            , shape_sampler(0.1, 5.0)
+        {
+            K = Q.size1();
+            C = condition_samples.size();
+            xs.resize(K);
+            log_xs.resize(K);
+            xs_mu.resize(K);
+        }
+
+        void end_burnin()
+        {
+            burnin_state = false;
+        }
+
+        void run()
+        {
+            while (true) {
+                IdxRange transcripts = transcript_queue.pop();
+                if (transcripts.first == -1) break;
+
+                for (int tid = transcripts.first; tid < transcripts.second; ++tid) {
+                    rng_t& rng = rng_pool[tid];
+
+                    // sample mu
+                    for (size_t i = 0; i < C; ++i) {
+                        size_t l = 0;
+                        BOOST_FOREACH (int j, condition_samples[i]) {
+                            xs[l] = Q(j, tid);
+                            log_xs[l] = fastlog(xs[l]);
+                            ++l;
+                        }
+
+                        condition_mean(i, tid) = mu_sampler.sample(
+                                rng, condition_mean(i, tid),
+                                condition_shape[tid], &xs.at(0), &log_xs.at(0), l,
+                                experiment_mean[tid], experiment_shape);
+                        assert_finite(condition_mean(i, tid));
+                    }
+
+                    for (size_t i = 0; i < K; ++i) {
+                        xs_mu[i] = condition_mean(condition[i], tid);
+                        xs[i] = Q(i, tid);
+                    }
+
+                    // Force sigma to something rather large to avoid getting
+                    // when initialized in an extremely low probability state
+                    if (burnin_state) condition_shape[tid] = 1.0;
+                    else {
+                        condition_shape[tid] =
+                            shape_sampler.sample(
+                                    rng, &xs_mu.at(0),
+                                    condition_shape[tid],
+                                    &xs.at(0), K,
+                                    condition_shape_alpha,
+                                    condition_shape_beta);
+                    }
+                    assert_finite(condition_shape[tid]);
+                }
+                notify_queue.push(1);
+            }
+        }
+
+        void start()
+        {
+            thread = new boost::thread(boost::bind(&ConditionMeanShapeSamplerThread::run, this));
+        }
+
+        void join()
+        {
+            thread->join();
+            delete thread;
+            thread = NULL;
+        }
+
+    private:
+        matrix<float>& Q;
+        matrix<float>& condition_mean;
+        std::vector<float>& condition_shape;
+        std::vector<float>& experiment_mean;
+        double& experiment_shape;
+        const double& condition_shape_alpha;
+        const double& condition_shape_beta;
+        const std::vector<int>& condition;
+        const std::vector<std::vector<int> >& condition_samples;
+        Queue<IdxRange>& transcript_queue;
+        Queue<int>& notify_queue;
+        std::vector<rng_t>& rng_pool;
+        bool burnin_state;
+        boost::thread* thread;
+
+        // temporary data vector
+        std::vector<float> xs, log_xs;
+        std::vector<float> xs_mu;
+
+        // number of replicates
+        size_t K;
+
+        // number of conditions
+        size_t C;
+
+        GammaMeanSampler mu_sampler;
+        GammaShapeSampler shape_sampler;
+};
+
+
 // Sample from the beta parameter of a gamm distribution
 class GammaBetaSampler : public Shredder
 {
@@ -1087,88 +1074,51 @@ class GammaBetaSampler : public Shredder
         double sample(rng_t& rng,
                       double beta0, double alpha,
                       double beta_a, double beta_b,
-                      const double* xs, size_t n)
+                      const float* xs, size_t n)
         {
             this->alpha = alpha;
             this->beta_a = beta_a;
             this->beta_b = beta_b;
             this->xs = xs;
             this->n = n;
+
+            likelihood.set_alpha(alpha);
+            likelihood_dbeta.set_alpha(alpha);
+            prior.set_alpha(beta_a);
+            prior.set_beta(beta_b);
+
             return Shredder::sample(rng, beta0);
         }
 
     private:
         double alpha;
         double beta_a, beta_b;
-        const double* xs;
+        const float* xs;
         size_t n;
 
-        GammaLogPdf gamma_dist;
+        GammaLogPdf likelihood;
+        GammaLogPdfDBeta likelihood_dbeta;
+
+        GammaLogPdf prior;
+        GammaLogPdfDx prior_dx;
 
     protected:
         double f(double beta, double &d)
         {
             d = 0.0;
-            double fx = 0.0;
+            double lp = 0.0;
 
-            d += gamma_dist.df_dx(beta_a, beta_b, &beta, 1);
-            fx += gamma_dist.f(beta_a, beta_b, &beta, 1);
+            likelihood.set_beta(beta);
+            likelihood_dbeta.set_beta(beta);
+            for (size_t i = 0; i < n; ++i) {
+                lp += likelihood.x(xs[i]);
+                d += likelihood_dbeta.x(xs[i]);
+            }
 
-            d += gamma_dist.df_dbeta(alpha, beta, xs, n);
-            fx += gamma_dist.f(alpha, beta, xs, n);
+            lp += prior.x(beta);
+            d += prior_dx.x(beta);
 
-            return fx;
-        }
-};
-
-
-class AlphaSampler : public Shredder
-{
-    public:
-        AlphaSampler()
-            : Shredder(1e-16, 1e5, 1e-5)
-        {
-        }
-
-        double sample(rng_t& rng,
-                      double alpha0, double beta,
-                      double alpha_alpha, double beta_alpha,
-                      const double* sigmas, size_t n)
-        {
-            this->beta = beta;
-            this->alpha_alpha = alpha_alpha;
-            this->beta_alpha = beta_alpha;
-            this->sigmas = sigmas;
-            this->n = n;
-            return Shredder::sample(rng, alpha0);
-        }
-
-    private:
-        double beta;
-        double alpha_alpha;
-        double beta_alpha;
-        const double* sigmas;
-        size_t n;
-
-        InvGammaLogPdf prior_logpdf;
-        SqInvGammaLogPdf likelihood_logpdf;
-
-    protected:
-        double f(double alpha, double &d)
-        {
-            d = 0.0;
-            double fx = 0.0;
-
-            double prior_d = prior_logpdf.df_dx(alpha_alpha, beta_alpha, &alpha, 1);
-            double prior_fx = prior_logpdf.f(alpha_alpha, beta_alpha, &alpha, 1);
-
-            d += prior_d;
-            fx += prior_fx;
-
-            d += likelihood_logpdf.df_dalpha(alpha, beta, sigmas, n);
-            fx += likelihood_logpdf.f(alpha, beta, sigmas, n);
-
-            return fx;
+            return lp;
         }
 };
 
@@ -1220,55 +1170,55 @@ class BetaSampler : public Shredder
 };
 
 
-class ExperimentTgroupMuSigmaSamplerThread
+class ExperimentMeanShapeSamplerThread
 {
     public:
-        ExperimentTgroupMuSigmaSamplerThread(
-                std::vector<double>& experiment_tgroup_mean,
-                double& experiment_tgroup_shape,
-                double experiment_tgroup_mean0,
-                double experiment_tgroup_shape0,
-                matrix<double>& condition_tgroup_mean,
-                Queue<IdxRange>& tgroup_queue,
+        ExperimentMeanShapeSamplerThread(
+                std::vector<float>& experiment_mean,
+                double& experiment_shape,
+                double experiment_mean0,
+                double experiment_shape0,
+                matrix<float>& condition_mean,
+                Queue<IdxRange>& transcript_queue,
                 Queue<int>& notify_queue,
                 std::vector<rng_t>& rng_pool)
-            : experiment_tgroup_mean(experiment_tgroup_mean)
-            , experiment_tgroup_shape(experiment_tgroup_shape)
-            , experiment_tgroup_mean0(experiment_tgroup_mean0)
-            , experiment_tgroup_shape0(experiment_tgroup_shape0)
-            , condition_tgroup_mean(condition_tgroup_mean)
-            , tgroup_queue(tgroup_queue)
+            : experiment_mean(experiment_mean)
+            , experiment_shape(experiment_shape)
+            , experiment_mean0(experiment_mean0)
+            , experiment_shape0(experiment_shape0)
+            , condition_mean(condition_mean)
+            , transcript_queue(transcript_queue)
             , notify_queue(notify_queue)
             , rng_pool(rng_pool)
             , thread(NULL)
-            , mu_sampler(1e-10, 1)
+            , mu_sampler(1e-12, 1)
         {
         }
 
         void run()
         {
-            size_t C = condition_tgroup_mean.size1();
-            std::vector<double> data(C);
+            size_t C = condition_mean.size1();
+            std::vector<float> xs(C), log_xs(C);
 
             while (true) {
-                IdxRange tgroups = tgroup_queue.pop();
-                if (tgroups.first == -1) break;
+                IdxRange transcripts = transcript_queue.pop();
+                if (transcripts.first == -1) break;
 
-                for (int tgroup = tgroups.first; tgroup < tgroups.second; ++tgroup) {
+                for (int tid = transcripts.first; tid < transcripts.second; ++tid) {
                     for (size_t i = 0; i < C; ++i) {
-                        data[i] = condition_tgroup_mean(i, tgroup);
+                        xs[i] = condition_mean(i, tid);
+                        log_xs[i] = fastlog(xs[i]);
                     }
 
-                    rng_t& rng = rng_pool[tgroup];
+                    rng_t& rng = rng_pool[tid];
 
-                    experiment_tgroup_mean[tgroup] =
+                    experiment_mean[tid] =
                         mu_sampler.sample(rng,
-                                          experiment_tgroup_mean[tgroup],
-                                          experiment_tgroup_shape,
-                                          &data.at(0), C,
-                                          experiment_tgroup_mean0,
-                                          experiment_tgroup_shape0);
-                    asm("nop");
+                                          experiment_mean[tid],
+                                          experiment_shape,
+                                          &xs.at(0), &log_xs.at(0), C,
+                                          experiment_mean0,
+                                          experiment_shape0);
                 }
 
                 notify_queue.push(1);
@@ -1277,7 +1227,7 @@ class ExperimentTgroupMuSigmaSamplerThread
 
         void start()
         {
-            thread = new boost::thread(boost::bind(&ExperimentTgroupMuSigmaSamplerThread::run, this));
+            thread = new boost::thread(boost::bind(&ExperimentMeanShapeSamplerThread::run, this));
         }
 
         void join()
@@ -1288,12 +1238,12 @@ class ExperimentTgroupMuSigmaSamplerThread
         }
 
     private:
-        std::vector<double>& experiment_tgroup_mean;
-        double& experiment_tgroup_shape;
-        double experiment_tgroup_mean0, experiment_tgroup_shape0;
-        matrix<double>& condition_tgroup_mean;
+        std::vector<float>& experiment_mean;
+        double& experiment_shape;
+        double experiment_mean0, experiment_shape0;
+        matrix<float>& condition_mean;
 
-        Queue<IdxRange>& tgroup_queue;
+        Queue<IdxRange>& transcript_queue;
         Queue<int>& notify_queue;
         std::vector<rng_t>& rng_pool;
         boost::thread* thread;
@@ -1308,6 +1258,7 @@ Analyze::Analyze(unsigned int rng_seed,
                  size_t num_samples,
                  TranscriptSet& transcripts,
                  const char* genome_filename,
+                 bool run_seqbias_correction,
                  bool run_gc_correction,
                  bool run_3p_correction,
                  bool run_frag_correction,
@@ -1315,13 +1266,12 @@ Analyze::Analyze(unsigned int rng_seed,
                  bool nopriors,
                  std::set<std::string> excluded_seqs,
                  std::set<std::string> bias_training_seqnames,
-                 double experiment_tgroup_sigma_alpha,
-                 double experiment_tgroup_sigma_beta,
-                 double experiment_splice_sigma_alpha,
-                 double experiment_splice_sigma_beta,
-                 double condition_tgroup_alpha,
-                 double condition_tgroup_beta_a,
-                 double condition_tgroup_beta_b,
+                 double experiment_shape_alpha,
+                 double experiment_shape_beta,
+                 double experiment_splice_sigma_alpha, double experiment_splice_sigma_beta,
+                 double condition_shape_alpha,
+                 double condition_shape_beta_a,
+                 double condition_shape_beta_b,
                  double condition_splice_alpha,
                  double condition_splice_beta_a,
                  double condition_splice_beta_b)
@@ -1329,6 +1279,7 @@ Analyze::Analyze(unsigned int rng_seed,
     , num_samples(num_samples)
     , transcripts(transcripts)
     , genome_filename(genome_filename)
+    , run_seqbias_correction(run_seqbias_correction)
     , run_gc_correction(run_gc_correction)
     , run_3p_correction(run_3p_correction)
     , run_frag_correction(run_frag_correction)
@@ -1345,30 +1296,27 @@ Analyze::Analyze(unsigned int rng_seed,
     N = transcripts.size();
     T = transcripts.num_tgroups();
 
-    this->experiment_tgroup_sigma_alpha = experiment_tgroup_sigma_alpha;
-    this->experiment_tgroup_sigma_beta = experiment_tgroup_sigma_beta;
+    this->experiment_shape_alpha = experiment_shape_alpha;
+    this->experiment_shape_beta = experiment_shape_beta;
 
     this->experiment_splice_sigma_alpha = experiment_splice_sigma_alpha;
     this->experiment_splice_sigma_beta = experiment_splice_sigma_beta;
-
-    this->condition_tgroup_alpha  = condition_tgroup_alpha;
-    this->condition_tgroup_beta_a = condition_tgroup_beta_a;
-    this->condition_tgroup_beta_b = condition_tgroup_beta_b;
 
     this->condition_splice_alpha  = condition_splice_alpha;
     this->condition_splice_beta_a = condition_splice_beta_a;
     this->condition_splice_beta_b = condition_splice_beta_b;
 
-    experiment_tgroup_mean0  = constants::analyze_experiment_tgroup_mean0;
-    experiment_tgroup_shape0 = constants::analyze_experiment_tgroup_shape0;
+    this->condition_shape_alpha  = condition_shape_alpha;
+    this->condition_shape_beta_a = condition_shape_beta_a;
+    this->condition_shape_beta_b = condition_shape_beta_b;
+
+    this->experiment_mean0  = constants::analyze_experiment_mean0;
+    this->experiment_shape0 = constants::analyze_experiment_shape0;
 
     experiment_splice_mu0    = constants::analyze_experiment_splice_mu0;
     experiment_splice_sigma0 = constants::analyze_experiment_splice_sigma0;
-
     experiment_splice_nu = constants::analyze_experiment_splice_nu;
 
-    tgroup_expr.resize(T);
-    tgroup_row_data.resize(T);
     scale_work.resize(N);
 
     gamma_beta_sampler = new GammaBetaSampler();
@@ -1389,11 +1337,11 @@ Analyze::Analyze(unsigned int rng_seed,
     splice_rng_pool.resize(spliced_tgroup_indexes.size());
     BOOST_FOREACH (rng_t& rng, splice_rng_pool) {
         rng.seed(rng_seed);
-        ++rng_seed; // seeding each differently to be cautious
+        ++rng_seed;
     }
 
-    tgroup_rng_pool.resize(T);
-    BOOST_FOREACH (rng_t& rng, tgroup_rng_pool) {
+    transcript_rng_pool.resize(N);
+    BOOST_FOREACH (rng_t& rng, transcript_rng_pool) {
         rng.seed(rng_seed);
         ++rng_seed;
     }
@@ -1408,8 +1356,8 @@ Analyze::~Analyze()
 {
     delete gamma_beta_sampler;
     delete invgamma_beta_sampler;
-    delete gamma_normal_sigma_sampler;
     delete gamma_shape_sampler;
+    delete gamma_normal_sigma_sampler;
 }
 
 
@@ -1439,6 +1387,7 @@ class SamplerInitThread
                           const std::vector<std::string>& filenames, const char* fa_fn,
                           TranscriptSet& transcripts,
                           std::vector<FragmentModel*>& fms,
+                          bool run_seqbias_correction,
                           bool run_gc_correction,
                           bool run_3p_correction,
                           bool run_frag_correction,
@@ -1451,6 +1400,7 @@ class SamplerInitThread
             , fa_fn(fa_fn)
             , transcripts(transcripts)
             , fms(fms)
+            , run_seqbias_correction(run_seqbias_correction)
             , run_gc_correction(run_gc_correction)
             , run_3p_correction(run_3p_correction)
             , run_frag_correction(run_frag_correction)
@@ -1472,9 +1422,10 @@ class SamplerInitThread
 
                 fms[index] = new FragmentModel();
                 fms[index]->estimate(transcripts, filenames[index].c_str(), fa_fn,
-                                     run_gc_correction, run_3p_correction,
-                                     run_frag_correction, collect_qc_data,
-                                     excluded_seqs, bias_training_seqnames);
+                                     run_seqbias_correction, run_gc_correction,
+                                     run_3p_correction, run_frag_correction,
+                                     collect_qc_data, excluded_seqs,
+                                     bias_training_seqnames);
 
                 samplers[index] = new Sampler(rng_seed,
                                               filenames[index].c_str(), fa_fn,
@@ -1501,6 +1452,7 @@ class SamplerInitThread
         const char* fa_fn;
         TranscriptSet& transcripts;
         std::vector<FragmentModel*>& fms;
+        bool run_seqbias_correction;
         bool run_gc_correction;
         bool run_3p_correction;
         bool run_frag_correction;
@@ -1522,7 +1474,7 @@ class SamplerTickThread
 {
     public:
         SamplerTickThread(std::vector<Sampler*>& samplers,
-                          matrix<double>& Q,
+                          matrix<float>& Q,
                           Queue<int>& tick_queue,
                           Queue<int>& tock_queue)
             : samplers(samplers)
@@ -1546,9 +1498,9 @@ class SamplerTickThread
                     samplers[index]->sample();
                 }
 
-                const std::vector<double>& state = samplers[index]->state();
+                const std::vector<float>& state = samplers[index]->state();
 
-                matrix_row<matrix<double> > row(Q, index);
+                matrix_row<matrix<float> > row(Q, index);
                 std::copy(state.begin(), state.end(), row.begin());
 
                 // notify of completion
@@ -1577,7 +1529,7 @@ class SamplerTickThread
 
     private:
         std::vector<Sampler*> samplers;
-        matrix<double>& Q;
+        matrix<float>& Q;
         Queue<int>& tick_queue;
         Queue<int>& tock_queue;
         boost::thread* thread;
@@ -1596,7 +1548,8 @@ void Analyze::setup_samplers()
     Queue<int> indexes;
     for (unsigned int i = 0; i < constants::num_threads; ++i) {
         threads[i] = new SamplerInitThread(rng_seed, filenames, genome_filename,
-                                           transcripts, fms, run_gc_correction,
+                                           transcripts, fms,
+                                           run_seqbias_correction, run_gc_correction,
                                            run_3p_correction, run_frag_correction,
                                            collect_qc_data, excluded_seqs,
                                            bias_training_seqnames,
@@ -1676,22 +1629,19 @@ void Analyze::setup_output(hid_t file_id)
 
         // tgroup table
         hid_t tgroup_dataset =
-            H5Dcreate2_checked(file_id, "/tgroup", H5T_NATIVE_UINT,
-                               dataspace, H5P_DEFAULT,
-                               H5P_DEFAULT, H5P_DEFAULT);
+        H5Dcreate2_checked(file_id, "/tgroup", H5T_NATIVE_UINT,
+                            dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
         unsigned int* tgroup_data = new unsigned int[N];
 
-        for (TranscriptSet::iterator t = transcripts.begin();
-                t != transcripts.end(); ++t) {
+        for (TranscriptSet::iterator t = transcripts.begin(); t != transcripts.end(); ++t) {
             tgroup_data[t->id] = t->tgroup;
         }
 
         H5Dwrite_checked(tgroup_dataset, H5T_NATIVE_UINT, H5S_ALL, H5S_ALL,
-                          H5S_ALL, tgroup_data);
+                         H5S_ALL, tgroup_data);
 
         H5Dclose(tgroup_dataset);
-
         delete [] tgroup_data;
     }
 
@@ -1738,7 +1688,7 @@ void Analyze::setup_output(hid_t file_id)
 
         h5_sample_scaling_dataspace = H5Screate_simple(2, dims, NULL);
         h5_sample_scaling_dataset =
-            H5Dcreate2_checked(file_id, "/sample_scaling", H5T_NATIVE_DOUBLE,
+            H5Dcreate2_checked(file_id, "/sample_scaling", H5T_NATIVE_FLOAT,
                                h5_sample_scaling_dataspace, H5P_DEFAULT,
                                dataset_create_property, H5P_DEFAULT);
 
@@ -1761,32 +1711,20 @@ void Analyze::setup_output(hid_t file_id)
             Logger::abort("HDF5 group creation failed.");
         }
 
-        hsize_t dims[2] = {num_samples, T};
-        hsize_t chunk_dims[2] = {1, T};
+        hsize_t dims[2] = {num_samples, N};
+        hsize_t chunk_dims[2] = {1, N};
 
         hid_t dataset_create_property = H5Pcreate(H5P_DATASET_CREATE);
         H5Pset_layout(dataset_create_property, H5D_CHUNKED);
         H5Pset_chunk(dataset_create_property, 2, chunk_dims);
         H5Pset_deflate(dataset_create_property, 7);
 
-        h5_experiment_tgroup_dataspace = H5Screate_simple(2, dims, NULL);
+        h5_experiment_mean_dataspace = H5Screate_simple(2, dims, NULL);
 
         h5_experiment_mean_dataset =
-            H5Dcreate2_checked(file_id, "/experiment/tgroup_mean", H5T_NATIVE_DOUBLE,
-                               h5_experiment_tgroup_dataspace, H5P_DEFAULT,
+            H5Dcreate2_checked(file_id, "/experiment/mean", H5T_NATIVE_FLOAT,
+                               h5_experiment_mean_dataspace, H5P_DEFAULT,
                                dataset_create_property, H5P_DEFAULT);
-
-        h5_experiment_sd_dataset =
-            H5Dcreate2_checked(file_id, "/experiment/tgroup_sd", H5T_NATIVE_DOUBLE,
-                               h5_experiment_tgroup_dataspace, H5P_DEFAULT,
-                               dataset_create_property, H5P_DEFAULT);
-
-        hsize_t tgroup_row_dims = T;
-        h5_tgroup_row_mem_dataspace = H5Screate_simple(1, &tgroup_row_dims, NULL);
-
-        hsize_t tgroup_row_start = 0;
-        H5Sselect_hyperslab_checked(h5_tgroup_row_mem_dataspace, H5S_SELECT_SET,
-                                    &tgroup_row_start, NULL, &tgroup_row_dims, NULL);
 
         // splicing parameters
         chunk_dims[1] = spliced_tgroup_indexes.size();
@@ -1823,19 +1761,30 @@ void Analyze::setup_output(hid_t file_id)
             Logger::abort("HDF5 group creation failed.");
         }
 
-        hsize_t dims[3] = {num_samples, C, T};
-        hsize_t chunk_dims[3] = {1, 1, T};
+        hsize_t dims[3] = {num_samples, C, N};
+        hsize_t chunk_dims[3] = {1, 1, N};
 
         hid_t dataset_create_property = H5Pcreate(H5P_DATASET_CREATE);
         H5Pset_layout(dataset_create_property, H5D_CHUNKED);
         H5Pset_chunk(dataset_create_property, 3, chunk_dims);
         H5Pset_deflate(dataset_create_property, 7);
 
-        h5_condition_tgroup_dataspace = H5Screate_simple(3, dims, NULL);
+        h5_condition_mean_dataspace = H5Screate_simple(3, dims, NULL);
 
         h5_condition_mean_dataset =
-            H5Dcreate2_checked(file_id, "/condition/tgroup_mean", H5T_NATIVE_FLOAT,
-                               h5_condition_tgroup_dataspace, H5P_DEFAULT,
+            H5Dcreate2_checked(file_id, "/condition/mean", H5T_NATIVE_FLOAT,
+                               h5_condition_mean_dataspace, H5P_DEFAULT,
+                               dataset_create_property, H5P_DEFAULT);
+
+        hsize_t condition_mean_dims[2] = {C, N};
+        h5_condition_mean_mem_dataspace = H5Screate_simple(2, condition_mean_dims, NULL);
+
+        hsize_t shape_chunk_dims[2] = {1, N};
+        H5Pset_chunk(dataset_create_property, 2, shape_chunk_dims);
+
+        h5_condition_shape_dataset =
+            H5Dcreate2_checked(file_id, "/condition/shape", H5T_NATIVE_FLOAT,
+                               h5_experiment_mean_dataspace, H5P_DEFAULT,
                                dataset_create_property, H5P_DEFAULT);
 
         // splicing
@@ -1869,6 +1818,9 @@ void Analyze::setup_output(hid_t file_id)
         H5Pclose(dataset_create_property);
     }
 
+    hsize_t dims[1] = { N };
+    h5_row_mem_dataspace = H5Screate_simple(1, dims, NULL);
+
     h5_splice_work = new hvl_t[spliced_tgroup_indexes.size()];
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
         size_t num_tids = tgroup_tids[spliced_tgroup_indexes[i]].size();
@@ -1898,9 +1850,9 @@ void Analyze::qsampler_update_hyperparameters()
         qsamplers[i]->hp.scale = scale[i];
 
         size_t c = condition[i];
-        for (size_t j = 0; j < T; ++j) {
-            qsamplers[i]->hp.tgroup_mean[j] = condition_tgroup_mean(c, j);
-            qsamplers[i]->hp.tgroup_shape[j] = condition_tgroup_shape[j];
+        for (size_t j = 0; j < N; ++j) {
+            qsamplers[i]->hp.mean[j] = condition_mean(c, j);
+            qsamplers[i]->hp.shape[j] = condition_shape[j];
         }
 
         std::fill(qsamplers[i]->hp.splice_mu.begin(),
@@ -1922,43 +1874,14 @@ void Analyze::qsampler_update_hyperparameters()
 }
 
 
-void Analyze::compute_ts()
-{
-    for (unsigned int i = 0; i < K; ++i) {
-        matrix_row<matrix<double> > row(ts, i);
-        std::fill(row.begin(), row.end(), 0.0);
-        for (TranscriptSet::iterator t = transcripts.begin(); t != transcripts.end(); ++t) {
-            row(t->tgroup) += Q(i, t->id);
-        }
-    }
-}
-
-
-void Analyze::compute_xs()
-{
-    for (unsigned int i = 0; i < K; ++i) {
-        std::fill(tgroup_expr.begin(), tgroup_expr.end(), 0.0);
-        for (TranscriptSet::iterator t = transcripts.begin(); t != transcripts.end(); ++t) {
-            tgroup_expr[t->tgroup] += Q(i, t->id);
-        }
-
-        for (TranscriptSet::iterator t = transcripts.begin(); t != transcripts.end(); ++t) {
-            xs(i, t->id) = Q(i, t->id) / tgroup_expr[t->tgroup];
-        }
-    }
-}
-
-
 void Analyze::run(hid_t output_file_id, bool dryrun)
 {
     C = condition_index.size();
     Q.resize(K, N);
-    ts.resize(K, T);
-    xs.resize(K, N);
     scale.resize(K, 1.0);
-    condition_tgroup_mean.resize(C, T);
-    condition_tgroup_shape.resize(T);
-    experiment_tgroup_mean.resize(T);
+    condition_mean.resize(C, N);
+    condition_shape.resize(N);
+    experiment_mean.resize(N);
 
     condition_splice_mu.resize(C);
     for (size_t i = 0; i < C; ++i) {
@@ -1988,7 +1911,6 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
 
     condition_splice_sigma_work.resize(flattened_sigma_size);
     experiment_splice_sigma_work.resize(C * flattened_sigma_size);
-    experiment_tgroup_shape_work.resize(C * T);
 
     experiment_splice_mu.resize(spliced_tgroup_indexes.size());
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
@@ -2026,28 +1948,27 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
         thread->start();
     }
 
-    musigma_sampler_threads.resize(constants::num_threads);
-    BOOST_FOREACH (ConditionTgroupMuSigmaSamplerThread*& thread, musigma_sampler_threads) {
-        thread = new ConditionTgroupMuSigmaSamplerThread(
-                ts,
-                condition_tgroup_mean, condition_tgroup_shape,
-                experiment_tgroup_mean, experiment_tgroup_shape,
-                condition_tgroup_alpha, condition_tgroup_beta,
+    meanshape_sampler_threads.resize(constants::num_threads);
+    BOOST_FOREACH (ConditionMeanShapeSamplerThread*& thread, meanshape_sampler_threads) {
+        thread = new ConditionMeanShapeSamplerThread(
+                Q, condition_mean, condition_shape,
+                experiment_mean, experiment_shape,
+                condition_shape_alpha, condition_shape_beta,
                 condition, condition_samples,
-                musigma_sampler_tick_queue,
-                musigma_sampler_notify_queue,
-                tgroup_rng_pool);
+                meanshape_sampler_tick_queue,
+                meanshape_sampler_notify_queue,
+                transcript_rng_pool);
         thread->start();
     }
 
-    experiment_musigma_sampler_threads.resize(constants::num_threads);
-    BOOST_FOREACH (ExperimentTgroupMuSigmaSamplerThread*& thread,
-                   experiment_musigma_sampler_threads) {
-        thread = new ExperimentTgroupMuSigmaSamplerThread(
-            experiment_tgroup_mean, experiment_tgroup_shape,
-            experiment_tgroup_mean0, experiment_tgroup_shape0,
-            condition_tgroup_mean, experiment_musigma_sampler_tick_queue,
-            experiment_musigma_sampler_notify_queue, tgroup_rng_pool);
+    experiment_meanshape_sampler_threads.resize(constants::num_threads);
+    BOOST_FOREACH (ExperimentMeanShapeSamplerThread*& thread,
+                   experiment_meanshape_sampler_threads) {
+        thread = new ExperimentMeanShapeSamplerThread(
+            experiment_mean, experiment_shape,
+            experiment_mean0, experiment_shape0,
+            condition_mean, experiment_meanshape_sampler_tick_queue,
+            experiment_meanshape_sampler_notify_queue, transcript_rng_pool);
 
         thread->start();
     }
@@ -2086,8 +2007,6 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
         thread->start();
     }
 
-    warmup();
-
     const char* optimize_task_name = "Optimizing";
     Logger::push_task(optimize_task_name, constants::num_opt_rounds);
 
@@ -2115,8 +2034,8 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
         thread->end_burnin();
     }
 
-    BOOST_FOREACH (ConditionTgroupMuSigmaSamplerThread* thread,
-                   musigma_sampler_threads) {
+    BOOST_FOREACH (ConditionMeanShapeSamplerThread* thread,
+                   meanshape_sampler_threads) {
         thread->end_burnin();
     }
 
@@ -2136,18 +2055,14 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         qsampler_tick_queue.push(-1);
-        musigma_sampler_tick_queue.push(IdxRange(-1, -1));
-        experiment_musigma_sampler_tick_queue.push(IdxRange(-1, -1));
-        splice_mu_sigma_sampler_tick_queue.push(IdxRange(-1, -1));
-        experiment_splice_mu_sigma_sampler_tick_queue.push(IdxRange(-1, -1));
+        meanshape_sampler_tick_queue.push(IdxRange(-1, -1));
+        experiment_meanshape_sampler_tick_queue.push(IdxRange(-1, -1));
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         qsampler_threads[i]->join();
-        musigma_sampler_threads[i]->join();
-        experiment_musigma_sampler_threads[i]->join();
-        splice_mu_sigma_sampler_threads[i]->join();
-        experiment_splice_mu_sigma_sampler_threads[i]->join();
+        meanshape_sampler_threads[i]->join();
+        experiment_meanshape_sampler_threads[i]->join();
     }
 
     BOOST_FOREACH (Sampler* qsampler, qsamplers) {
@@ -2156,27 +2071,27 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         delete qsampler_threads[i];
-        delete musigma_sampler_threads[i];
-        delete experiment_musigma_sampler_threads[i];
-        delete splice_mu_sigma_sampler_threads[i];
-        delete experiment_splice_mu_sigma_sampler_threads[i];
+        delete meanshape_sampler_threads[i];
+        delete experiment_meanshape_sampler_threads[i];
     }
 
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
         delete [] reinterpret_cast<float*>(h5_splice_work[i].p);
     }
     delete [] h5_splice_work;
+
     H5Dclose(h5_experiment_mean_dataset);
-    H5Sclose(h5_experiment_tgroup_dataspace);
+    H5Sclose(h5_experiment_mean_dataspace);
     H5Dclose(h5_condition_mean_dataset);
-    H5Sclose(h5_condition_tgroup_dataspace);
+    H5Sclose(h5_condition_mean_dataspace);
+    H5Sclose(h5_condition_mean_mem_dataspace);
     H5Dclose(h5_sample_quant_dataset);
+    H5Sclose(h5_sample_quant_dataspace);
+    H5Sclose(h5_sample_quant_mem_dataspace);
     H5Dclose(h5_experiment_splice_mu_dataset);
     H5Dclose(h5_condition_splice_mu_dataset);
     H5Dclose(h5_condition_splice_sigma_dataset);
-    H5Sclose(h5_sample_quant_dataspace);
-    H5Sclose(h5_sample_quant_mem_dataspace);
-    H5Sclose(h5_tgroup_row_mem_dataspace);
+    H5Sclose(h5_row_mem_dataspace);
     H5Sclose(h5_experiment_splice_dataspace);
     H5Sclose(h5_condition_splice_mu_dataspace);
     H5Sclose(h5_condition_splice_sigma_dataspace);
@@ -2187,68 +2102,6 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
     H5Sclose(h5_sample_scaling_mem_dataspace);
 
     Logger::pop_task(sample_task_name);
-}
-
-
-void Analyze::warmup()
-{
-#if 0
-    // draw a few samples from the quantification samplers without priors
-    for (size_t i = 0; i < 10; ++i) {
-        for (size_t j = 0; j < K; ++j) {
-            qsampler_tick_queue.push(j);
-        }
-
-        for (size_t j = 0; j < K; ++j) {
-            qsampler_notify_queue.pop();
-        }
-    }
-
-    compute_ts();
-    compute_ts_scaling();
-    compute_xs();
-#endif
-
-#if 0
-    // choose ml estimates for tgroup_mu
-    for (size_t i = 0; i < C; ++i) {
-        for (size_t j = 0; j < T; ++j) {
-            double mu = 0.0;
-            BOOST_FOREACH (int l, condition_samples[i]) {
-                mu += ts(l, j);
-            }
-            tgroup_mu(i, j) = mu / condition_samples[i].size();
-        }
-    }
-#endif
-
-    // choose initially flat values for splicing parameters
-    for (size_t i = 0; i < C; ++i) {
-        for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
-            std::fill(condition_splice_mu[i][j].begin(),
-                      condition_splice_mu[i][j].end(), 0.5);
-        }
-    }
-
-    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
-        std::fill(condition_splice_sigma[i].begin(),
-                  condition_splice_sigma[i].end(), 0.1);
-    }
-
-    // initialially flat values for experiment splicing
-    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
-        std::fill(experiment_splice_mu[i].begin(),
-                  experiment_splice_mu[i].end(), 0.5);
-    }
-
-    // ml estimates for experiment_tgroup_mean
-    for (size_t j = 0; j < T; ++j) {
-        double mu = 0.0;
-        for (size_t i = 0; i < C; ++i) {
-            mu += condition_tgroup_mean(i, j);
-        }
-        experiment_tgroup_mean[j] = mu / C;
-    }
 }
 
 
@@ -2267,12 +2120,12 @@ void Analyze::sample(bool optimize_state)
     // sampling these parameters can't be done in parallel, so we take this
     // oppourtunity
 
-    condition_tgroup_beta =
+    condition_shape_beta =
         gamma_beta_sampler->sample(
-                rng, condition_tgroup_beta, condition_tgroup_alpha,
-                condition_tgroup_beta_a, condition_tgroup_beta_b,
-                &condition_tgroup_shape.at(0), T);
-    assert_finite(condition_tgroup_beta);
+                rng, condition_shape_beta, condition_shape_alpha,
+                condition_shape_beta_a, condition_shape_beta_b,
+                &condition_shape.at(0), N);
+    assert_finite(condition_shape_beta);
 
     for (size_t i = 0, j = 0; j < condition_splice_sigma.size(); ++j) {
         for (size_t k = 0; k < condition_splice_sigma[j].size(); ++k) {
@@ -2303,6 +2156,7 @@ void Analyze::sample(bool optimize_state)
             experiment_splice_sigma_work.size(),
             experiment_splice_sigma_alpha, experiment_splice_sigma_beta);
 
+
     // TODO: sampling experiment_tgroup_shape is currently to slow,
     // and not important enough to bother with.
 
@@ -2318,29 +2172,21 @@ void Analyze::sample(bool optimize_state)
     //     condition_tgroup_mean.data().size(),
     //     experiment_tgroup_sigma_alpha, experiment_tgroup_sigma_beta);
 
-    experiment_tgroup_shape = constants::analyze_experiment_tgroup_shape;
+    experiment_shape = constants::analyze_experiment_shape;
 
     for (size_t i = 0; i < K; ++i) {
         qsampler_notify_queue.pop();
     }
 
-    compute_ts_scaling();
-    compute_ts();
-    compute_xs();
+    compute_scaling();
 
     // size of units of work queued for threads
     const size_t block_size = 250;
 
     // sample condition-level parameters
-
-    for (size_t i = 0; i < T; i += block_size) {
-        musigma_sampler_tick_queue.push(
-                IdxRange(i, std::min<int>(T, i + block_size)));
-    }
-
-    for (size_t i = 0; i < T; i += block_size) {
-        musigma_sampler_notify_queue.pop();
-        i += block_size;
+    for (size_t i = 0; i < N; i += block_size) {
+        meanshape_sampler_tick_queue.push(
+                IdxRange(i, std::min<int>(N, i + block_size)));
     }
 
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); i += block_size) {
@@ -2348,24 +2194,27 @@ void Analyze::sample(bool optimize_state)
                 IdxRange(i, std::min<int>(spliced_tgroup_indexes.size(), i + block_size)));
     }
 
+    for (size_t i = 0; i < N; i += block_size) {
+        meanshape_sampler_notify_queue.pop();
+    }
+
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); i += block_size) {
         splice_mu_sigma_sampler_notify_queue.pop();
     }
 
     // sample experiment-level parameters
-
-    for (size_t i = 0; i < T; i += block_size) {
-        experiment_musigma_sampler_tick_queue.push(
-                IdxRange(i, std::min<int>(T, i + block_size)));
-    }
-
-    for (size_t i = 0; i < T; i += block_size) {
-        experiment_musigma_sampler_notify_queue.pop();
+    for (size_t i = 0; i < N; i += block_size) {
+        experiment_meanshape_sampler_tick_queue.push(
+                IdxRange(i, std::min<int>(N, i + block_size)));
     }
 
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); i += block_size) {
         experiment_splice_mu_sigma_sampler_tick_queue.push(
                 IdxRange(i, std::min<int>(spliced_tgroup_indexes.size(), i + block_size)));
+    }
+
+    for (size_t i = 0; i < N; i += block_size) {
+        experiment_meanshape_sampler_notify_queue.pop();
     }
 
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); i += block_size) {
@@ -2377,30 +2226,22 @@ void Analyze::sample(bool optimize_state)
 void Analyze::write_output(size_t sample_num)
 {
     hsize_t file_start2[2] = {sample_num, 0};
-    hsize_t file_count2[2] = {1, T};
+    hsize_t file_count2[2] = {1, N};
 
-    H5Sselect_hyperslab_checked(h5_experiment_tgroup_dataspace, H5S_SELECT_SET,
+    H5Sselect_hyperslab_checked(h5_experiment_mean_dataspace, H5S_SELECT_SET,
                                 file_start2, NULL, file_count2, NULL);
-    std::copy(experiment_tgroup_mean.begin(), experiment_tgroup_mean.end(),
-              tgroup_row_data.begin());
     H5Dwrite_checked(h5_experiment_mean_dataset, H5T_NATIVE_FLOAT,
-                              h5_tgroup_row_mem_dataspace, h5_experiment_tgroup_dataspace,
-                              H5P_DEFAULT, &tgroup_row_data.at(0));
+                     h5_row_mem_dataspace, h5_experiment_mean_dataspace,
+                     H5P_DEFAULT, &experiment_mean.at(0));
 
     hsize_t file_start3[3] = {sample_num, 0, 0};
-    hsize_t file_count3[3] = {1, 1, T};
+    hsize_t file_count3[3] = {1, C, N};
 
-    for (size_t i = 0; i < C; ++i) {
-        file_start3[1] = i;
-        H5Sselect_hyperslab_checked(h5_condition_tgroup_dataspace, H5S_SELECT_SET,
-                                    file_start3, NULL, file_count3, NULL);
-
-        matrix_row<matrix<double > > mu_row(condition_tgroup_mean, i);
-        std::copy(mu_row.begin(), mu_row.end(), tgroup_row_data.begin());
-        H5Dwrite_checked(h5_condition_mean_dataset, H5T_NATIVE_FLOAT,
-                                  h5_tgroup_row_mem_dataspace, h5_condition_tgroup_dataspace,
-                                  H5P_DEFAULT, &tgroup_row_data.at(0));
-    }
+    H5Sselect_hyperslab_checked(h5_condition_mean_dataspace, H5S_SELECT_SET,
+                                file_start3, NULL, file_count3, NULL);
+    H5Dwrite_checked(h5_condition_mean_dataset, H5T_NATIVE_FLOAT,
+                     h5_condition_mean_mem_dataspace, h5_condition_mean_dataspace,
+                     H5P_DEFAULT, &condition_mean.data()[0]);
 
     hsize_t sample_quant_start[3] = {sample_num, 0, 0};
     hsize_t sample_quant_count[3] = {1, K, N};
@@ -2409,7 +2250,7 @@ void Analyze::write_output(size_t sample_num)
                                 sample_quant_start, NULL,
                                 sample_quant_count, NULL);
 
-    H5Dwrite_checked(h5_sample_quant_dataset, H5T_NATIVE_DOUBLE,
+    H5Dwrite_checked(h5_sample_quant_dataset, H5T_NATIVE_FLOAT,
                      h5_sample_quant_mem_dataspace, h5_sample_quant_dataspace,
                      H5P_DEFAULT, &Q.data()[0]);
 
@@ -2419,7 +2260,7 @@ void Analyze::write_output(size_t sample_num)
     H5Sselect_hyperslab_checked(h5_sample_scaling_dataspace, H5S_SELECT_SET,
                                 sample_scaling_start, NULL,
                                 sample_scaling_count, NULL);
-    H5Dwrite_checked(h5_sample_scaling_dataset, H5T_NATIVE_DOUBLE,
+    H5Dwrite_checked(h5_sample_scaling_dataset, H5T_NATIVE_FLOAT,
                      h5_sample_scaling_mem_dataspace, h5_sample_scaling_dataspace,
                      H5P_DEFAULT, &scale.at(0));
 
@@ -2486,7 +2327,7 @@ void Analyze::write_output(size_t sample_num)
 }
 
 
-void Analyze::compute_ts_scaling()
+void Analyze::compute_scaling()
 {
     size_t effective_size =
         std::min<size_t>(N, constants::sample_scaling_truncation);
@@ -2494,11 +2335,11 @@ void Analyze::compute_ts_scaling()
         N - effective_size + constants::sample_scaling_quantile * effective_size;
 
     for (unsigned int i = 0; i < K; ++i) {
-        matrix_row<matrix<double> > row(Q, i);
+        matrix_row<matrix<float> > row(Q, i);
 
         // unscale abundance estimates so we can compute a new scale
         // and renormalize. I know this must seem weird.
-        BOOST_FOREACH (double& x, row) x /= scale[i];
+        BOOST_FOREACH (float& x, row) x /= scale[i];
 
         // normalize according to an upper quantile
         std::copy(row.begin(), row.end(), scale_work.begin());
@@ -2511,8 +2352,8 @@ void Analyze::compute_ts_scaling()
     }
 
     for (unsigned int i = 0; i < K; ++i) {
-        matrix_row<matrix<double> > row(Q, i);
-        BOOST_FOREACH (double& x, row) {
+        matrix_row<matrix<float> > row(Q, i);
+        BOOST_FOREACH (float& x, row) {
             x *= scale[i];
         }
     }
@@ -2521,14 +2362,33 @@ void Analyze::compute_ts_scaling()
 
 void Analyze::choose_initial_values()
 {
-    std::fill(experiment_tgroup_mean.begin(), experiment_tgroup_mean.end(), -20);
-    std::fill(condition_tgroup_mean.data().begin(), condition_tgroup_mean.data().end(), 1e-6);
-    std::fill(condition_tgroup_shape.begin(), condition_tgroup_shape.end(), 1.0);
+    std::fill(experiment_mean.begin(), experiment_mean.end(), constants::zero_eps);
+    std::fill(condition_mean.data().begin(), condition_mean.data().end(), constants::zero_eps);
+    std::fill(condition_shape.begin(), condition_shape.end(), 1.0);
+
+    experiment_shape = 2.0;
+    condition_shape_beta = 1.0;
 
     experiment_splice_sigma = 0.5;
-    experiment_tgroup_shape = 2.0;
-
-    condition_tgroup_beta = 1.0;
     condition_splice_beta = 1.0;
+
+    // choose initially flat values for splicing parameters
+    for (size_t i = 0; i < C; ++i) {
+        for (size_t j = 0; j < spliced_tgroup_indexes.size(); ++j) {
+            std::fill(condition_splice_mu[i][j].begin(),
+                      condition_splice_mu[i][j].end(), 0.5);
+        }
+    }
+
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        std::fill(condition_splice_sigma[i].begin(),
+                  condition_splice_sigma[i].end(), 0.1);
+    }
+
+    // initialially flat values for experiment splicing
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        std::fill(experiment_splice_mu[i].begin(),
+                  experiment_splice_mu[i].end(), 0.5);
+    }
 }
 

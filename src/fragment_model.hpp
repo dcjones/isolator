@@ -21,6 +21,7 @@ class FragmentModel
         FragmentModel();
         ~FragmentModel();
         void estimate(TranscriptSet& ts, const char* bam_fn, const char* fa_fn,
+                      bool use_seqbias_correction,
                       bool use_gc_correction, bool use_3p_correction,
                       bool use_frag_correction, bool tabulate_seqbias,
                       std::set<std::string> excluded_seqs,

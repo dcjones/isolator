@@ -58,7 +58,7 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
     twobitseq tbseqrc;
     rng_t rng;
 
-    pos_t L = seqbias[0]->getL();
+    pos_t L = seqbias[0] ? seqbias[0]->getL() : 0;
 
     std::vector<ReadPos>::iterator i;
     for (i = foreground_positions.begin(); i != foreground_positions.end(); ++i) {
@@ -79,7 +79,6 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
             }
 
             curr_seqname = i->seqname;
-
         }
 
         if (seq == NULL || (pos_t) tbseq.size() < median_frag_len) continue;
@@ -90,18 +89,20 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
 
         // sample background position
         boost::random::uniform_int_distribution<pos_t> random_uniform(
-                i->start, i->end - median_frag_len + 1);
+                i->start + L, i->end - median_frag_len);
         pos_t pos = random_uniform(rng);
         float gc = (float) gc_count(seq + pos, median_frag_len) / median_frag_len;
-        float sb = seqbias[0]->get_bias(tbseq, pos - L) *
-                   seqbias[1]->get_bias(tbseqrc, seqlen - pos - 1 - L);
+        float sb = seqbias[0] ?
+                   seqbias[0]->get_bias(tbseq, pos - L) *
+                   seqbias[1]->get_bias(tbseqrc, seqlen - pos - 1 - L) : 1.0;
         background_gc.push_back(WeightedGC(gc, 1.0 / sb));
 
         // sample foreground position
         if (i->strand == 0) {
             if (i->pos >= i->start && i->pos + median_frag_len - 1 <= i->end) {
-                float sb = seqbias[0]->get_bias(tbseq, i->pos - L) *
-                           seqbias[1]->get_bias(tbseqrc, seqlen - i->pos - 1 - L);
+                float sb = seqbias[0] ?
+                           seqbias[0]->get_bias(tbseq, i->pos - L) *
+                           seqbias[1]->get_bias(tbseqrc, seqlen - i->pos - 1 - L) : 1.0;
 
                 foreground_gc.push_back(
                     WeightedGC((float) gc_count(seq + i->pos, median_frag_len) / median_frag_len,
@@ -109,14 +110,14 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
             }
         } else {
             if (i->pos - median_frag_len >= i->start && i->pos <= i->end) {
-                float sb = seqbias[0]->get_bias(tbseq, i->pos - median_frag_len - L) *
-                           seqbias[1]->get_bias(tbseqrc, seqlen - i->pos - median_frag_len - 1 - L);
+                float sb = seqbias[0] ?
+                           seqbias[0]->get_bias(tbseq, i->pos - median_frag_len - L) *
+                           seqbias[1]->get_bias(tbseqrc, seqlen - i->pos - median_frag_len - 1 - L) : 1.0;
                 foreground_gc.push_back(
                     WeightedGC((float) gc_count(seq + i->pos - median_frag_len, median_frag_len) / median_frag_len,
                                1.0 /sb));
             }
         }
-
         task.inc();
     }
 
@@ -192,12 +193,18 @@ GCBias::GCBias(const char* ref_filename, PosTable& foreground_position_table,
 
 double GCBias::get_bias(double gc)
 {
-    std::vector<double>::iterator i =
-        std::lower_bound(bins.begin(), bins.end(), gc);
+    const float* bin =
+        std::lower_bound(constants::gcbias_bins,
+                         constants::gcbias_bins + constants::gcbias_num_bins,
+                         gc);
 
-    if (i == bins.end()) return bin_bias.back();
+    size_t i = bin - constants::gcbias_bins;
 
-    return bin_bias[i - bins.begin()];
+    if (i >= constants::gcbias_num_bins) {
+        return bin_bias.back();
+    }
+
+    return bin_bias[i];
 }
 
 

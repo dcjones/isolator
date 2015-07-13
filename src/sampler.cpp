@@ -10,6 +10,7 @@
 #include <ctime>
 
 #include "constants.hpp"
+#include "distributions.hpp"
 #include "fastmath.hpp"
 #include "hat-trie/hat-trie.h"
 #include "logger.hpp"
@@ -35,16 +36,9 @@ static void supress_khash_unused_function_warnings()
 }
 }
 
-
 static double sq(double x)
 {
     return x * x;
-}
-
-
-static double poisson_lnpdf(double lambda, unsigned int k)
-{
-    return k * fastlog(lambda) - lgamma(k + 1) - lambda;
 }
 
 
@@ -1446,218 +1440,6 @@ struct ComponentCmpRev
 };
 
 
-class InterTgroupSampler : public Shredder
-{
-    public:
-        InterTgroupSampler(Sampler& S)
-            : Shredder(constants::zero_eps, 1.0 - constants::zero_eps, constants::zero_eps)
-            , S(S)
-        {
-            size_t max_comp_size = 0;
-            for (unsigned int c = 0; c < S.num_components; ++c) {
-                max_comp_size = std::max<size_t>(max_comp_size,
-                        S.component_frag[c + 1] - S.component_frag[c]);
-            }
-
-            row_u = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
-            row_v = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
-            frag_probs = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
-            frag_probs_prop = reinterpret_cast<float*>(aalloc(max_comp_size * sizeof(float)));
-            idxs = new unsigned int [max_comp_size];
-            idxs_work = new unsigned int [max_comp_size];
-        }
-
-        ~InterTgroupSampler()
-        {
-            delete [] idxs;
-            delete [] idxs_work;
-            afree(frag_probs);
-            afree(frag_probs_prop);
-            afree(row_u);
-            afree(row_v);
-        }
-
-        double sample(rng_t& rng, unsigned int c, unsigned int u, unsigned int v,
-                      bool optimize_state)
-        {
-            double x0 = S.tgroupmix[u] / (S.tgroupmix[u] + S.tgroupmix[v]);
-
-            if (upper_limit <= lower_limit) return x0;
-
-            idxlen = 0;
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
-                std::swap(idxs, idxs_work);
-                idxlen = S.weight_matrix->idx_union(idxs, idxs_work, idxlen, tid);
-            }
-
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
-                std::swap(idxs, idxs_work);
-                idxlen = S.weight_matrix->idx_union(idxs, idxs_work, idxlen, tid);
-            }
-
-            uf0 = idxlen;
-            uf1 = 0;
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
-                if (S.weight_matrix->rowlens[tid] > 0) {
-                    unsigned int firstidx = S.weight_matrix->idxs[tid][0];
-                    unsigned int lastidx = S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1];
-
-                    unsigned int tid_f0, tid_f1;
-                    for (tid_f0 = 0; tid_f0 < idxlen && idxs[tid_f0] != firstidx; ++tid_f0);
-                    for (tid_f1 = tid_f0; tid_f1 < idxlen && idxs[tid_f1] != lastidx; ++tid_f1);
-                    ++tid_f1;
-
-                    uf0 = std::min<unsigned int>(uf0, tid_f0);
-                    uf1 = std::max<unsigned int>(uf1, tid_f1);
-                }
-            }
-            uf0 &= 0xfffffff8;
-            memset(row_u, 0, idxlen * sizeof(float));
-
-            vf0 = idxlen;
-            vf1 = 0;
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
-                if (S.weight_matrix->rowlens[tid] > 0) {
-                    unsigned int firstidx = S.weight_matrix->idxs[tid][0];
-                    unsigned int lastidx = S.weight_matrix->idxs[tid][S.weight_matrix->rowlens[tid] - 1];
-
-                    unsigned int tid_f0, tid_f1;
-                    for (tid_f0 = 0; tid_f0 < idxlen && idxs[tid_f0] != firstidx; ++tid_f0);
-                    for (tid_f1 = tid_f0; tid_f1 < idxlen && idxs[tid_f1] != lastidx; ++tid_f1);
-                    ++tid_f1;
-
-                    vf0 = std::min<unsigned int>(vf0, tid_f0);
-                    vf1 = std::max<unsigned int>(vf1, tid_f1);
-                }
-            }
-            vf0 &= 0xfffffff8;
-
-            this->x0 = x0;
-            this->c = c;
-            this->u = u;
-            this->v = v;
-            this->tgroupmix_uv = S.tgroupmix[u] + S.tgroupmix[v];
-
-            memset(row_u, 0, idxlen * sizeof(float));
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
-                S.weight_matrix->expand_row(row_u, idxs + uf0, uf1 - uf0, tid,
-                                            S.tgroup_tmix[tid]);
-            }
-
-            memset(row_v, 0, idxlen * sizeof(float));
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
-                S.weight_matrix->expand_row(row_v, idxs + vf0, vf1 - vf0, tid,
-                                            S.tgroup_tmix[tid]);
-            }
-
-            for (unsigned int k = 0; k < idxlen; ++k) {
-                frag_probs[k] = S.frag_probs[c][idxs[k] - S.component_frag[c]];
-            }
-
-            if (optimize_state) {
-                return Shredder::optimize(x0);
-            }
-            else {
-                return Shredder::sample(rng, x0);
-            }
-        }
-
-    protected:
-        double f(double x, double& d)
-        {
-            double tgroupmix_u = x * tgroupmix_uv;
-            double tgroupmix_v = (1 - x) * tgroupmix_uv;
-
-            acopy(frag_probs_prop, frag_probs, idxlen * sizeof(float));
-
-            for (unsigned int k = 0; k < idxlen; ++k) {
-                frag_probs_prop[k] = S.frag_probs[c][idxs[k] - S.component_frag[c]];
-            }
-
-            axpy(frag_probs_prop + uf0,
-                 row_u, tgroupmix_u - S.tgroupmix[u], uf1 - uf0);
-
-            axpy(frag_probs_prop + vf0,
-                 row_v, tgroupmix_v - S.tgroupmix[v], vf1 - vf0);
-
-            // gradient
-            d = 0.0;
-            d += sumdiv(row_u, frag_probs_prop + uf0, uf1 - uf0);
-            d -= sumdiv(row_v, frag_probs_prop + vf0, vf1 - vf0);
-            d *= tgroupmix_u + tgroupmix_v;
-
-            // prior probability
-            double prior_lp = 0.0;
-            if (S.use_priors) {
-                double xu = S.cmix[c] * tgroupmix_u / S.tgroup_scaling[u];
-                prior_lp += tgroup_prior.f(S.hp.tgroup_mean[u],
-                                           S.hp.tgroup_shape[u], &xu, 1);
-
-                double xv = S.cmix[c] * tgroupmix_v / S.tgroup_scaling[v];
-                prior_lp += tgroup_prior.f(S.hp.tgroup_mean[v],
-                                           S.hp.tgroup_shape[v], &xv, 1);
-
-                d += (S.cmix[c] * tgroupmix_uv / S.tgroup_scaling[u]) *
-                     tgroup_prior.df_dx(S.hp.tgroup_mean[u],
-                                        S.hp.tgroup_shape[u],
-                                        &xv, 1);
-
-                d += -(S.cmix[c] * tgroupmix_uv / S.tgroup_scaling[v]) *
-                     tgroup_prior.df_dx(S.hp.tgroup_mean[u],
-                                        S.hp.tgroup_shape[u],
-                                        &xv, 1);
-
-                //////////////////////////////////
-                // double xu = S.cmix[c] * tgroupmix_u;
-                // double logxu = fastlog(xu) - fastlog(S.tgroup_scaling[u]);
-                // double mu_u = S.hp.tgroup_mu[u];
-                // prior_lp += tgroup_prior.f(mu_u, S.hp.tgroup_sigma[u], logxu);
-                // prior_lp -= fastlog(x); // jacobian
-
-                // double xv = S.cmix[c] * tgroupmix_v;
-                // double logxv = fastlog(xv) - fastlog(S.tgroup_scaling[v]);
-                // double mu_v = S.hp.tgroup_mu[v];
-                // prior_lp += tgroup_prior.f(mu_v, S.hp.tgroup_sigma[v], logxv);
-                // prior_lp -= fastlog(1 - x); // jacobian
-
-                // // derivative of normal log-pdf
-                // d += (mu_u - logxu) / (sq(S.hp.tgroup_sigma[u]) * x);
-                // // XXX: Should this be +=, that makes more intuitive sense
-                // d -= (mu_v - logxv) / (sq(S.hp.tgroup_sigma[v]) * (1 - x));
-
-                // // derivative of jacobian
-                // d -= 1/x;
-                // d += 1/(1-x);
-            }
-
-            // optimization can fail if d is huge
-            d = std::max<double>(std::min<double>(d, 1e4), -1e4);
-
-            double lp = sumlog(frag_probs_prop, idxlen);
-            return lp / M_LOG2E + prior_lp;
-        }
-
-    private:
-        AltGammaLogPdf tgroup_prior;
-        float *row_u, *row_v;
-        unsigned int *idxs, *idxs_work;
-        unsigned int idxlen;
-        float *frag_probs, *frag_probs_prop;
-
-        double x0;
-
-        // log-probability of the fragments in [f0, f1]
-        unsigned int c;
-        unsigned int u;
-        unsigned int v;
-        unsigned int uf0, uf1,
-                     vf0, vf1;
-        double tgroupmix_uv;
-
-        Sampler& S;
-};
-
-
 double intertranscriptsampler_nlopt_objective(unsigned int _n, const double* _x,
                                               double* _grad, void* data);
 
@@ -1668,8 +1450,8 @@ class InterTranscriptSampler
         InterTranscriptSampler(Sampler& S)
             : opt(NULL)
             , S(S)
-            , lower_limit(constants::zero_eps)
-            , upper_limit(1.0 - constants::zero_eps)
+            , lower_limit(1e-6)
+            , upper_limit(1.0 - 1e-6)
         {
             opt = nlopt_create(NLOPT_LD_SLSQP, 1);
             //opt = nlopt_create(NLOPT_LN_SBPLX, 1);
@@ -1716,6 +1498,10 @@ class InterTranscriptSampler
 
         double sample(double x0)
         {
+            if (lower_limit > upper_limit) return x0;
+
+            x0 = std::max<double>(std::min<double>(upper_limit, x0), lower_limit);
+
             double d0;
             double lp0 = f(x0, d0);
             assert_finite(lp0);
@@ -1727,10 +1513,9 @@ class InterTranscriptSampler
             double x_min = find_slice_edge(x0, slice_height, lp0, d0, -1, &x_min_lp);
             double x_max = find_slice_edge(x0, slice_height, lp0, d0,  1, &x_max_lp);
 
-            const double x_eps = 1e-6;
             double d;
             double x = (x_min + x_max) / 2;
-            while (fabs(x_max - x_min) > x_eps) {
+            while (fabs(x_max - x_min) > tolerance) {
                 x = x_min + (x_max - x_min) * random_uniform_01(rng);
                 double lp = f(x, d);
 
@@ -1747,19 +1532,38 @@ class InterTranscriptSampler
             this->u = u;
             this->v = v;
 
+            tgu = S.transcript_tgroup[u];
+            tgv = S.transcript_tgroup[v];
+
+            wtmix_tgu_sum = 0.0;
+            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgu]) {
+                wtmix_tgu_sum += S.tmix[tid] / S.transcript_weights[tid];
+            }
+
+            if (tgu == tgv) {
+                wtmix_tgv_sum = 0.0;
+                BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgv]) {
+                    wtmix_tgv_sum += S.tmix[tid] / S.transcript_weights[tid];
+                }
+            }
+
             c = S.transcript_component[u];
             assert(c == S.transcript_component[v]);
 
-            tgroup = S.transcript_tgroup[u];
-            assert(tgroup == S.transcript_tgroup[v]);
+            // set suitable lower/upper_limit
+            lower_limit = constants::min_expr * S.expr_scaling[u] / (S.cmix[c] * (S.tmix[u] + S.tmix[v]));
+            lower_limit = std::max<double>(lower_limit, constants::zero_eps);
 
-            wtgroupmix0 = 0.0;
-            BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
-                wtgroupmix0 += S.tmix[tid] / S.transcript_weights[tid];
-            }
+            upper_limit = 1.0 - constants::min_expr * S.expr_scaling[v] / (S.cmix[c] * (S.tmix[u] + S.tmix[v]));
+            upper_limit = std::min<double>(upper_limit, 1.0 - constants::zero_eps);
 
+            tolerance = std::min<double>(
+                constants::min_expr * S.expr_scaling[u] / S.cmix[c],
+                constants::min_expr * S.expr_scaling[v] / S.cmix[c]);
+            tolerance = std::max<double>(tolerance, constants::zero_eps);
+
+            // find the smallest range of fragments shared by both transcripts
             idxlen = S.weight_matrix->idx_union(idxs, u, v);
-
             uf0 = uf1 = 0;
             if (S.weight_matrix->rowlens[u] > 0) {
                 unsigned int firstidx = S.weight_matrix->idxs[u][0];
@@ -1787,6 +1591,18 @@ class InterTranscriptSampler
             for (unsigned int k = 0; k < idxlen; ++k) {
                 frag_probs[k] = S.frag_probs[c][idxs[k] - S.component_frag[c]];
             }
+
+            if (S.use_priors) {
+                prior_u.set_mean(S.hp.mean[u]);
+                prior_dx_u.set_mean(S.hp.mean[u]);
+                prior_u.set_shape(S.hp.shape[u]);
+                prior_dx_u.set_shape(S.hp.shape[u]);
+
+                prior_v.set_mean(S.hp.mean[v]);
+                prior_dx_v.set_mean(S.hp.mean[v]);
+                prior_v.set_shape(S.hp.shape[v]);
+                prior_dx_v.set_shape(S.hp.shape[v]);
+            }
         }
 
 
@@ -1804,6 +1620,8 @@ class InterTranscriptSampler
             double maxf;
             double x = std::max<double>(std::min<double>(x0, upper_limit), lower_limit);
 
+            nlopt_set_lower_bounds(opt, &lower_limit);
+            nlopt_set_upper_bounds(opt, &upper_limit);
             nlopt_result result = nlopt_optimize(opt, &x, &maxf);
             if (result < 0 && result != NLOPT_ROUNDOFF_LIMITED) {
                 Logger::warn("Optimization failed with code %d", (int) result);
@@ -1820,7 +1638,7 @@ class InterTranscriptSampler
         {
             const double lp_eps = 1e-3;
             const double d_eps  = 1e-1;
-            const double x_eps  = 1e-6;
+            const double x_eps  = tolerance;
 
             size_t newton_count = 0;
             double lp = lp0 - slice_height;
@@ -1831,14 +1649,14 @@ class InterTranscriptSampler
                 x_bound_lower = lower_limit;
                 x_bound_upper = x0;
                 if (f(0.0, d) > slice_height) {
-                    return 0.0;
+                    return lower_limit;
                 }
             }
             else {
                 x_bound_lower = x0;
                 x_bound_upper = upper_limit;
                 if (f(1.0, d) > slice_height) {
-                    return 1.0;
+                    return upper_limit;
                 }
             }
 
@@ -1918,7 +1736,7 @@ class InterTranscriptSampler
             double wu = S.transcript_weights[u];
             double wv = S.transcript_weights[v];
             double c = S.tmix[u] + S.tmix[v];
-            double a = wtgroupmix0 - S.tmix[u] / wu - S.tmix[v] / wv;
+            double a = wtmix_tgu_sum - S.tmix[u] / wu - S.tmix[v] / wv;
 
             // derivative of: (x*c/u) / (x*c/u + (1-x)*c/v + a))
             return
@@ -1932,7 +1750,7 @@ class InterTranscriptSampler
             double wu = S.transcript_weights[u];
             double wv = S.transcript_weights[v];
             double c = S.tmix[u] + S.tmix[v];
-            double a = wtgroupmix0 - S.tmix[u] / wu - S.tmix[v] / wv;
+            double a = wtmix_tgv_sum - S.tmix[u] / wu - S.tmix[v] / wv;
 
             // derivative of: ((1-x)*c/v) / (x*c/u + (1-x)*c/v + a))
             return
@@ -1946,7 +1764,7 @@ class InterTranscriptSampler
             double wu = S.transcript_weights[u];
             double wv = S.transcript_weights[v];
             double c = S.tmix[u] + S.tmix[v];
-            double a = wtgroupmix0 - S.tmix[u] / wu - S.tmix[v] / wv;
+            double a = wtmix_tgu_sum - S.tmix[u] / wu - S.tmix[v] / wv;
 
             double d = 2 * (2 * c * (wu - wv)) /
                 (a * wu * wv + c * (wu * (-x) + wu + wv * x));
@@ -1956,6 +1774,77 @@ class InterTranscriptSampler
             return d;
         }
 
+        double nonmatched_weight_transform_gradient_u_tid(double x, unsigned int tid)
+        {
+            double t = S.tmix[tid] / S.transcript_weights[tid];
+            double w = S.transcript_weights[u];
+            double s = wtmix_tgu_sum;
+
+            // derivative of
+            //   t / (s + (x * (u + v) - u) / w)
+            // is always negative
+            double numerator = -t * w * (S.tmix[u] + S.tmix[v]);
+            double denomenator = sq(s * w + S.tmix[u] * (x - 1) + S.tmix[v] * x);
+            return numerator / denomenator;
+        }
+
+        double nonmatched_weight_transform_gradient_u(double x)
+        {
+            double w = S.transcript_weights[u];
+            double s = wtmix_tgu_sum;
+
+            // derivative of
+            //   x * (u + v) / (s + (x * (u + v) - u) / w)
+            // is always positive (?)
+            double numerator = -w * (S.tmix[u] + S.tmix[v]) * (S.tmix[u] - s * w);
+            double denomenator = sq(s * w + S.tmix[u] * (x - 1) + S.tmix[v] * x);
+            return numerator / denomenator;
+        }
+
+        double derivative_log_nonmatched_weight_transform_gradient_u(double x)
+        {
+            double w = S.transcript_weights[u];
+            double s = wtmix_tgu_sum;
+            double numerator = -2 * (S.tmix[u] + S.tmix[v]);
+            double denomenator = s * w + S.tmix[u] * (x - 1) + S.tmix[v] * x;
+            return numerator / denomenator;
+        }
+
+        double nonmatched_weight_transform_gradient_v_tid(double x, unsigned int tid)
+        {
+            double t = S.tmix[tid] / S.transcript_weights[tid];
+            double w = S.transcript_weights[v];
+            double s = wtmix_tgv_sum;
+
+            // derivative of
+            //   t / (s + ((1-x) * (u + v) - v) / w)
+            // always positive
+            double numerator = t * w * (S.tmix[u] + S.tmix[v]);
+            double denomenator = sq(s * w - S.tmix[u] * (-x) + S.tmix[u] - S.tmix[v] * x);
+            return numerator / denomenator;
+        }
+
+        double nonmatched_weight_transform_gradient_v(double x)
+        {
+            double w = S.transcript_weights[v];
+            double s = wtmix_tgv_sum;
+
+            // derivative
+            //   (1 - x) * (u + v) / (s + ((1-x) * (u + v) - v) / w)
+            // always negative
+            double numerator = w * (S.tmix[u] + S.tmix[v]) * (S.tmix[v] - s * w);
+            double denomenator = sq(s * w + S.tmix[u] * (-x) + S.tmix[u] - S.tmix[v] * x);
+            return numerator / denomenator;
+        }
+
+        double derivative_log_nonmatched_weight_transform_gradient_v(double x)
+        {
+            double w = S.transcript_weights[v];
+            double s = wtmix_tgv_sum;
+            double numerator = -2 * (S.tmix[u] - S.tmix[v]);
+            double denomenator = s * w + S.tmix[u] * x + S.tmix[u] - S.tmix[v] * x;
+            return numerator / denomenator;
+        }
 
         double f(double x, double& d)
         {
@@ -1977,37 +1866,112 @@ class InterTranscriptSampler
 
             double prior_lp = 0.0;
             if (S.use_priors) {
-                double wtgroupmix = wtgroupmix0 +
-                    (tmixu - S.tmix[u]) / S.transcript_weights[u] +
-                    (tmixv - S.tmix[v]) / S.transcript_weights[v];
+                float expru = tmixu * S.cmix[c] / S.expr_scaling[u];
+                float exprv = tmixv * S.cmix[c] / S.expr_scaling[v];
 
-                double wtmixu = (tmixu / S.transcript_weights[u]) / wtgroupmix;
-                double wtmixv = (tmixv / S.transcript_weights[v]) / wtgroupmix;
+                prior_lp += prior_u.x(expru);
+                prior_lp += fastlog((S.tmix[u] + S.tmix[v]) * S.cmix[c] / S.expr_scaling[u]);
 
-                prior_lp += splice_prior.f(S.hp.splice_mu[u],
-                                           S.hp.splice_sigma[u],
-                                           wtmixu);
+                prior_lp += prior_v.x(exprv);
+                prior_lp += fastlog((S.tmix[u] + S.tmix[v]) * S.cmix[c] / S.expr_scaling[v]);
 
-                prior_lp += splice_prior.f(S.hp.splice_mu[v],
-                                           S.hp.splice_sigma[v],
-                                           wtmixv);
+                d += ((S.tmix[u] + S.tmix[v]) * S.cmix[c] / S.expr_scaling[u]) *
+                    prior_dx_u.x(expru);
 
-                double su = weight_transform_gradient_u(x),
-                       sv = weight_transform_gradient_v(x);
+                d += (-(S.tmix[u] + S.tmix[v]) * S.cmix[c] / S.expr_scaling[v]) *
+                    prior_dx_v.x(exprv);
 
-                // jacobian
-                prior_lp += fastlog(su) + fastlog(-sv);
+                // easy case for splicing priors: u and v are in the same tgroup
+                if (tgu == tgv) {
+                    double splice_u = (tmixu / S.transcript_weights[u]) / wtmix_tgu_sum;
+                    double splice_v = (tmixv / S.transcript_weights[v]) / wtmix_tgv_sum;
 
-                d += splice_prior.df_dx(S.hp.splice_mu[u],
-                                        S.hp.splice_sigma[u],
-                                        wtmixu) * su;
+                    prior_lp += splice_prior.f(S.hp.splice_mu[u],
+                                               S.hp.splice_sigma[u],
+                                               splice_u);
 
-                d += splice_prior.df_dx(S.hp.splice_mu[v],
-                                        S.hp.splice_sigma[v],
-                                        wtmixv) * sv;
+                    prior_lp += splice_prior.f(S.hp.splice_mu[v],
+                                               S.hp.splice_sigma[v],
+                                               splice_v);
 
-                // derivative of the log jacobian
-                d += derivative_log_weight_transform_gradient(x);
+                    double su = weight_transform_gradient_u(x),
+                           sv = weight_transform_gradient_v(x);
+
+                    // jacobian
+                    prior_lp += fastlog(su) + fastlog(-sv);
+
+                    d += splice_prior.df_dx(S.hp.splice_mu[u],
+                                            S.hp.splice_sigma[u],
+                                            splice_u) * su;
+
+                    d += splice_prior.df_dx(S.hp.splice_mu[v],
+                                            S.hp.splice_sigma[v],
+                                            splice_v) * sv;
+
+                    // derivative of the log jacobian
+                    d += derivative_log_weight_transform_gradient(x);
+                }
+                else {
+                    // the hard case, evaluate splice prior for every transcript
+                    // in tgu and tgv.
+                    if (S.tgroup_tids[tgu].size() > 1) {
+                        double new_wtmix_tgu_sum =
+                            wtmix_tgu_sum + (tmixu - S.tmix[u]) / S.transcript_weights[u];
+                        BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgu]) {
+                            double splice, su;
+                            if (tid == u) {
+                                splice = tmixu;
+                                su = nonmatched_weight_transform_gradient_u(x);
+                                d += derivative_log_nonmatched_weight_transform_gradient_u(x);
+                            }
+                            else {
+                                splice = S.tmix[tid];
+                                su = nonmatched_weight_transform_gradient_u_tid(x, tid);
+                                d += -derivative_log_nonmatched_weight_transform_gradient_u(x);
+                            }
+                            splice /= S.transcript_weights[tid] / new_wtmix_tgu_sum;
+
+                            prior_lp += splice_prior.f(S.hp.splice_mu[tid],
+                                                       S.hp.splice_sigma[tid],
+                                                       splice);
+
+                            prior_lp += fastlog(fabs(su));
+
+                            d += splice_prior.df_dx(S.hp.splice_mu[tid],
+                                                    S.hp.splice_sigma[tid],
+                                                    splice) * su;
+                        }
+                    }
+
+                    if (S.tgroup_tids[tgv].size() > 1) {
+                        double new_wtmix_tgv_sum =
+                            wtmix_tgv_sum + (tmixv - S.tmix[v]) / S.transcript_weights[v];
+                        BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgv]) {
+                            double splice, sv;
+                            if (tid == v) {
+                                splice = tmixv;
+                                sv = nonmatched_weight_transform_gradient_v(x);
+                                d += -derivative_log_nonmatched_weight_transform_gradient_v(x);
+                            }
+                            else {
+                                splice = S.tmix[tid];
+                                sv = nonmatched_weight_transform_gradient_v_tid(x, tid);
+                                d += derivative_log_nonmatched_weight_transform_gradient_v(x);
+                            }
+                            splice /= S.transcript_weights[tid] / new_wtmix_tgv_sum;
+
+                            prior_lp += splice_prior.f(S.hp.splice_mu[tid],
+                                                       S.hp.splice_sigma[tid],
+                                                       splice);
+
+                            prior_lp += fastlog(fabs(sv));
+
+                            d += splice_prior.df_dx(S.hp.splice_mu[tid],
+                                                    S.hp.splice_sigma[tid],
+                                                    splice) * sv;
+                        }
+                    }
+                }
             }
 
             // avoid optimization failing due to extremely large
@@ -2015,6 +1979,9 @@ class InterTranscriptSampler
             d = std::max<double>(std::min<double>(d, 1e4), -1e4);
 
             double lp = sumlog(frag_probs_prop, idxlen);
+            assert_finite(lp);
+            assert_finite(prior_lp);
+
             return lp / M_LOG2E + prior_lp;
         }
 
@@ -2022,10 +1989,15 @@ class InterTranscriptSampler
     private:
         nlopt_opt opt;
 
+        AltGammaLogPdf prior_u, prior_v;
+        AltGammaLogPdfDx prior_dx_u, prior_dx_v;
+
         NormalLogPdf splice_prior;
 
-        unsigned int u, v, c, tgroup;
-        double wtgroupmix0;
+        unsigned int u, v, c, tgu, tgv;
+
+        // sum of tmixs for every tid in tgu, tgv respectively
+        double wtmix_tgu_sum, wtmix_tgv_sum;
 
         unsigned int uf0, uf1,
                      vf0, vf1;
@@ -2040,7 +2012,7 @@ class InterTranscriptSampler
         Sampler& S;
 
         // Bounds on the parameter being sampled over
-        double lower_limit, upper_limit;
+        double lower_limit, upper_limit, tolerance;
 
         rng_t rng;
         boost::random::uniform_01<double> random_uniform_01;
@@ -2064,7 +2036,108 @@ double intertranscriptsampler_nlopt_objective(unsigned int _n, const double* _x,
 }
 
 
-double component_nlopt_objective(unsigned int, const double*, double*, void*);
+class ComponentSampler : public Shredder
+{
+    public:
+        ComponentSampler(Sampler& S)
+            : Shredder(constants::zero_eps, 1e9, constants::zero_eps)
+            , S(S)
+        {
+            size_t max_comp_size = 0;
+            for (unsigned int c = 0; c < S.num_components; ++c) {
+                max_comp_size = std::max<size_t>(max_comp_size, S.component_num_transcripts[c]);
+            }
+
+            priors.resize(max_comp_size);
+            prior_dxs.resize(max_comp_size);
+        }
+
+        void prepare_sample_optimize()
+        {
+            unsigned int num_frags = S.component_frag[c + 1] - S.component_frag[c];
+            likelihood.set_k(num_frags);
+            likelihood_dlambda.set_k(num_frags);
+
+            for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
+                unsigned int tid = S.component_transcripts[c][i];
+                priors[i].set_mean(S.hp.mean[tid]);
+                priors[i].set_shape(S.hp.shape[tid]);
+                prior_dxs[i].set_mean(S.hp.mean[tid]);
+                prior_dxs[i].set_shape(S.hp.shape[tid]);
+            }
+        }
+
+        double optimize(unsigned int c)
+        {
+            this->c = c;
+            prepare_sample_optimize();
+            return Shredder::optimize(S.cmix[c]);
+        }
+
+        double sample(rng_t& rng, unsigned int c)
+        {
+            lower_limit = constants::zero_eps;
+            for (size_t i = 0; i < S.component_num_transcripts[c]; ++i) {
+                unsigned int tid = S.component_transcripts[c][i];
+                lower_limit = std::max<double>(
+                    lower_limit, constants::min_expr * S.expr_scaling[tid] / S.tmix[tid]);
+            }
+
+            tolerance = 1.0;
+            for (size_t i = 0; i < S.component_num_transcripts[c]; ++i) {
+                unsigned int tid = S.component_transcripts[c][i];
+                tolerance = std::min<double>(tolerance,
+                                             constants::min_expr * S.expr_scaling[tid] / S.tmix[tid]);
+            }
+            tolerance = std::max<double>(tolerance, constants::zero_eps);
+
+            this->c = c;
+            prepare_sample_optimize();
+
+            return Shredder::sample(rng, S.cmix[c]);
+        }
+
+    private:
+        Sampler& S;
+        PoissonLogPdf likelihood;
+        PoissonLogPdfDLambda likelihood_dlambda;
+
+        std::vector<AltGammaLogPdf> priors;
+        std::vector<AltGammaLogPdfDx> prior_dxs;
+
+        // component index being sampled
+        unsigned int c;
+
+    protected:
+        double f(double cmixc, double& d)
+        {
+            double lp = likelihood.lambda(cmixc);
+            d = likelihood_dlambda.lambda(cmixc);
+
+            if (S.use_priors) {
+                // prior
+                for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
+                    unsigned int tid = S.component_transcripts[c][i];
+                    float x = S.tmix[tid] * cmixc;
+                    float scaledx = x / S.expr_scaling[tid];
+                    double prior_lp = priors[i].x(scaledx);
+
+                    // jacobian term
+                    double transform_derivative = S.tmix[tid] / S.expr_scaling[tid];
+                    prior_lp += fastlog(transform_derivative);
+                    lp += prior_lp;
+
+                    // derivative
+                    d += prior_dxs[i].x(scaledx) * transform_derivative;
+
+                    if (!boost::math::isfinite(lp)) {
+                        Logger::abort("non-finite log-likelihood encountered");
+                    }
+                }
+            }
+            return lp;
+        }
+};
 
 
 /* The interface that MaxPostThread and MCMCThread implement. */
@@ -2074,7 +2147,7 @@ class AbundanceSamplerThread
         AbundanceSamplerThread(Sampler& S,
                         Queue<ComponentBlock>& q,
                         Queue<int>& notify_queue)
-            : inter_tgroup_sampler(S)
+            : component_sampler(S)
             , inter_transcript_sampler(S)
             , S(S)
             , q(q)
@@ -2082,20 +2155,11 @@ class AbundanceSamplerThread
             , optimize_state(false)
             , thread(NULL)
         {
-            component_opt = nlopt_create(NLOPT_LN_SBPLX, 1);
-            nlopt_set_max_objective(component_opt,
-                                    component_nlopt_objective,
-                                    reinterpret_cast<void*>(this));
-            double lower_bound = 1e-3;
-            nlopt_set_lower_bounds(component_opt, &lower_bound);
-            nlopt_set_ftol_abs(component_opt, 1e-2);
         }
 
         ~AbundanceSamplerThread()
         {
             if (thread) delete thread;
-
-            nlopt_destroy(component_opt);
         }
 
         // Sample expression of component c
@@ -2107,13 +2171,7 @@ class AbundanceSamplerThread
         // Sample transcript mixtures within component c
         void sample_intra_component(unsigned int c);
 
-        // Sample tgroup mixtures with a fixed component
-        void sample_inter_tgroup(unsigned int c, unsigned int u, unsigned int v);
-
-        // Sample transcript mixtures within a fixed tgroup
-        void sample_intra_tgroup(unsigned int tgroup);
-
-        // Sample relative abundance of two transcripts within the same tgroup
+        // Sample relative abundance of two transcripts within the same component
         void sample_inter_transcript(unsigned int u, unsigned int v);
 
         // If set to true, optimize rather than sample.
@@ -2161,29 +2219,7 @@ class AbundanceSamplerThread
 
 
     private:
-        float find_component_slice_edge(unsigned int c, float x0, float slice_height, float step);
-
-        double compute_component_probability(unsigned int c, float x);
-
-        float recompute_intra_component_probability(unsigned int u, unsigned int v,
-                                              float tmixu, float tmixv,
-                                              unsigned int f0, unsigned int f1,
-                                              float pf01, float p0,
-                                              float bu, float bv,
-                                              float tgroupmix_u,
-                                              float tgroupmix_v,
-                                              float *d);
-
-        float transcript_slice_sample_search(float slice_height,
-                                             unsigned int u, unsigned int v,
-                                             float z0, float p0, bool left,
-                                             double bu, double bv,
-                                             double wtgroupmix_u,
-                                             double wtgroupmix_v);
-
-        AltGammaLogPdf tgroup_prior;
-
-        InterTgroupSampler inter_tgroup_sampler;
+        ComponentSampler component_sampler;
         InterTranscriptSampler inter_transcript_sampler;
         rng_t* rng;
         boost::random::uniform_01<double> random_uniform_01;
@@ -2193,232 +2229,33 @@ class AbundanceSamplerThread
         Queue<int>& notify_queue;
         bool optimize_state;
         boost::thread* thread;
-
-        // currenty component being sampled or optimized over
-        unsigned int c;
-
-        nlopt_opt component_opt;
-        friend double component_nlopt_objective(unsigned int, const double*, double*, void*);
 };
-
-
-double component_nlopt_objective(unsigned int _n, const double* _x,
-                                 double* _grad, void* data)
-{
-    UNUSED(_n);
-    UNUSED(_grad);
-    AbundanceSamplerThread* sampler =
-        reinterpret_cast<AbundanceSamplerThread*>(data);
-
-    return sampler->compute_component_probability(sampler->c, _x[0]);
-}
-
-
-float AbundanceSamplerThread::find_component_slice_edge(unsigned int c,
-                                                        float x0, float slice_height,
-                                                        float step)
-{
-    float component_epsilon = S.component_num_transcripts[c] * constants::zero_eps;
-
-    const float eps = 1e-8;
-    double x, y;
-    do {
-        x = std::max<float>(component_epsilon, x0 + step);
-        y = compute_component_probability(c, x);
-        step *= 2;
-    } while (y > slice_height && x > component_epsilon);
-    step /= 2;
-
-    // binary search to find the edge
-    double a, b;
-    if (step < 0.0) {
-        a = std::max<float>(component_epsilon, x0 + step);
-        b = x0;
-    }
-    else {
-        a = x0;
-        b = x0 + step;
-    }
-
-    while (fabs(b - a) / ((b+a)/2) > eps) {
-        double mid = (a + b) / 2;
-        double w = compute_component_probability(c, mid);
-
-        if (step < 0) {
-            if (w > slice_height) b = mid;
-            else                  a = mid;
-        }
-        else {
-            if (w > slice_height) a = mid;
-            else                  b = mid;
-        }
-    }
-
-    return (a + b) / 2;
-}
-
-
-double AbundanceSamplerThread::compute_component_probability(unsigned int c, float cmixc)
-{
-    double lp = poisson_lnpdf(cmixc, S.component_frag[c + 1] - S.component_frag[c]);
-
-    if (S.use_priors) {
-        // prior
-        BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-            double x = S.tgroupmix[tgroup] * cmixc;
-            double scaledx = x / S.tgroup_scaling[tgroup];
-
-            double prior_lp = tgroup_prior.f(S.hp.tgroup_mean[tgroup],
-                                           S.hp.tgroup_shape[tgroup],
-                                           &scaledx, 1);
-            lp += prior_lp;
-
-            if (!boost::math::isfinite(lp)) {
-                Logger::abort("non-finite log-likelihood encountered");
-            }
-        }
-    }
-
-    return lp;
-}
 
 
 void AbundanceSamplerThread::sample_intra_component(unsigned int c)
 {
     if (S.component_num_transcripts[c] <= 1) return;
 
-    double component_tmix = 0.0;
-    BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-        S.tgroupmix[tgroup] = 0.0;
+    for (unsigned int i = 0; i < S.component_num_transcripts[c]; ++i) {
+        random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
+                    0, S.component_num_transcripts[c] - 1));
+        unsigned int u = random_uniform_int(*rng);
 
-        BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
-            S.tgroupmix[tgroup] += S.tmix[tid];
+        unsigned int v = u;
+        while (v == u) {
+            v = random_uniform_int(*rng);
         }
-        if (!boost::math::isfinite(S.tgroupmix[tgroup]) || S.tgroupmix[tgroup] <= 0.0) {
-            Logger::abort("A non-positive tgroup mixture occurred.");
-        }
-        component_tmix += S.tgroupmix[tgroup];
 
-        BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
-            S.tgroup_tmix[tid] = S.tmix[tid] / S.tgroupmix[tgroup];
-        }
-    }
+        unsigned int tidu = S.component_transcripts[c][u],
+                     tidv = S.component_transcripts[c][v];
 
-    // sample transcript abundance within tgroups
-    BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-        sample_intra_tgroup(tgroup);
-    }
+        // don't try to sample if there's very little room to move
+        if ((S.tmix[tidu] <= 2.0 * constants::zero_eps &&
+             S.tmix[tidv] <= 2.0 * constants::zero_eps) ||
+            (S.tmix[tidu] >= 1.0 - 2.0 * constants::zero_eps &&
+             S.tmix[tidv] >= 1.0 - 2.0 * constants::zero_eps)) continue;
 
-    if (S.component_tgroups[c].size() > 1) {
-        for (unsigned int i = 0; i < S.component_tgroups[c].size(); ++i) {
-            random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
-                        0, S.component_tgroups[c].size() - 1));
-            unsigned int u = random_uniform_int(*rng);
-
-            unsigned int v = u;
-            while (v == u) {
-                v = random_uniform_int(*rng);
-            }
-
-            unsigned int tgroupu = 0, tgroupv = 0;
-            unsigned int j = 0;
-            BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-                if (u == j) tgroupu = tgroup;
-                if (v == j) tgroupv = tgroup;
-                ++j;
-            }
-
-            // don't try to sample if there's very little room to move
-            if ((S.tgroupmix[tgroupu] <= 2.0 * constants::zero_eps &&
-                 S.tgroupmix[tgroupv] <= 2.0 * constants::zero_eps) ||
-                (S.tgroupmix[tgroupu] >= 1.0 - 2.0 * constants::zero_eps &&
-                 S.tgroupmix[tgroupv] >= 1.0 - 2.0 * constants::zero_eps)) continue;
-
-            sample_inter_tgroup(c, tgroupu, tgroupv);
-        }
-    }
-}
-
-
-void AbundanceSamplerThread::sample_inter_tgroup(unsigned int c, unsigned int u, unsigned int v)
-{
-    double x = inter_tgroup_sampler.sample(*rng, c, u, v, optimize_state);
-
-    double tgroupmix_u = x * (S.tgroupmix[u] + S.tgroupmix[v]);
-    double tgroupmix_v = (1 - x) * (S.tgroupmix[u] + S.tgroupmix[v]);
-
-    double u_delta = tgroupmix_u / S.tgroupmix[u];
-    double v_delta = tgroupmix_v / S.tgroupmix[v];
-
-    assert_finite(tgroupmix_u);
-    assert_finite(tgroupmix_v);
-
-    S.tgroupmix[u] = tgroupmix_u;
-    S.tgroupmix[v] = tgroupmix_v;
-
-    BOOST_FOREACH (unsigned int tid, S.tgroup_tids[u]) {
-        double tmix_tid =
-            std::min<float>(
-                    1.0 - constants::zero_eps,
-                    std::max<float>(constants::zero_eps, S.tmix[tid] * u_delta));
-        asxpy(S.frag_probs[c],
-              S.weight_matrix->rows[tid],
-              tmix_tid - S.tmix[tid],
-              S.weight_matrix->idxs[tid],
-              S.component_frag[c],
-              S.weight_matrix->rowlens[tid]);
-        S.tmix[tid] = tmix_tid;
-        assert_finite(S.tmix[tid]);
-    }
-
-    BOOST_FOREACH (unsigned int tid, S.tgroup_tids[v]) {
-        double tmix_tid =
-            std::min<float>(
-                    1.0 - constants::zero_eps,
-                    std::max<float>(constants::zero_eps, S.tmix[tid] * v_delta));
-        asxpy(S.frag_probs[c],
-              S.weight_matrix->rows[tid],
-              tmix_tid - S.tmix[tid],
-              S.weight_matrix->idxs[tid],
-              S.component_frag[c],
-              S.weight_matrix->rowlens[tid]);
-        S.tmix[tid] = tmix_tid;
-        assert_finite(S.tmix[tid]);
-    }
-
-    size_t component_size = S.component_frag[c+1] - S.component_frag[c];
-    for (size_t i = 0; i < component_size; ++i) {
-        // if fragment probabilities are just slightly negative, adjust to
-        // avoid NaNs.
-        if (S.frag_probs[c][i] < 0) S.frag_probs[c][i] = 0.0;
-    }
-}
-
-
-void AbundanceSamplerThread::sample_intra_tgroup(unsigned int tgroup)
-{
-    if (S.tgroup_tids[tgroup].size() > 1) {
-        for (unsigned int i = 0; i < S.tgroup_tids[tgroup].size() - 1; ++i) {
-            random_uniform_int.param(boost::random::uniform_int_distribution<unsigned int>::param_type(
-                        0, S.tgroup_tids[tgroup].size() - 1));
-            unsigned int u = random_uniform_int(*rng);
-
-            unsigned int v = u;
-            while (v == u) {
-                v = random_uniform_int(*rng);
-            }
-
-            unsigned int tidu = S.tgroup_tids[tgroup][u],
-                         tidv = S.tgroup_tids[tgroup][v];
-
-            // don't try to sample if there's very little room to move
-            if ((S.tmix[tidu] <= 2.0 * constants::zero_eps &&
-                 S.tmix[tidv] <= 2.0 * constants::zero_eps) ||
-                (S.tmix[tidu] >= 1.0 - 2.0 * constants::zero_eps &&
-                 S.tmix[tidv] >= 1.0 - 2.0 * constants::zero_eps)) continue;
-
-            sample_inter_transcript(tidu, tidv);
-        }
+        sample_inter_transcript(tidu, tidv);
     }
 }
 
@@ -2449,9 +2286,6 @@ void AbundanceSamplerThread::sample_inter_transcript(unsigned int u, unsigned in
     unsigned int c = S.transcript_component[u];
     assert(c == S.transcript_component[v]);
 
-    unsigned int tgroup = S.transcript_tgroup[u];
-    assert(tgroup == S.transcript_tgroup[v]);
-
     asxpy(S.frag_probs[c],
           S.weight_matrix->rows[u],
           tmix_delta_u,
@@ -2473,9 +2307,6 @@ void AbundanceSamplerThread::sample_inter_transcript(unsigned int u, unsigned in
         if (S.frag_probs[c][i] < 0) S.frag_probs[c][i] = 0.0;
     }
 
-    S.tgroup_tmix[u] = tmixu / S.tgroupmix[tgroup];
-    S.tgroup_tmix[v] = tmixv / S.tgroupmix[tgroup];
-
     S.tmix[u] = tmixu;
     S.tmix[v] = tmixv;
 }
@@ -2490,63 +2321,13 @@ void AbundanceSamplerThread::sample_inter_transcript(unsigned int u, unsigned in
  */
 void AbundanceSamplerThread::sample_component(unsigned int c)
 {
-    BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-        S.tgroupmix[tgroup] = 0.0;
-        BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
-            S.tgroupmix[tgroup] += S.tmix[tid];
-        }
-    }
-
-    this->c = c;
-
-    float x0 = S.cmix[c];
-
-    double lp0 = compute_component_probability(c, x0);
-    double slice_height = lp0 +
-        fastlog(std::max<double>(constants::zero_eps, random_uniform_01(*rng)));
-    double step = 1.0;
-
-    double x_min = find_component_slice_edge(c, x0, slice_height, -step);
-    double x_max = find_component_slice_edge(c, x0, slice_height, +step);
-
-    double x;
-    while (true) {
-         x = x_min + (x_max - x_min) * random_uniform_01(*rng);
-         double lp = compute_component_probability(c, x);
-
-         if (lp >= slice_height) break;
-         else if (x > x0) x_max = x;
-         else             x_min = x;
-
-         if (fabs(x_max - x_min) < 1e-8) break;
-    }
-
-    S.cmix[c] = x;
+    S.cmix[c] = component_sampler.sample(*rng, c);
 }
 
 
 void AbundanceSamplerThread::optimize_component(unsigned int c)
 {
-    BOOST_FOREACH (unsigned int tgroup, S.component_tgroups[c]) {
-        S.tgroupmix[tgroup] = 0.0;
-        BOOST_FOREACH (unsigned int tid, S.tgroup_tids[tgroup]) {
-            S.tgroupmix[tgroup] += S.tmix[tid];
-        }
-    }
-
-    this->c = c;
-    double x0 = 1.0 + (S.component_frag[c + 1] - S.component_frag[c]);
-    double x = x0;
-
-    double maxf;
-    double component_epsilon = S.component_num_transcripts[c] * 1e-6;
-    nlopt_set_lower_bounds(component_opt, &component_epsilon);
-    nlopt_result result = nlopt_optimize(component_opt, &x, &maxf);
-    if (result < 0 && result != NLOPT_ROUNDOFF_LIMITED) {
-        Logger::warn("Optimization failed with code %d", (int) result);
-    }
-
-    S.cmix[c] = x;
+    S.cmix[c] = component_sampler.optimize(c);
 }
 
 
@@ -2555,10 +2336,7 @@ Sampler::Sampler(unsigned int rng_seed,
                  std::set<std::string> excluded_seqs,
                  TranscriptSet& ts, FragmentModel& fm,
                  bool run_frag_correction, bool use_priors)
-    : ts(ts)
-    , fm(fm)
-    , run_frag_correction(run_frag_correction)
-    , use_priors(use_priors)
+    : use_priors(use_priors)
 {
     /* Producer/consumer queue of intervals containing indexed reads to be
      * processed. */
@@ -2572,7 +2350,7 @@ Sampler::Sampler(unsigned int rng_seed,
 
     weight_matrix = new WeightMatrix(ts.size(), fm.alnindex.size());
     transcript_weights = new double [ts.size()];
-    tgroup_scaling.resize(ts.num_tgroups());
+    expr_scaling.resize(ts.size());
 
     std::vector<FragWeightEstimationThread*> threads;
     for (size_t i = 0; i < constants::num_threads; ++i) {
@@ -2660,8 +2438,7 @@ Sampler::Sampler(unsigned int rng_seed,
     component_tgroups.resize(num_components);
     component_num_transcripts = new unsigned int [num_components];
     std::fill(component_num_transcripts,
-            component_num_transcripts + num_components,
-            0);
+            component_num_transcripts + num_components, 0);
     transcript_component = new unsigned int [ts.size()];
     transcript_tgroup = new unsigned int [ts.size()];
     for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
@@ -2724,10 +2501,8 @@ Sampler::Sampler(unsigned int rng_seed,
     delete [] ds;
     delete [] idxmap;
 
-    tmix            = new double [weight_matrix->nrow];
-    tgroupmix       = new double [tgroup_tids.size()];
-    tgroup_tmix     = new double [weight_matrix->nrow];
-    cmix            = new double [num_components];
+    tmix = new double [weight_matrix->nrow];
+    cmix = new double [num_components];
 
     expr.resize(weight_matrix->nrow);
 
@@ -2754,8 +2529,8 @@ Sampler::Sampler(unsigned int rng_seed,
 
     // initialize hyperparameters
     hp.scale = 1.0;
-    hp.tgroup_mean.resize(ts.num_tgroups(), 0.0);
-    hp.tgroup_shape.resize(ts.num_tgroups(), 0.0);
+    hp.mean.resize(ts.size(), 0.0);
+    hp.shape.resize(ts.size(), 0.0);
     hp.splice_mu.resize(ts.size());
     hp.splice_sigma.resize(ts.size());
     std::fill(hp.splice_mu.begin(), hp.splice_mu.end(), 0.5);
@@ -2793,8 +2568,6 @@ Sampler::~Sampler()
 {
     delete [] tmix;
     delete [] cmix;
-    delete [] tgroupmix;
-    delete [] tgroup_tmix;
     delete [] transcript_component;
     delete [] transcript_tgroup;
     for (size_t i = 0; i < num_components; ++i) {
@@ -2817,7 +2590,7 @@ Sampler::~Sampler()
 
 void Sampler::start()
 {
-    std::fill(tgroup_scaling.begin(), tgroup_scaling.end(), 1.0);
+    std::fill(expr_scaling.begin(), expr_scaling.end(), 1.0);
 
     /* Initial mixtures */
     for (unsigned int i = 0; i < num_components; ++i) {
@@ -2864,19 +2637,10 @@ void Sampler::sample()
 {
     sample_abundance();
 
-    std::vector<double> cmix_weight(num_components);
-    for (unsigned int i = 0; i < num_components; ++i) {
-        cmix_weight[i] = 0.0;
-        for (unsigned int j = 0; j < component_num_transcripts[i]; ++j) {
-            cmix_weight[i] += tmix[component_transcripts[i][j]] * transcript_weights[component_transcripts[i][j]];
-        }
-    }
-
     // adjust for transcript weight
     double expr_total = 0.0;
     for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
         double tmixi = tmix[i];
-        //expr[i] = tmixi * cmix[transcript_component[i]] / cmix_weight[transcript_component[i]];
         expr[i] = tmixi * cmix[transcript_component[i]] / transcript_weights[i];
         expr_total += expr[i];
     }
@@ -2889,9 +2653,9 @@ void Sampler::sample()
 #if 0
     {
         FILE* out = fopen("gc-length-expr.tsv", "w");
-        fprintf(out, "transcript_id\tstrand\texons\tlength\tweight\tcount\texpr\tcomp_size\tnum_tgroups\n");
+        fprintf(out, "transcript_id\tstrand\texons\tlength\tweight\tcount\texpr\tcomp_size\n");
         for (TranscriptSet::iterator t = ts.begin(); t != ts.end(); ++t) {
-            fprintf(out, "%s\t%d\t%lu\t%lu\t%e\t%lu\t%e\t%lu\t%lu\n",
+            fprintf(out, "%s\t%d\t%lu\t%lu\t%e\t%lu\t%e\t%lu\n",
                     t->transcript_id.get().c_str(),
                     (int) t->strand,
                     (unsigned long) t->size(),
@@ -2899,8 +2663,7 @@ void Sampler::sample()
                     transcript_weights[t->id],
                     (unsigned long) weight_matrix->rowlens[t->id],
                     expr[t->id],
-                    (unsigned long) component_num_transcripts[transcript_component[t->id]],
-                    (unsigned long) component_tgroups[transcript_component[t->id]].size());
+                    (unsigned long) component_num_transcripts[transcript_component[t->id]]);
         }
         fclose(out);
     }
@@ -2910,15 +2673,11 @@ void Sampler::sample()
         expr[i] *= hp.scale;
     }
 
-    std::fill(tgroup_scaling.begin(), tgroup_scaling.end(), 0.0);
-    for (unsigned int tgroup = 0; tgroup < tgroup_tids.size(); ++tgroup) {
-        double scaled_expr = 0.0;
-        double unscaled_expr = 0.0;
-        BOOST_FOREACH (unsigned int tid, tgroup_tids[tgroup]) {
-            scaled_expr += expr[tid];
-            unscaled_expr += cmix[transcript_component[tid]] * tmix[tid];
-        }
-        tgroup_scaling[tgroup] = unscaled_expr / scaled_expr;
+    std::fill(expr_scaling.begin(), expr_scaling.end(), 0.0);
+    for (unsigned int i = 0; i < weight_matrix->nrow; ++i) {
+        double unscaled_expr = cmix[transcript_component[i]] * tmix[i];
+        double scaled_expr = expr[i];
+        expr_scaling[i] = unscaled_expr / scaled_expr;
     }
 }
 
@@ -2939,7 +2698,7 @@ void Sampler::optimize()
 }
 
 
-const std::vector<double>& Sampler::state() const
+const std::vector<float>& Sampler::state() const
 {
     return expr;
 }

@@ -10,7 +10,6 @@
 
 class WeightMatrix;
 class AbundanceSamplerThread;
-class MultireadSamplerThread;
 
 
 // Unit of work used in the abundance sampler.
@@ -68,11 +67,7 @@ class Sampler
 
         // Return the current sampler state: a vector containing the relative
         // abundance of each transcript indexed by tid.
-        const std::vector<double>& state() const;
-
-        // Scaling factor to convert between relative abundance, normalized by sequencing depth,
-        // estimates in terms of number of reads.
-        const std::vector<double>& expr_scaling() const;
+        const std::vector<float>& state() const;
 
         // Use priors on transcript start site usage and splicing
         void engage_priors();
@@ -84,16 +79,16 @@ class Sampler
             // Normalization factor accounting for sequencing depth
             double scale;
 
-            // Mean parameter for tgroup abundance prior
-            std::vector<double> tgroup_mean;
+            // Mean parameter for transcript abundance prior
+            std::vector<float> mean;
 
-            // Shape parameter for tgroup abundance prior
-            std::vector<double> tgroup_shape;
+            // Shape parameter for transcript abundance prior
+            std::vector<float> shape;
 
-            // Logisitic-normal mean
+            // Normal splice mean
             std::vector<double> splice_mu;
 
-            // Logistic-normal sigma
+            // Normal splice sigma
             std::vector<double> splice_sigma;
         } hp;
 
@@ -109,12 +104,6 @@ class Sampler
          * tmix. */
         void init_frag_probs();
 
-        // Recompute frag_count_sums
-        void update_frag_count_sums();
-
-        TranscriptSet& ts;
-        FragmentModel& fm;
-
         // Abundance sampling
         std::vector<AbundanceSamplerThread*> abundance_threads;
         Queue<ComponentBlock> component_queue;
@@ -125,21 +114,12 @@ class Sampler
         // thread starvation.
         std::vector<unsigned int> ordered_components;
 
-        // True if fragmentation bias should be corrected for
-        bool run_frag_correction;
-
         // True if priors on cmix and tmix are used. If false, hyperparameters
         // (values in the hp structure) are ignored.
         bool use_priors;
 
         /* Transcript mixture coefficients. Within-component relative abundance. */
         double* tmix;
-
-        /* Transcription group within-component relative abundance. */
-        double* tgroupmix;
-
-        /* Relative abundance of a transcript within its tgroup */
-        double* tgroup_tmix;
 
         /* Component mixture coefficients. */
         double* cmix;
@@ -149,10 +129,7 @@ class Sampler
 
         /* Factor by which transcript estimates in terms of number of reads differ
            from the estimate accounting for transcript length, gc bias, and sequencing depth */
-        std::vector<double> tgroup_scaling;
-
-        /* GC content of each transcript. */
-        double* transcript_gc;
+        std::vector<float> expr_scaling;
 
         /* transcript_component[i] gives the component number of transcript i */
         unsigned int* transcript_component;
@@ -174,9 +151,6 @@ class Sampler
         unsigned int* component_num_transcripts;
         unsigned int** component_transcripts;
 
-        /* Total number of fragments beign considered  */
-        double total_frag_count;
-
         /* frag_probs[i][j] holds the probability of the jth fragment in
          * component i, given the component and transcript mixtures. */
         float** frag_probs;
@@ -187,15 +161,10 @@ class Sampler
 
         /* Temporary space to do normalization on expression before copying to
          * samples */
-        std::vector<double> expr;
+        std::vector<float> expr;
 
-        /* Samples indexed by transcript id */
-        float** samples;
-
-        friend class InferenceThread;
         friend class AbundanceSamplerThread;
-        friend class MultireadSamplerThread;
-        friend class InterTgroupSampler;
+        friend class ComponentSampler;
         friend class InterTranscriptSampler;
 };
 

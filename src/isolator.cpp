@@ -217,11 +217,12 @@ static void print_summarize_strategies(FILE* fout)
            "  transcript-expression\n"
            "  transcript-splicing\n"
            "  gene-expression\n"
+           "  feature-expression\n"
            "  condition-transcript-expression\n"
            "  condition-gene-expression\n"
+           "  condition-feature-expression\n"
            "  differential-gene-expression\n"
            "  differential-transcript-expression\n"
-           "  differential-transcription\n"
            "  differential-splicing\n"
            "  differential-feature-splicing\n"
            "  condition-splicing\n"
@@ -343,16 +344,17 @@ static int isolator_summarize(int argc, char* argv[])
         summarize.gene_expression(out_file, credible_interval,
                                   unnormalized);
     }
+    else if (strcmp(strategy, "feature-expression") == 0) {
+        summarize.feature_expression(out_file, credible_interval, unnormalized);
+    }
     else if (strcmp(strategy, "condition-transcript-expression") == 0) {
         summarize.condition_transcript_expression(out_file, credible_interval);
     }
     else if (strcmp(strategy, "condition-gene-expression") == 0) {
         summarize.condition_gene_expression(out_file, credible_interval);
     }
-    else if (strcmp(strategy, "differential-transcription") == 0) {
-        minimum_effect_size = log2(minimum_effect_size);
-        summarize.differential_transcription(out_file, credible_interval,
-                                             minimum_effect_size);
+    else if (strcmp(strategy, "condition-feature-expression") == 0) {
+        summarize.condition_feature_expression(out_file, credible_interval);
     }
     else if (strcmp(strategy, "differential-splicing") == 0) {
         summarize.differential_splicing(out_file, credible_interval,
@@ -1096,9 +1098,10 @@ void write_qc_data(FILE* fout, Analyze& analyze)
         // GC bias
         if (analyze.fms[i]->gcbias && constants::gcbias_num_bins > 0) {
             fprintf(fout, "  gcbias_bins: [");
-            fprintf(fout, "%0.3f", analyze.fms[i]->gcbias->bins[0]);
+
+            fprintf(fout, "%0.3f", constants::gcbias_bins[0]);
             for (size_t j = 1; j < constants::gcbias_num_bins; ++j) {
-                fprintf(fout, ", %0.3f", analyze.fms[i]->gcbias->bins[j]);
+                fprintf(fout, ", %0.3f", constants::gcbias_bins[j]);
             }
             fprintf(fout, "]\n");
 
@@ -1162,6 +1165,7 @@ static void print_analyze_help(FILE* fout)
         "-n, --dry-run             initialize the sampler, but do not generate samples or output.\n"
         "-Q, --qc=FILE             print quality control information to the given file\n"
         "-p, --threads=N           number of threads to use.\n"
+        "    --no-seqbias-correction   disable fragment end priming bias correction.\n"
         "    --no-gc-correction    disable fragment GC-content correction.\n"
         "    --no-3p-bias          disable trancript 3' bias correction.\n"
         "    --bias-training-seqs=FILE   a filename containing names (one per line) of sequences\n"
@@ -1191,26 +1195,27 @@ static int isolator_analyze(int argc, char* argv[])
 {
     static struct option long_options[] =
     {
-        {"help",                 no_argument,       NULL, 'h'},
-        {"output",               required_argument, NULL, 'o'},
-        {"qc",                   required_argument, NULL, 'Q'},
-        {"dry-run",              no_argument,       NULL, 'n'},
-        {"seed",                 required_argument, NULL, 's'},
-        {"introns",              no_argument,       NULL, 0},
-        {"exons",                no_argument,       NULL, 0},
-        {"verbose",              no_argument,       NULL, 'v'},
-        {"genomic-seq",          required_argument, NULL, 'g'},
-        {"threads",              required_argument, NULL, 'p'},
-        {"bias-training-seqs",   required_argument, NULL, 0},
-        {"no-gc-correction",     no_argument,       NULL, 0},
-        {"no-3p-correction",     no_argument,       NULL, 0},
-        {"no-frag-correction",   no_argument,       NULL, 0},
-        {"num-samples",          required_argument, NULL, 'N'},
-        {"burnin",               required_argument, NULL, 'B'},
-        {"min-align-pr",         required_argument, NULL, 0},
-        {"tss-cluster-distance", required_argument, NULL, 0},
-        {"exclude-seqs",         required_argument, NULL, 0},
-        {"no-priors",            no_argument,       NULL, 0},
+        {"help",                  no_argument,       NULL, 'h'},
+        {"output",                required_argument, NULL, 'o'},
+        {"qc",                    required_argument, NULL, 'Q'},
+        {"dry-run",               no_argument,       NULL, 'n'},
+        {"seed",                  required_argument, NULL, 's'},
+        {"introns",               no_argument,       NULL, 0},
+        {"exons",                 no_argument,       NULL, 0},
+        {"verbose",               no_argument,       NULL, 'v'},
+        {"genomic-seq",           required_argument, NULL, 'g'},
+        {"threads",               required_argument, NULL, 'p'},
+        {"bias-training-seqs",    required_argument, NULL, 0},
+        {"no-seqbias-correction", no_argument,       NULL, 0},
+        {"no-gc-correction",      no_argument,       NULL, 0},
+        {"no-3p-correction",      no_argument,       NULL, 0},
+        {"no-frag-correction",    no_argument,       NULL, 0},
+        {"num-samples",           required_argument, NULL, 'N'},
+        {"burnin",                required_argument, NULL, 'B'},
+        {"min-align-pr",          required_argument, NULL, 0},
+        {"tss-cluster-distance",  required_argument, NULL, 0},
+        {"exclude-seqs",          required_argument, NULL, 0},
+        {"no-priors",             no_argument,       NULL, 0},
 
         {"experiment_tgroup_sigma_alpha",  required_argument, NULL, 0},
         {"experiment_tgroup_sigma_beta",   required_argument, NULL, 0},
@@ -1232,6 +1237,7 @@ static int isolator_analyze(int argc, char* argv[])
     unsigned int burnin = 50;
     unsigned int num_samples = 350;
     pos_t tss_cluster_dist = 150;
+    bool run_seqbias_correction = true;
     bool run_gc_correction = true;
     bool run_3p_correction = true;
     bool run_frag_correction = true;
@@ -1249,15 +1255,15 @@ static int isolator_analyze(int argc, char* argv[])
     std::set<std::string> excluded_seqs;
 
     // model parameter defaults
-    double experiment_tgroup_sigma_alpha = 1.0,
-           experiment_tgroup_sigma_beta = 1.0,
+    double experiment_shape_alpha = 1.0,
+           experiment_shape_beta = 1.0,
 
            experiment_splice_sigma_alpha = 5.0,
            experiment_splice_sigma_beta = 10.0,
 
-           condition_tgroup_alpha = 3.0,
-           condition_tgroup_beta_a = 5.0,
-           condition_tgroup_beta_b = 0.01,
+           condition_shape_alpha = 3.0,
+           condition_shape_beta_a = 5.0,
+           condition_shape_beta_b = 0.01,
 
            condition_splice_alpha = 3.0,
            condition_splice_beta_a = 3.0,
@@ -1315,7 +1321,10 @@ static int isolator_analyze(int argc, char* argv[])
             case 0:
                 longopt_name = std::string(long_options[optidx].name);
 
-                if (longopt_name == "no-gc-correction") {
+                if (longopt_name == "no-seqbias-correction") {
+                    run_seqbias_correction = false;
+                }
+                else if (longopt_name == "no-gc-correction") {
                     run_gc_correction = false;
                 }
                 else if (longopt_name == "no-3p-correction") {
@@ -1348,11 +1357,11 @@ static int isolator_analyze(int argc, char* argv[])
                 else if (longopt_name == "min-align-pr") {
                     constants::min_align_pr = atof(optarg);
                 }
-                else if (longopt_name == "experiment_tgroup_sigma_alpha") {
-                    experiment_tgroup_sigma_alpha = strtod(optarg, NULL);
+                else if (longopt_name == "experiment_shape_alpha") {
+                    experiment_shape_alpha = strtod(optarg, NULL);
                 }
-                else if (longopt_name == "experiment_tgroup_sigma_beta") {
-                    experiment_tgroup_sigma_beta = strtod(optarg, NULL);
+                else if (longopt_name == "experiment_shape_beta") {
+                    experiment_shape_beta = strtod(optarg, NULL);
                 }
                 else if (longopt_name == "experiment_splice_sigma_alpha") {
                     experiment_splice_sigma_alpha = strtod(optarg, NULL);
@@ -1360,14 +1369,14 @@ static int isolator_analyze(int argc, char* argv[])
                 else if (longopt_name == "experiment_splice_sigma_beta") {
                     experiment_splice_sigma_beta = strtod(optarg, NULL);
                 }
-                else if (longopt_name == "condition_tgroup_alpha") {
-                    condition_tgroup_alpha = strtod(optarg, NULL);
+                else if (longopt_name == "condition_shape_alpha") {
+                    condition_shape_alpha = strtod(optarg, NULL);
                 }
-                else if (longopt_name == "condition_tgroup_beta_a") {
-                    condition_tgroup_beta_a = strtod(optarg, NULL);
+                else if (longopt_name == "condition_shape_beta_a") {
+                    condition_shape_beta_a = strtod(optarg, NULL);
                 }
-                else if (longopt_name == "condition_tgroup_beta_b") {
-                    condition_tgroup_beta_b = strtod(optarg, NULL);
+                else if (longopt_name == "condition_shape_beta_b") {
+                    condition_shape_beta_b = strtod(optarg, NULL);
                 }
                 else if (longopt_name == "condition_splice_alpha") {
                     condition_splice_alpha = strtod(optarg, NULL);
@@ -1430,6 +1439,10 @@ static int isolator_analyze(int argc, char* argv[])
         ts.read_gtf(annotation_filename, tss_cluster_dist, use_tss);
     }
 
+    // scale priors by number of transcripts
+    constants::analyze_experiment_mean0 /= ts.size();
+    constants::min_expr /= ts.size();
+
     hid_t output_file_id = 0;
     if (!dryrun) {
         output_file_id =
@@ -1479,17 +1492,18 @@ static int isolator_analyze(int argc, char* argv[])
     }
 
     Analyze analyze(rng_seed, burnin, num_samples, ts, fa_fn,
-                    run_gc_correction, run_3p_correction, run_frag_correction,
+                    run_seqbias_correction, run_gc_correction,
+                    run_3p_correction, run_frag_correction,
                     qc_output_file != NULL, nopriors,
                     excluded_seqs,
                     bias_training_seqnames,
-                    experiment_tgroup_sigma_alpha,
-                    experiment_tgroup_sigma_beta,
+                    experiment_shape_alpha,
+                    experiment_shape_beta,
                     experiment_splice_sigma_alpha,
                     experiment_splice_sigma_beta,
-                    condition_tgroup_alpha,
-                    condition_tgroup_beta_a,
-                    condition_tgroup_beta_b,
+                    condition_shape_alpha,
+                    condition_shape_beta_a,
+                    condition_shape_beta_b,
                     condition_splice_alpha,
                     condition_splice_beta_a,
                     condition_splice_beta_b);

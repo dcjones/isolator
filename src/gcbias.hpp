@@ -21,7 +21,6 @@ public:
 	~GCBias();
 	double get_bias(double gc);
 
-	std::vector<double> bins;
 	std::vector<double> bin_bias;
 };
 

@@ -225,12 +225,38 @@ static double lbeta(double x, double y)
 }
 
 
+#if 0
+double PoissonLogPdf::f(float lambda, unsigned int k)
+{
+    return k * fastlog(lambda) - lgammaf(k + 1) - lambda;
+}
+
+
+double PoissonLogPdf::df_dlambda(float lambda, unsigned int k)
+{
+    return (float) k / lambda - 1;
+}
+#endif
+
+
 static const double NEG_LOG_2_PI_DIV_2 = -log(2 * M_PI)/2;
 
 double NormalLogPdf::f(double mu, double sigma, const double* xs, size_t n)
 {
     double part1 = n * (NEG_LOG_2_PI_DIV_2 - fastlog(sigma));
     double part2 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part2 += sq(xs[i] - mu) / (2 * sq(sigma));
+    }
+
+    return part1 - part2;
+}
+
+
+float NormalLogPdf::f(float mu, float sigma, const float* xs, size_t n)
+{
+    float part1 = n * (NEG_LOG_2_PI_DIV_2 - fastlog(sigma));
+    float part2 = 0.0;
     for (size_t i = 0; i < n; ++i) {
         part2 += sq(xs[i] - mu) / (2 * sq(sigma));
     }
@@ -273,9 +299,30 @@ double NormalLogPdf::df_dmu(double mu, double sigma, const double* xs, size_t n)
 }
 
 
+float NormalLogPdf::df_dmu(float mu, float sigma, const float* xs, size_t n)
+{
+    float part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += xs[i] - mu;
+    }
+    return part / sq(sigma);
+}
+
+
 double NormalLogPdf::df_dsigma(double mu, double sigma, const double* xs, size_t n)
 {
     double part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += sq(xs[i] - mu);
+    }
+
+    return part / cb(sigma) - n/sigma;
+}
+
+
+float NormalLogPdf::df_dsigma(float mu, float sigma, const float* xs, size_t n)
+{
+    float part = 0.0;
     for (size_t i = 0; i < n; ++i) {
         part += sq(xs[i] - mu);
     }
@@ -324,12 +371,27 @@ double LogNormalLogPdf::df_dsigma(double mu, double sigma, const double* xs, siz
 }
 
 
+#if 0
 double StudentsTLogPdf::f(double nu, double mu, double sigma, const double* xs, size_t n)
 {
     double part1 =
         n * (lgamma((nu + 1) / 2) - lgamma(nu / 2) - fastlog(sqrt(nu * M_PI) * sigma));
 
     double part2 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part2 += log1p(sq((xs[i] - mu) / sigma) / nu);
+    }
+
+    return part1 - ((nu + 1) / 2) * part2;
+}
+
+
+float StudentsTLogPdf::f(float nu, float mu, float sigma, const float* xs, size_t n)
+{
+    float part1 =
+        n * (lgammaf((nu + 1) / 2) - lgamma(nu / 2) - fastlog(sqrt(nu * M_PI) * sigma));
+
+    float part2 = 0.0;
     for (size_t i = 0; i < n; ++i) {
         part2 += log1p(sq((xs[i] - mu) / sigma) / nu);
     }
@@ -360,6 +422,17 @@ double StudentsTLogPdf::df_dmu(double nu, double mu, double sigma, const double*
 }
 
 
+float StudentsTLogPdf::df_dmu(float nu, float mu, float sigma, const float* xs, size_t n)
+{
+    float part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += (2 * (xs[i] - mu) / sq(sigma) / nu) / (1 + sq((xs[i] - mu) / sigma) / nu);
+    }
+
+    return ((nu + 1) / 2) * part;
+}
+
+
 double StudentsTLogPdf::df_dsigma(double nu, double mu, double sigma, const double* xs, size_t n)
 {
     double part = 0.0;
@@ -370,8 +443,10 @@ double StudentsTLogPdf::df_dsigma(double nu, double mu, double sigma, const doub
 
     return ((nu + 1) / 2) * part - n / sigma;
 }
+#endif
 
 
+#if 0
 double GammaLogPdf::f(double alpha, double beta, const double* xs, size_t n)
 {
     double part1 = 0.0, part2 = 0.0;
@@ -382,6 +457,21 @@ double GammaLogPdf::f(double alpha, double beta, const double* xs, size_t n)
 
     return
         n * (alpha * fastlog(beta) - lgamma(alpha)) +
+        (alpha - 1) * part1 -
+        beta * part2;
+}
+
+
+float GammaLogPdf::f(float alpha, float beta, const float* xs, size_t n)
+{
+    float part1 = 0.0, part2 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part1 += fastlog(xs[i]);
+        part2 += xs[i];
+    }
+
+    return
+        n * (alpha * fastlog(beta) - lgammaf(alpha)) +
         (alpha - 1) * part1 -
         beta * part2;
 }
@@ -420,6 +510,19 @@ double GammaLogPdf::df_dbeta(double alpha, double beta, const double* xs, size_t
 }
 
 
+float GammaLogPdf::df_dbeta(float alpha, float beta, const float* xs, size_t n)
+{
+    float part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += xs[i];
+    }
+
+    return (float) n * (alpha / beta) - part;
+}
+#endif
+
+
+#if 0
 double AltGammaLogPdf::f(double mean, double shape, const double* xs, size_t n)
 {
     double scale =  mean / shape;
@@ -428,8 +531,41 @@ double AltGammaLogPdf::f(double mean, double shape, const double* xs, size_t n)
         part += (shape - 1.0) * fastlog(xs[i]) - xs[i] / scale;
     }
 
-    return -(double) n * (lgamma(shape) + shape * log(scale)) + part;
+    double ans = -(double) n * (lgamma(shape) + shape * fastlog(scale)) + part;
+    assert_finite(ans);
+    return ans;
 }
+
+
+float AltGammaLogPdf::f(float mean, float shape, const float* xs, size_t n)
+{
+    float scale =  mean / shape;
+    float part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += (shape - 1.0) * fastlog(xs[i]) - xs[i] / scale;
+    }
+
+    float ans = -(float) n * (lgammaf(shape) + shape * fastlog(scale)) + part;
+    assert_finite(ans);
+    return ans;
+}
+
+
+double AltGammaLogPdf::f(double mean, double shape, double x)
+{
+    double scale =  mean / shape;
+    double part = (shape - 1.0) * fastlog(x) - x / scale;
+    return -(lgamma(shape) + shape * fastlog(scale)) + part;
+}
+
+
+float AltGammaLogPdf::f(float mean, float shape, float x)
+{
+    float scale =  mean / shape;
+    float part = (shape - 1.0) * fastlog(x) - x / scale;
+    return -(lgammaf(shape) + shape * fastlog(scale)) + part;
+}
+
 
 
 double AltGammaLogPdf::df_dx(double mean, double shape, const double* xs, size_t n)
@@ -444,6 +580,14 @@ double AltGammaLogPdf::df_dx(double mean, double shape, const double* xs, size_t
 }
 
 
+double AltGammaLogPdf::df_dx(double mean, double shape, double x)
+{
+    double scale = mean / shape;
+    double part = (shape - 1.0) / x;
+    return part - 1.0 / scale;
+}
+
+
 double AltGammaLogPdf::df_dmean(double mean, double shape, const double* xs, size_t n)
 {
     double part = 0.0;
@@ -452,6 +596,17 @@ double AltGammaLogPdf::df_dmean(double mean, double shape, const double* xs, siz
     }
     part *= shape / sq(mean);
     return part - (double) n * shape / mean;
+}
+
+
+float AltGammaLogPdf::df_dmean(float mean, float shape, const float* xs, size_t n)
+{
+    float part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += xs[i];
+    }
+    part *= shape / sq(mean);
+    return part - (float) n * shape / mean;
 }
 
 
@@ -465,6 +620,27 @@ double AltGammaLogPdf::df_dshape(double mean, double shape, const double* xs, si
 
     return (double) n * (-boost::math::digamma(shape) + fastlog(scale) * (mean/sq(shape))) + part;
 }
+
+
+float AltGammaLogPdf::df_dshape(float mean, float shape, const float* xs, size_t n)
+{
+    float scale = mean / shape;
+    float part = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        part += fastlog(xs[i]) - xs[i] / mean;
+    }
+
+    return (float) n * (-boost::math::digamma(shape) + fastlog(scale) * (mean/sq(shape))) + part;
+}
+
+
+float AltGammaLogPdf::df_dshape(float mean, float shape, float x)
+{
+    float scale = mean / shape;
+    float part = fastlog(x) - x / mean;
+    return (-boost::math::digamma(shape) + fastlog(scale) * (mean/sq(shape))) + part;
+}
+#endif
 
 
 double InvGammaLogPdf::f(double alpha, double beta, const double* xs, size_t n)

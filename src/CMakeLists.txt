@@ -18,6 +18,7 @@ add_executable(isolator
                common.cpp
                constants.cpp
                cpuid.cpp
+               distributions.cpp
                emp_dist.cpp
                fastmath.cpp
                fastmath-vanilla.cpp

@@ -52,14 +52,18 @@ class Summarize
                              double credible_interval,
                              bool unnormalized);
 
+        void feature_expression(FILE* output,
+                                double credible_interval,
+                                bool unnormalized);
+    
         void differential_gene_expression(FILE* output, double credible_interval,
                                           double effect_size);
 
         void differential_transcript_expression(FILE* output, double credible_interval,
                                                 double effect_size);
 
-        void differential_transcription(FILE* output, double credible_interval,
-                                        double effect_size);
+        //void differential_transcription(FILE* output, double credible_interval,
+                                        //double effect_size);
 
         void differential_splicing(FILE* output, double credible_interval,
                                    double effect_size);
@@ -71,6 +75,8 @@ class Summarize
         void condition_feature_splicing_samples(FILE* output);
 
         void condition_gene_expression(FILE* output, double credible_interval);
+
+        void condition_feature_expression(FILE* output, double credible_interval);
 
         void condition_transcript_expression(FILE* output,
                                              double credible_interval);
@@ -88,9 +94,9 @@ class Summarize
         std::vector<std::vector<float> > transcript_condition_splicing(const char* transcript_id);
 
 
-        void tgroup_fold_change(FILE* output,
-                                unsigned int condition_a,
-                                unsigned int condition_b);
+        //void tgroup_fold_change(FILE* output,
+                                //unsigned int condition_a,
+                                //unsigned int condition_b);
 
         void expression_samples(FILE* output);
         void condition_pairwise_splicing(FILE* output);
@@ -120,8 +126,8 @@ class Summarize
         void condition_transcript_expression(boost::multi_array<float, 3>& output);
         void condition_gene_expression(boost::multi_array<float, 3>& output);
 
-        void read_condition_tgroup_mean(unsigned int condition,
-                                        boost::numeric::ublas::matrix<float>& data);
+        //void read_condition_tgroup_mean(unsigned int condition,
+                                        //boost::numeric::ublas::matrix<float>& data);
 
         void condition_splicing(std::vector<boost::multi_array<float, 3> >& output);
 
@@ -177,7 +183,7 @@ class Summarize
         std::vector<unsigned int> spliced_tgroup_indexes;
 
         // normalization factor indexed by sample_num, sample
-        boost::numeric::ublas::matrix<double> scale;
+        boost::numeric::ublas::matrix<float> scale;
 };
 
 

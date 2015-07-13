@@ -50,15 +50,31 @@ class Shredder
 
 
 // Some common distribution functions, with derivatives
+//
+
+#if 0
+class PoissonLogPdf
+{
+    public:
+        double f(float lambda, unsigned int k);
+        double df_dlambda(float lambda, unsigned int k);
+};
+#endif
 
 
 class NormalLogPdf
 {
     public:
         double f(double mu, double sigma, const double* xs, size_t n);
+        float f(float mu, float sigma, const float* xs, size_t n);
+
         double df_dx(double mu, double sigma, const double* xs, size_t n);
+
         double df_dmu(double mu, double sigma, const double* xs, size_t n);
+        float df_dmu(float mu, float sigma, const float* xs, size_t n);
+
         double df_dsigma(double mu, double sigma, const double* xs, size_t n);
+        float df_dsigma(float mu, float sigma, const float* xs, size_t n);
 
         double f(double mu, double sigma, double x);
         double df_dx(double mu, double sigma, double x);
@@ -75,35 +91,52 @@ class LogNormalLogPdf
 };
 
 
+#if 0
 class StudentsTLogPdf
 {
     public:
         double f(double nu, double mu, double sigma, const double* xs, size_t n);
+        float f(float nu, float mu, float sigma, const float* xs, size_t n);
         double df_dx(double nu, double mu, double sigma, const double* xs, size_t n);
         double df_dmu(double nu, double mu, double sigma, const double* xs, size_t n);
+        float df_dmu(float nu, float mu, float sigma, const float* xs, size_t n);
         double df_dsigma(double nu, double mu, double sigma, const double* xs, size_t n);
 };
+#endif
 
 
+#if 0
 class GammaLogPdf
 {
     public:
         double f(double alpha, double beta, const double* xs, size_t n);
+        float f(float alpha, float beta, const float* xs, size_t n);
         double df_dx(double alpha, double beta, const double* xs, size_t n);
         double df_dalpha(double alpha, double beta, const double* xs, size_t n);
         double df_dbeta(double alpha, double beta, const double* xs, size_t n);
+        float df_dbeta(float alpha, float beta, const float* xs, size_t n);
 };
+#endif
 
 
+#if 0
 // Gamma parameterized by mean and shape
 class AltGammaLogPdf
 {
     public:
         double f(double mean, double shape, const double* xs, size_t n);
+        float f(float mean, float shape, const float* xs, size_t n);
+        double f(double mean, double shape, double x);
+        float f(float mean, float shape, float x);
         double df_dx(double mean, double shape, const double* xs, size_t n);
+        double df_dx(double mean, double shape, double x);
         double df_dmean(double mean, double shape, const double* xs, size_t n);
+        float df_dmean(float mean, float shape, const float* xs, size_t n);
         double df_dshape(double shape, double mean, const double* xs, size_t n);
+        float df_dshape(float shape, float mean, const float* xs, size_t n);
+        float df_dshape(float mean, float shape, float x);
 };
+#endif
 
 
 class InvGammaLogPdf

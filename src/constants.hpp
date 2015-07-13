@@ -144,10 +144,10 @@ namespace constants
      * scale changes are meaningless. */
     extern float min_expr;
 
-    /* Hyperparameters for the gamma prior on experiment_tgroup_mu values. */
-    extern double analyze_experiment_tgroup_mean0;
-    extern double analyze_experiment_tgroup_shape0;
-    extern double analyze_experiment_tgroup_shape;
+    /* Hyperparameters for the gamma prior on experiment_mean values. */
+    extern double analyze_experiment_mean0;
+    extern double analyze_experiment_shape0;
+    extern double analyze_experiment_shape;
 
     /* Hyperparameters for the normal prior on experiment_splice_mu values. */
     extern double analyze_experiment_splice_mu0;
@@ -155,7 +155,6 @@ namespace constants
 
     /* Student-t nu parameter for the experiment tgroup and splice
      * distributions. */
-    extern double analyze_experiment_tgroup_nu;
     extern double analyze_experiment_splice_nu;
 
     /* When there is no data, group level variance parameters can converge

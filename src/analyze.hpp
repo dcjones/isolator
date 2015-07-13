@@ -16,8 +16,8 @@
 #include "transcripts.hpp"
 
 class SamplerTickThread;
-class ConditionTgroupMuSigmaSamplerThread;
-class ExperimentTgroupMuSigmaSamplerThread;
+class ConditionMeanShapeSamplerThread;
+class ExperimentMeanShapeSamplerThread;
 class GammaBetaSampler;
 class AlphaSampler;
 class BetaSampler;
@@ -37,6 +37,7 @@ class Analyze
                 size_t num_samples,
                 TranscriptSet& ts,
                 const char* genome_filename,
+                bool run_seqbias_correction,
                 bool run_gc_correction,
                 bool run_3p_correction,
                 bool run_frag_correction,
@@ -44,13 +45,13 @@ class Analyze
                 bool nopriors,
                 std::set<std::string> excluded_seqs,
                 std::set<std::string> bias_training_seqnames,
-                double experiment_tgroup_sigma_alpha,
-                double experiment_tgroup_sigma_beta,
+                double experiment_shape_alpha,
+                double experiment_shape_beta,
                 double experiment_splice_sigma_alpha,
                 double experiment_splice_sigma_beta,
-                double condition_tgroup_alpha,
-                double condition_tgroup_beta_a,
-                double condition_tgroup_beta_b,
+                double condition_shape_alpha,
+                double condition_shape_beta_a,
+                double condition_shape_beta_b,
                 double condition_splice_alpha,
                 double condition_splice_beta_a,
                 double condition_splice_beta_b);
@@ -66,7 +67,6 @@ class Analyze
     private:
         void setup_samplers();
         void setup_output(hid_t output_file_id);
-        void warmup();
         void sample(bool optimize_state);
         void write_output(size_t sample_num);
 
@@ -76,7 +76,7 @@ class Analyze
         void compute_xs();
 
         void choose_initial_values();
-        void compute_ts_scaling();
+        void compute_scaling();
 
         // number of burnin samples
         size_t burnin;
@@ -90,6 +90,9 @@ class Analyze
         // File name of a fasta file containing the reference genome sequence
         // against which the reads are aligned.
         const char* genome_filename;
+
+        // True if SeqBias correction should be used.
+        bool run_seqbias_correction;
 
         // True if GC content correction should be used.
         bool run_gc_correction;
@@ -127,8 +130,8 @@ class Analyze
 
         // threads used for iterating samplers
         std::vector<SamplerTickThread*> qsampler_threads;
-        std::vector<ConditionTgroupMuSigmaSamplerThread*> musigma_sampler_threads;
-        std::vector<ExperimentTgroupMuSigmaSamplerThread*> experiment_musigma_sampler_threads;
+        std::vector<ConditionMeanShapeSamplerThread*> meanshape_sampler_threads;
+        std::vector<ExperimentMeanShapeSamplerThread*> experiment_meanshape_sampler_threads;
         GammaBetaSampler* gamma_beta_sampler;
         BetaSampler* invgamma_beta_sampler;
         GammaNormalSigmaSampler* gamma_normal_sigma_sampler;
@@ -144,59 +147,49 @@ class Analyze
 
         // work is doled out in block for these. Otherwise threads can starve
         // when there are few sample in the experiment
-        Queue<IdxRange> musigma_sampler_tick_queue,
-                        experiment_musigma_sampler_tick_queue,
+        Queue<IdxRange> meanshape_sampler_tick_queue,
+                        experiment_meanshape_sampler_tick_queue,
                         splice_mu_sigma_sampler_tick_queue,
                         experiment_splice_mu_sigma_sampler_tick_queue;
 
-        Queue<int> musigma_sampler_notify_queue,
-                   experiment_musigma_sampler_notify_queue,
+        Queue<int> meanshape_sampler_notify_queue,
+                   experiment_meanshape_sampler_notify_queue,
                    splice_mu_sigma_sampler_notify_queue,
                    experiment_splice_mu_sigma_sampler_notify_queue;
 
         // We maintain a different rng for every unit of work for threads.
         // That way we can actually make isolator run reproducible.
+        std::vector<rng_t> transcript_rng_pool;
         std::vector<rng_t> splice_rng_pool;
-        std::vector<rng_t> tgroup_rng_pool;
 
         // matrix containing relative transcript abundance samples, indexed by:
         //   sample -> transcript (tid)
-        boost::numeric::ublas::matrix<double> Q;
+        boost::numeric::ublas::matrix<float> Q;
 
-        // tgroup log-abundance, indexed by sample -> tgroup
-        boost::numeric::ublas::matrix<double> ts;
+        // transcript mean parameter, indexed by condition -> transcript
+        boost::numeric::ublas::matrix<float> condition_mean;
 
-        // transcript abundance relative to other transcripts within the same
-        // tgroup. Indexed by replicate -> tid.
-        boost::numeric::ublas::matrix<double> xs;
-
-        // tgroup mean parameter, indexed by condition -> tgroup
-        boost::numeric::ublas::matrix<double> condition_tgroup_mean;
-
-        // tgroup shape parameter, indexed by tgroup
-        std::vector<double> condition_tgroup_shape;
-
-        // parameters of the inverse gamma prior on condition_tgroup_sigma
-        double condition_tgroup_alpha, condition_tgroup_beta;
+        // transcript shape parameter, indexed by transcript
+        std::vector<float> condition_shape;
 
         // parameters of the inverse gamma prior on condition_splice_sigma
         double condition_splice_alpha, condition_splice_beta;
 
-        // experiment-wise tgroup position paremeter, indexed by tgroup
-        std::vector<double> experiment_tgroup_mean;
+        // parameters of the inverse gamma prior on condition_shape
+        double condition_shape_alpha, condition_shape_beta;
 
-        // experiment-wide tgroup scale parameter
-        double experiment_tgroup_shape;
+        // experiment-wise transcript position paremeter, indexed by transcript
+        std::vector<float> experiment_mean;
 
-        // gamma hypeparameters for prior on experiment_tgroup_sigma
-        double experiment_tgroup_sigma_alpha;
-        double experiment_tgroup_sigma_beta;
+        // experiment-wide transcript scale parameter
+        double experiment_shape;
 
-        // parameters for normal prior over experiment_tgroup_mu
-        double experiment_tgroup_mean0, experiment_tgroup_shape0;
+        // gamma hypeparameters for prior on experiment_shape
+        double experiment_shape_alpha;
+        double experiment_shape_beta;
 
-        // temporary space used by compute_xs
-        std::vector<double> tgroup_expr;
+        // parameters for normal prior over experiment_mean
+        double experiment_mean0, experiment_shape0;
 
         // tids belonging to each tgroup (indexed by tgroup)
         std::vector<std::vector<unsigned int> > tgroup_tids;
@@ -206,10 +199,10 @@ class Analyze
 
         // condition slice mean indexed by condition, spliced tgroup, transcript
         // according to spliced_tgroup_indexes and tgroup_tids
-        std::vector<std::vector<std::vector<double> > > condition_splice_mu;
+        std::vector<std::vector<std::vector<float> > > condition_splice_mu;
 
         // per-spliced-tgroup experiment wide logistic-normal mean
-        std::vector<std::vector<double> > experiment_splice_mu;
+        std::vector<std::vector<float> > experiment_splice_mu;
 
         // prior parameters for experimient_splice_mu
         double experiment_splice_nu, experiment_splice_mu0, experiment_splice_sigma0;
@@ -222,16 +215,15 @@ class Analyze
         double experiment_splice_sigma_beta;
 
         // splicing precision, indexed by spliced tgroup
-        std::vector<std::vector<double> > condition_splice_sigma;
+        std::vector<std::vector<float> > condition_splice_sigma;
 
         // overparameterization to unstick stuck samplers
-        std::vector<std::vector<double> > condition_splice_eta;
+        std::vector<std::vector<float> > condition_splice_eta;
 
         // flattened condition_splice_sigma used for sampling alpha, beta
         // params.
-        std::vector<double> condition_splice_sigma_work;
-        std::vector<double> experiment_splice_sigma_work;
-        std::vector<double> experiment_tgroup_shape_work;
+        std::vector<float> condition_splice_sigma_work;
+        std::vector<float> experiment_splice_sigma_work;
 
         // paramaters for the inverse gamma priors on splice_alpha and
         // splice_beta
@@ -245,10 +237,10 @@ class Analyze
         std::vector<int> condition;
 
         // normalization constant for each sample
-        std::vector<double> scale;
+        std::vector<float> scale;
 
         // temporary space used for computing scale
-        std::vector<double> scale_work;
+        std::vector<float> scale_work;
 
         // number of sequenced samples
         unsigned int K;
@@ -259,12 +251,12 @@ class Analyze
         // number of transcripts
         unsigned int N;
 
-        // number of transcription groups (TSS groups, typicall)
+        // number of tgroups
         unsigned int T;
 
         // Hyperparams for inverse gamma prior on tgroup_alpha/tgroup_beta
-        double condition_tgroup_beta_a,
-               condition_tgroup_beta_b;
+        double condition_shape_beta_a,
+               condition_shape_beta_b;
 
         // RNG used for alpha/beta samplers
         unsigned int rng_seed;
@@ -273,9 +265,10 @@ class Analyze
         // HDF5 dataspace ids, for output purposes
 
         // dataspaces
-        hid_t h5_experiment_tgroup_dataspace;
-        hid_t h5_condition_tgroup_dataspace;
-        hid_t h5_tgroup_row_mem_dataspace;
+        hid_t h5_experiment_mean_dataspace;
+        hid_t h5_condition_mean_dataspace;
+        hid_t h5_condition_mean_mem_dataspace;
+        hid_t h5_row_mem_dataspace;
         hid_t h5_sample_quant_dataspace;
         hid_t h5_sample_quant_mem_dataspace;
         hid_t h5_experiment_splice_dataspace;
@@ -287,8 +280,8 @@ class Analyze
 
         // datasets
         hid_t h5_experiment_mean_dataset;
-        hid_t h5_experiment_sd_dataset;
         hid_t h5_condition_mean_dataset;
+        hid_t h5_condition_shape_dataset;
         hid_t h5_sample_quant_dataset;
         hid_t h5_experiment_splice_mu_dataset;
         hid_t h5_experiment_splice_sigma_dataset;
@@ -302,8 +295,8 @@ class Analyze
         // structure for the ragged-array splicing data
         hvl_t* h5_splice_work;
 
-        // a write buffer for converting doubles to floats before hdf5 output
-        std::vector<float> tgroup_row_data;
+        // a write buffer for hdf5 output
+        std::vector<float> row_data;
 
         friend void write_qc_data(FILE* fout, Analyze& analyze);
         friend void compare_seqbias(Analyze& analyze, TranscriptSet& ts,

@@ -462,6 +462,7 @@ FragmentModel::~FragmentModel()
 void FragmentModel::estimate(TranscriptSet& ts,
         const char* bam_fn,
         const char* fa_fn,
+        bool use_seqbias_correction,
         bool use_gc_correction,
         bool use_3p_correction,
         bool use_frag_correction,
@@ -548,7 +549,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
     seqbias_intervals.clear();
 
     // train seqbias
-    if (fa_fn) {
+    if (fa_fn && use_seqbias_correction) {
         std::string task_name0 = std::string("Training sense sequence bias (") +
                                  std::string(bam_fn) +
                                  std::string(")");

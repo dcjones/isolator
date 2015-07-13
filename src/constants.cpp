@@ -34,19 +34,22 @@ unsigned int         constants::sampler_component_block_size = 1;
 double               constants::sample_scaling_quantile      = 0.9;
 size_t               constants::sample_scaling_truncation    = 100000;
 float                constants::frag_prob_epsilon            = 1e-14;
-float                constants::min_expr                     = 1e-20;
-double               constants::analyze_experiment_tgroup_mean0  = 1e-9;
-double               constants::analyze_experiment_tgroup_shape0 = 2.0;
-double               constants::analyze_experiment_tgroup_shape  = 1.5;
+
+// These numbers are scaled by the number of transcripts
+double               constants::analyze_experiment_mean0     = 2e-4;
+float                constants::min_expr                     = 2e-7;
+
+double               constants::analyze_experiment_shape0    = 0.005;
+double               constants::analyze_experiment_shape     = 1.0;
 double               constants::analyze_experiment_splice_mu0    = 0.5;
 double               constants::analyze_experiment_splice_sigma0 = 1.0;
 double               constants::analyze_experiment_splice_nu     = 5.0;
 double               constants::analyze_min_splice_sigma         = 0.03;
-pos_t                constants::max_intron_overlap               = 2;
-double               constants::aligned_mismatch_pr              = 0.01;
-double               constants::misaligned_mismatch_pr           = 0.05;
-double               constants::misalign_prior                   = 0.05;
-pos_t                constants::fragbias_endlen                  = 100;
-float                constants::fragbias_scale                   = 3e5;
-double               constants::min_align_pr                     = 0.1;
-size_t               constants::max_newton_steps                 = 10;
+pos_t                constants::max_intron_overlap           = 2;
+double               constants::aligned_mismatch_pr          = 0.01;
+double               constants::misaligned_mismatch_pr       = 0.05;
+double               constants::misalign_prior               = 0.05;
+pos_t                constants::fragbias_endlen              = 100;
+float                constants::fragbias_scale               = 3e5;
+double               constants::min_align_pr                 = 0.1;
+size_t               constants::max_newton_steps             = 10;

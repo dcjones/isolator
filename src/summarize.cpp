@@ -138,7 +138,7 @@ Summarize::Summarize(const char* filename)
     dataset = H5Dopen2_checked(h5_file, "/sample_scaling", H5P_DEFAULT);
 
     scale.resize(num_samples, K);
-    H5Dread_checked(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
+    H5Dread_checked(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL,
                     H5P_DEFAULT, &scale.data()[0]);
 
     H5Dclose(dataset);
@@ -201,13 +201,6 @@ void Summarize::point_ci_transcript_expression(
             }
         }
 
-        // truncate miniscule values
-        for (size_t j = 0; j < num_samples; ++j) {
-            for (size_t k = 0; k < N; ++k) {
-                Qi(j, k) = std::max<float>(constants::min_expr, Qi(j, k));
-            }
-        }
-
         if (splicing_rate) {
             for (size_t tg = 0; tg < T; ++tg) {
                 for (size_t j = 0; j < num_samples; ++j) {
@@ -219,12 +212,6 @@ void Summarize::point_ci_transcript_expression(
                     BOOST_FOREACH (unsigned int tid, tgroup_tids[tg]) {
                         Qi(j, tid) /= expr_sum;
                     }
-
-                    // XXX: experiment with seeing the transformed data
-                    //BOOST_FOREACH (unsigned int tid, tgroup_tids[tg]) {
-                        //Qi(j, tid) =
-                            //log(Qi(j, tid) / Qi(j, tgroup_tids[tg].back()));
-                    //}
                 }
             }
         }
@@ -316,11 +303,6 @@ void Summarize::point_ci_gene_expression(
                 for (size_t k = 0; k < num_samples; ++k) {
                     work[k] += Qi(k, tid);
                 }
-            }
-
-            // truncate miniscule values
-            for (size_t k = 0; k < num_samples; ++k) {
-                work[k] = std::max<float>(constants::min_expr, work[k]);
             }
 
             // posterior median
@@ -487,6 +469,174 @@ void Summarize::gene_expression(FILE* output, double credible_interval,
 }
 
 
+void Summarize::feature_expression(FILE* output,
+                                   double credible_interval,
+                                   bool unnormalized)
+{
+    bool print_credible_interval = !isnan(credible_interval);
+
+    double lower_quantile = 0.5 - credible_interval/2;
+    double upper_quantile = 0.5 + credible_interval/2;
+
+    fprintf(output,
+            "gene_names"
+            "\tgene_ids"
+            "\ttranscript_ids"
+            "\tlocus"
+            "\ttype");
+    for (unsigned int i = 0; i < K; ++i) {
+        fprintf(output, "\t%s_tpm",
+                metadata.sample_names[i].c_str());
+        if (print_credible_interval) {
+            fprintf(output,
+                    "\t%s_tpm_lower\t%s_tpm_upper",
+                    metadata.sample_names[i].c_str(),
+                    metadata.sample_names[i].c_str());
+        }
+    }
+    fputc('\n', output);
+
+    std::vector<Interval> feature_intervals;
+    std::vector<std::vector<unsigned int> > including_tids;
+    std::vector<std::vector<unsigned int> > excluding_tids;
+    std::vector<GeneFeatureType> feature_types;
+    read_gene_features(feature_intervals, including_tids, excluding_tids,
+                       feature_types);
+    size_t num_features = feature_intervals.size();
+
+    hid_t dataset = H5Dopen2_checked(h5_file, "/transcript_quantification", H5P_DEFAULT);
+    hid_t dataspace = H5Dget_space(dataset);
+    hsize_t dims[3]; // dims are num_samples, K, N
+    H5Sget_simple_extent_dims(dataspace, dims, NULL);
+
+    hsize_t file_dataspace_start[3] = {0, 0, 0};
+    hsize_t file_dataspace_dims[3] = {num_samples, 1, N};
+
+    hsize_t mem_dataspace_dims[2] = {num_samples, N};
+    hsize_t mem_dataspace_start[2] = {0, 0};
+    hid_t mem_dataspace = H5Screate_simple(2, mem_dataspace_dims, NULL);
+    H5Sselect_hyperslab(mem_dataspace, H5S_SELECT_SET, mem_dataspace_start,
+                        NULL, mem_dataspace_dims, NULL);
+
+    // compute estimates
+    matrix<float> Qi(num_samples, N);
+    std::vector<float> work(num_samples);
+    boost::multi_array<float, 2>
+        means(boost::extents[num_features][K]),
+        lowers(boost::extents[num_features][K]),
+        uppers(boost::extents[num_features][K]);
+
+    for (size_t i = 0; i < K; ++i) {
+        file_dataspace_start[1] = i;
+
+        H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
+                            file_dataspace_start, NULL,
+                            file_dataspace_dims, NULL);
+
+        H5Dread_checked(dataset, H5T_NATIVE_FLOAT, mem_dataspace,
+                        dataspace, H5P_DEFAULT, &Qi.data()[0]);
+
+        if (unnormalized) {
+            for (size_t j = 0; j < num_samples; ++j) {
+                for (size_t k = 0; k < N; ++k) {
+                    Qi(j, k) /= scale(j, i);
+                }
+            }
+        }
+
+        for (size_t k = 0; k < feature_intervals.size(); ++k) {
+            std::fill(work.begin(), work.end(), 0.0f);
+            BOOST_FOREACH (unsigned int tid, including_tids[k]) {
+                for (size_t j = 0; j < num_samples; ++j) {
+                    work[j] += Qi(j, tid);
+                }
+            }
+
+            // posterior mean
+            means[k][i] = 0.0;
+            BOOST_FOREACH (float val, work) {
+                means[k][i] += val;
+            }
+            means[k][i] /= num_samples;
+
+            lowers[k][i] = work[lround((work.size() - 1) * lower_quantile)];
+            uppers[k][i] = work[lround((work.size() - 1) * upper_quantile)];
+        }
+    }
+
+    // print estimates
+    std::set<GeneID> gene_id_set;
+    std::set<GeneName> gene_name_set;
+    for (size_t k = 0; k < feature_intervals.size(); ++k) {
+        // gene_names
+        gene_name_set.clear();
+        BOOST_FOREACH (unsigned int tid, including_tids[k]) {
+            gene_name_set.insert(gene_names[tid]);
+        }
+
+        bool first_item = true;
+        BOOST_FOREACH (GeneName gene_name, gene_name_set) {
+            if (!first_item) fputc(',', output);
+            else first_item = false;
+            fputs(gene_name.get().c_str(), output);
+        }
+
+        // gene_ids
+        gene_id_set.clear();
+        BOOST_FOREACH (unsigned int tid, including_tids[k]) {
+            gene_id_set.insert(gene_ids[tid]);
+        }
+
+        fputc('\t', output);
+        first_item = true;
+        BOOST_FOREACH (GeneID gene_id, gene_id_set) {
+            if (!first_item) fputc(',', output);
+            else first_item = false;
+            fputs(gene_id.get().c_str(), output);
+        }
+
+        // transcript_ids
+        fputc('\t', output);
+        first_item = true;
+        BOOST_FOREACH (unsigned int tid, including_tids[k]) {
+            if (!first_item) fputc(',', output);
+            else first_item = false;
+            fputs(transcript_ids[tid].get().c_str(), output);
+        }
+
+        // locus
+        fputc('\t', output);
+        fprintf(output, "%s:%ld-%ld(%c)",
+                feature_intervals[k].seqname.get().c_str(),
+                feature_intervals[k].start,
+                feature_intervals[k].end,
+                feature_intervals[k].strand == strand_pos ? '+' :
+                feature_intervals[k].strand == strand_neg ? '-' : '.');
+
+        // type
+        fputc('\t', output);
+        if (feature_types[k] == GENE_FEATURE_CASSETTE_EXON) {
+            fputs("cassette_exon", output);
+        }
+        else if (feature_types[k] == GENE_FEATURE_RETAINED_INTRON) {
+            fputs("retained_intron", output);
+        }
+        else {
+            fputs("unknown_feature", output);
+        }
+
+        for (size_t i = 0; i < K; ++i) {
+            fprintf(output, "\t%e", means[k][i]);
+            if (print_credible_interval) {
+                fprintf(output, "\t%e\t%e", lowers[k][i], uppers[k][i]);
+            }
+        }
+        fputc('\n', output);
+    }
+}
+
+
+#if 0
 void Summarize::read_condition_tgroup_mean(unsigned int condition,
                                            matrix<float>& data)
 {
@@ -511,9 +661,10 @@ void Summarize::read_condition_tgroup_mean(unsigned int condition,
     H5Sclose(dataspace);
     H5Dclose(dataset);
 }
+#endif
 
 
-
+#if 0
 void Summarize::differential_transcription(FILE* output, double credible_interval,
                                            double effect_size)
 {
@@ -619,6 +770,7 @@ void Summarize::differential_transcription(FILE* output, double credible_interva
         }
     }
 }
+#endif
 
 
 void Summarize::differential_splicing(FILE* output, double credible_interval,
@@ -758,6 +910,69 @@ void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& s
     H5Tclose(memtype);
     H5Dclose(dataset);
 }
+
+
+#if 0
+void Summarize::condition_splicing(std::vector<boost::multi_array<float, 3> >& splicing)
+{
+    // NOTE: splicing is indexed by spliced tgroup, sample, condition, within tgroup index
+    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/mean", H5P_DEFAULT);
+
+    hid_t dataspace = H5Dget_space(dataset);
+    hsize_t dims[3]; // dims are num_samples, C, N
+    H5Sget_simple_extent_dims(dataspace, dims, NULL);
+    size_t num_samples = dims[0];
+
+    typedef boost::multi_array<float, 2> marray_t;
+    marray_t Q(boost::extents[C][N]);
+
+    for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
+        size_t tgroup = spliced_tgroup_indexes[i];
+        splicing[i].resize(boost::extents[num_samples][C][tgroup_tids[tgroup].size()]);
+    }
+
+    hsize_t file_dataspace_start[3] = {0, 0, 0};
+    hsize_t file_dataspace_dims[3] = {1, C, N};
+
+    hsize_t mem_dataspace_start[2] = {0, 0};
+    hsize_t mem_dataspace_dims[2] = {C, N};
+    hid_t mem_dataspace = H5Screate_simple(2, mem_dataspace_dims, NULL);
+    H5Sselect_hyperslab(mem_dataspace, H5S_SELECT_SET, mem_dataspace_start,
+                        NULL, mem_dataspace_dims, NULL);
+
+    for (size_t i = 0; i < num_samples; ++i) {
+        // read one samples worth of data
+        file_dataspace_start[0] = i;
+        H5Sselect_hyperslab_checked(dataspace, H5S_SELECT_SET,
+                                    file_dataspace_start, NULL,
+                                    file_dataspace_dims, NULL);
+
+        H5Dread_checked(dataset, H5T_NATIVE_FLOAT, mem_dataspace, dataspace,
+                        H5P_DEFAULT, &Q.data()[0]);
+
+        for (size_t j = 0; j < C; ++j) {
+            for (size_t k = 0; k < spliced_tgroup_indexes.size(); ++k) {
+                unsigned int tg = spliced_tgroup_indexes[k];
+                // compute tgroup expression
+                double tgroup_expr = 0.0;
+                BOOST_FOREACH (unsigned int tid, tgroup_tids[tg]) {
+                    tgroup_expr += Q[j][tid];
+                }
+
+                // compute transcript splicing
+                for (size_t l = 0; l < tgroup_tids[tg].size(); ++l) {
+                    unsigned int tid = tgroup_tids[tg][l];
+                    splicing[k][i][j][l] = Q[j][tid] / tgroup_expr;
+                }
+            }
+        }
+    }
+
+    H5Sclose(dataspace);
+    H5Sclose(mem_dataspace);
+    H5Dclose(dataset);
+}
+#endif
 
 
 void Summarize::experiment_splicing(FILE* output, double credible_interval)
@@ -1968,6 +2183,138 @@ void Summarize::condition_gene_expression(FILE* output,
 }
 
 
+void Summarize::condition_feature_expression(FILE* output, double credible_interval)
+{
+    bool print_credible_interval = !isnan(credible_interval);
+
+    double lower_quantile = 0.5 - credible_interval/2;
+    double upper_quantile = 0.5 + credible_interval/2;
+
+    fprintf(output,
+            "gene_names"
+            "\tgene_ids"
+            "\ttranscript_ids"
+            "\tlocus"
+            "\ttype");
+    for (unsigned int i = 0; i < C; ++i) {
+        fprintf(output, "\t%s_tpm",
+                condition_names[i].c_str());
+        if (print_credible_interval) {
+            fprintf(output,
+                    "\t%s_tpm_lower\t%s_tpm_upper",
+                    condition_names[i].c_str(),
+                    condition_names[i].c_str());
+        }
+    }
+    fputc('\n', output);
+
+    std::vector<Interval> feature_intervals;
+    std::vector<std::vector<unsigned int> > including_tids;
+    std::vector<std::vector<unsigned int> > excluding_tids;
+    std::vector<GeneFeatureType> feature_types;
+    read_gene_features(feature_intervals, including_tids, excluding_tids,
+                       feature_types);
+
+    // read condition-wise transcript expression data
+    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/mean", H5P_DEFAULT);
+    boost::multi_array<float, 3> condition_mean;
+    condition_mean.resize(boost::extents[num_samples][C][N]);
+    H5Dread_checked(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL,
+                    H5P_DEFAULT, condition_mean.data());
+    H5Dclose(dataset);
+
+    std::vector<float> work(num_samples);
+    std::set<GeneID> gene_id_set;
+    std::set<GeneName> gene_name_set;
+
+    for (size_t i = 0; i < feature_intervals.size(); ++i) {
+        // gene_names
+        gene_name_set.clear();
+        BOOST_FOREACH (unsigned int tid, including_tids[i]) {
+            gene_name_set.insert(gene_names[tid]);
+        }
+
+        bool first_item = true;
+        BOOST_FOREACH (GeneName gene_name, gene_name_set) {
+            if (!first_item) fputc(',', output);
+            else first_item = false;
+            fputs(gene_name.get().c_str(), output);
+        }
+
+        // gene_ids
+        gene_id_set.clear();
+        BOOST_FOREACH (unsigned int tid, including_tids[i]) {
+            gene_id_set.insert(gene_ids[tid]);
+        }
+
+        fputc('\t', output);
+        first_item = true;
+        BOOST_FOREACH (GeneID gene_id, gene_id_set) {
+            if (!first_item) fputc(',', output);
+            else first_item = false;
+            fputs(gene_id.get().c_str(), output);
+        }
+
+        // transcript_ids
+        fputc('\t', output);
+        first_item = true;
+        BOOST_FOREACH (unsigned int tid, including_tids[i]) {
+            if (!first_item) fputc(',', output);
+            else first_item = false;
+            fputs(transcript_ids[tid].get().c_str(), output);
+        }
+
+        // locus
+        fputc('\t', output);
+        fprintf(output, "%s:%ld-%ld(%c)",
+                feature_intervals[i].seqname.get().c_str(),
+                feature_intervals[i].start,
+                feature_intervals[i].end,
+                feature_intervals[i].strand == strand_pos ? '+' :
+                feature_intervals[i].strand == strand_neg ? '-' : '.');
+
+        // type
+        fputc('\t', output);
+        if (feature_types[i] == GENE_FEATURE_CASSETTE_EXON) {
+            fputs("cassette_exon", output);
+        }
+        else if (feature_types[i] == GENE_FEATURE_RETAINED_INTRON) {
+            fputs("retained_intron", output);
+        }
+        else {
+            fputs("unknown_feature", output);
+        }
+
+        // estimates, credible intervals
+        for (size_t j = 0; j < C; ++j) {
+            std::fill(work.begin(), work.end(), 0.0f);
+            BOOST_FOREACH (unsigned int tid, including_tids[i]) {
+                for (size_t k = 0; k < num_samples; ++k) {
+                    work[k] += condition_mean[k][j][tid];
+                }
+            }
+
+            fputc('\t', output);
+
+            // posterior mean
+            double mean = 0.0;
+            BOOST_FOREACH (float val, work) {
+                mean += val;
+            }
+            mean /= work.size();
+            fprintf(output, "%e", mean);
+
+            if (print_credible_interval) {
+                double lower = work[lround((work.size() - 1) * lower_quantile)];
+                double upper = work[lround((work.size() - 1) * upper_quantile)];
+                fprintf(output, "\t%e\t%e", lower, upper);
+            }
+        }
+        fputc('\n', output);
+    }
+}
+
+
 // output index by sample number, condition, gid
 void Summarize::condition_gene_expression(boost::multi_array<float, 3>& output)
 {
@@ -2087,6 +2434,7 @@ void Summarize::condition_splicing(FILE* output, double credible_interval)
 }
 
 
+#if 0
 void Summarize::tgroup_fold_change(FILE* output,
                                    unsigned int condition_a,
                                    unsigned int condition_b)
@@ -2203,6 +2551,7 @@ void Summarize::tgroup_fold_change(FILE* output,
         fprintf(output, "\t%f\t%f\n", log2fc_lower[i], log2fc_upper[i]);
     }
 }
+#endif
 
 
 void Summarize::condition_pairwise_splicing(FILE* output)
@@ -2406,15 +2755,26 @@ void Summarize::read_gene_features(std::vector<Interval>& feature_intervals,
 
 void Summarize::read_tgroup_mean(boost::multi_array<float, 3>& output)
 {
-    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/tgroup_mean", H5P_DEFAULT);
-    hid_t dataspace = H5Dget_space(dataset);
-    hsize_t dims[3]; // dims are: num_samples, C, T
-    H5Sget_simple_extent_dims(dataspace, dims, NULL);
-    output.resize(boost::extents[dims[0]][dims[1]][dims[2]]);
-
+    // read condition-wise transcript expression data
+    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/mean", H5P_DEFAULT);
+    boost::multi_array<float, 3> condition_mean;
+    condition_mean.resize(boost::extents[num_samples][C][N]);
     H5Dread_checked(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL,
-                    H5P_DEFAULT, output.data());
+                    H5P_DEFAULT, condition_mean.data());
     H5Dclose(dataset);
+
+    // summarize by tgroup
+    output.resize(boost::extents[num_samples][C][T]);
+    std::fill(output.data(), output.data() + output.size(), 0.0f);
+    for (size_t tg = 0; tg < tgroup_tids.size(); ++tg) {
+        BOOST_FOREACH (unsigned int tid, tgroup_tids[tg]) {
+            for (unsigned int i = 0; i < num_samples; ++i) {
+                for (unsigned int j = 0; j < C; ++j) {
+                    output[i][j][tg] += condition_mean[i][j][tid];
+                }
+            }
+        }
+    }
 }
 
 

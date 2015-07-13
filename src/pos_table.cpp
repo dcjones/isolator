@@ -1,13 +1,29 @@
 
 #include "pos_table.hpp"
 
+
 PosTable::PosTable()
-{
-}
+{}
 
 
 PosTable::~PosTable()
+{}
+
+
+bool PosSubtable::inc(pos_t pos, pos_t start, pos_t end, int strand)
 {
+    int s = strand == 0 ? 0 : 1;
+
+    boost::unordered_map<pos_t, PosTableVal>::iterator i = table[s].find(pos);
+    if (i == table[s].end()) {
+        table[s].insert(std::pair<pos_t, PosTableVal>(
+            pos, PosTableVal(pos, start, end, 1)));
+        return true;
+    }
+    else {
+        i->second.count++;
+        return false;
+    }
 }
 
 
@@ -18,12 +34,7 @@ size_t PosTable::size()
     for (subtable = subtables.begin(); subtable != subtables.end(); ++subtable) {
         int strand;
         for (strand = 0; strand < 2; ++strand) {
-            std::vector<PosTableVal>::iterator i;
-            for (i = subtable->values[strand].begin();
-                 i != subtable->values[strand].end();
-                 ++i) {
-                ++n;
-            }
+            n += subtable->table[strand].size();
         }
     }
 
@@ -41,18 +52,7 @@ void PosTable::add(int32_t tid, pos_t pos, int strand,
     }
 
     PosSubtable& subtable = subtables.back();
-
-    if (subtable.values[strand].empty() ||
-        subtable.values[strand].back().pos != pos) {
-        subtable.values[strand].push_back(PosTableVal());
-        subtable.values[strand].back().pos = pos;
-        subtable.values[strand].back().start = start;
-        subtable.values[strand].back().end = end;
-        subtable.values[strand].back().count = 1;
-    }
-    else {
-        subtable.values[strand].back().count++;
-    }
+    subtable.inc(pos, start, end, strand);
 }
 
 
@@ -62,14 +62,14 @@ void PosTable::dump(std::vector<ReadPos>& positions, size_t max_size)
     for (subtable = subtables.begin(); subtable != subtables.end(); ++subtable) {
         int strand;
         for (strand = 0; strand < 2; ++strand) {
-            std::vector<PosTableVal>::iterator i;
-            for (i = subtable->values[strand].begin();
-                 i != subtable->values[strand].end();
+            boost::unordered_map<pos_t, PosTableVal>::iterator i;
+            for (i = subtable->table[strand].begin();
+                 i != subtable->table[strand].end();
                  ++i) {
                 if (positions.size() < max_size) {
                     positions.push_back(
-                            ReadPos(subtable->seqname, strand, i->pos,
-                                    i->start, i->end, i->count));
+                            ReadPos(subtable->seqname, strand, i->second.pos,
+                                    i->second.start, i->second.end, i->second.count));
                 }
                 else {
                     goto finish_pos_table_dump;
