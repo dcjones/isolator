@@ -207,7 +207,7 @@ bool TranscriptCmpTSS::operator()(const Transcript& a, const Transcript& b) cons
 
 bool TranscriptCmpGeneId::operator()(const Transcript& a, const Transcript& b) const
 {
-    return a.gene_name < b.gene_name;
+    return a.gene_id < b.gene_id;
 }
 
 
