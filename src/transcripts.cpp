@@ -339,6 +339,8 @@ void TranscriptSet::read_gtf(const char* filename, pos_t tss_cluster_distance,
             fpos_mark += 1e6;
         }
 
+        if (strcmp(row->feature->s, "gene") == 0) continue;
+
         ++count;
 
         str_t* t_id = reinterpret_cast<str_t*>(
@@ -1024,6 +1026,7 @@ void TranscriptSet::get_retained_introns(
 
     // index flanking exons
     for (iterator t = begin(); t != end(); ++t) {
+        if (t->size() == 0) continue;
         Transcript::iterator e1 = t->begin();
         Transcript::iterator e2 = t->begin(); ++e2;
 
