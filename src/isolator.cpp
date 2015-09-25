@@ -1550,6 +1550,7 @@ static int isolator_analyze(int argc, char* argv[])
     if (!dryrun) {
         write_metadata(output_file_id, metadata);
     }
+    H5Fclose(output_file_id);
     Logger::info("Finished. Have a nice day!");
     Logger::end();
 

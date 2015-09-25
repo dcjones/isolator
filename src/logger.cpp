@@ -30,8 +30,13 @@ Logger::Logger()
 
 Logger::~Logger()
 {
-    finished = true;
+    {
+        boost::lock_guard<boost::mutex> lock(mut);
+        finished = true;
+    }
+
     if (print_thread) {
+        print_thread->join();
         delete print_thread;
     }
     fflush(stdout);
@@ -52,10 +57,11 @@ void Logger::start()
 
 void Logger::end()
 {
-    instance().flush();
-    boost::lock_guard<boost::mutex> lock(instance().mut);
-
-    instance().finished = true;
+    {
+        instance().flush();
+        boost::lock_guard<boost::mutex> lock(instance().mut);
+        instance().finished = true;
+    }
     instance().print_thread->join();
 
     delete instance().print_thread;
@@ -170,8 +176,11 @@ void Logger::print(const char* msg)
 
 void Logger::print_loop()
 {
-    while (!finished)
-    {
+    while (true) {
+        {
+            boost::lock_guard<boost::mutex> lock(mut);
+            if (finished) break;
+        }
         if (!suspended) flush();
         boost::this_thread::sleep(boost::posix_time::milliseconds(250));
     }
