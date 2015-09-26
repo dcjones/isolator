@@ -2057,12 +2057,16 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
         qsampler_tick_queue.push(-1);
         meanshape_sampler_tick_queue.push(IdxRange(-1, -1));
         experiment_meanshape_sampler_tick_queue.push(IdxRange(-1, -1));
+        splice_mu_sigma_sampler_tick_queue.push(IdxRange(-1, -1));
+        experiment_splice_mu_sigma_sampler_tick_queue.push(IdxRange(-1, -1));
     }
 
     for (size_t i = 0; i < constants::num_threads; ++i) {
         qsampler_threads[i]->join();
         meanshape_sampler_threads[i]->join();
         experiment_meanshape_sampler_threads[i]->join();
+        splice_mu_sigma_sampler_threads[i]->join();
+        experiment_splice_mu_sigma_sampler_threads[i]->join();
     }
 
     BOOST_FOREACH (Sampler* qsampler, qsamplers) {
@@ -2073,6 +2077,8 @@ void Analyze::run(hid_t output_file_id, bool dryrun)
         delete qsampler_threads[i];
         delete meanshape_sampler_threads[i];
         delete experiment_meanshape_sampler_threads[i];
+        delete splice_mu_sigma_sampler_threads[i];
+        delete experiment_splice_mu_sigma_sampler_threads[i];
     }
 
     for (size_t i = 0; i < spliced_tgroup_indexes.size(); ++i) {
