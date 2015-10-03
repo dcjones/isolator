@@ -123,7 +123,6 @@ class Summarize
                 double credible_interval, bool unnormalized);
 
         // output is indexed by: condition, gene, sample
-        void condition_transcript_expression(boost::multi_array<float, 3>& output);
         void condition_gene_expression(boost::multi_array<float, 3>& output);
 
         //void read_condition_tgroup_mean(unsigned int condition,
@@ -137,6 +136,7 @@ class Summarize
                 std::vector<std::vector<unsigned int> >& excluding_tids,
                 std::vector<GeneFeatureType>& feature_types);
 
+        void read_condition_mean(boost::multi_array<float, 3>& output);
         void read_tgroup_mean(boost::multi_array<float, 3>& output);
 
         hid_t h5_file;

@@ -1963,7 +1963,7 @@ void Summarize::differential_transcript_expression(FILE* output, double credible
     fputc('\n', output);
 
     boost::multi_array<float, 3> expr_data(boost::extents[num_samples][C][N]);
-    condition_transcript_expression(expr_data);
+    read_condition_mean(expr_data);
     std::vector<double> work(num_samples);
 
     for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
@@ -2025,7 +2025,7 @@ void Summarize::condition_transcript_expression(FILE* output,
     fputc('\n', output);
 
     boost::multi_array<float, 3> expr_data(boost::extents[num_samples][C][N]);
-    condition_transcript_expression(expr_data);
+    read_condition_mean(expr_data);
     std::vector<double> work(num_samples);
 
     for (unsigned int i = 0; i < N; ++i) {
@@ -2058,55 +2058,6 @@ void Summarize::condition_transcript_expression(FILE* output,
             }
         }
         fputc('\n', output);
-    }
-}
-
-
-// output indexed by sample number, condition, tid
-void Summarize::condition_transcript_expression(boost::multi_array<float, 3>& output)
-{
-    // indexed by: spliced tgroup, sample number, condition, within tgroup tid
-    std::vector<boost::multi_array<float, 3> > splicing_data(spliced_tgroup_indexes.size());
-    condition_splicing(splicing_data);
-
-    // indexed by: sample number, condition, tgroup
-    boost::multi_array<float, 3> tgroup_mean_data;
-    read_tgroup_mean(tgroup_mean_data);
-
-    tgroup_mean_data.begin();
-
-    for (size_t i = 0; i < num_samples; ++i) {
-        for (size_t j = 0; j < C; ++j) {
-            for (size_t k = 0; k < T; ++k) {
-                tgroup_mean_data[i][j][k] = exp(tgroup_mean_data[i][j][k]);
-            }
-        }
-    }
-
-    // fill in alternatively spliced transcripts
-    for (unsigned int stg = 0; stg < spliced_tgroup_indexes.size(); ++stg) {
-        unsigned int tg = spliced_tgroup_indexes[stg];
-        for (unsigned int k = 0; k < tgroup_tids[tg].size(); ++k) {
-            for (size_t i = 0; i < num_samples; ++i) {
-                for (size_t j = 0; j < C; ++j) {
-                    output[i][j][k] =
-                        tgroup_mean_data[i][j][tg] *
-                        splicing_data[stg][i][j][k];
-                }
-            }
-        }
-    }
-
-    // fill in transcripts that are not alternatively spliced
-    for (size_t k = 0; k < N; ++k) {
-        unsigned int tg = tgroup[k];
-        if (tgroup_tids[tg].size() != 1) continue;
-
-        for (size_t i = 0; i < num_samples; ++i) {
-            for (size_t j = 0; j < C; ++j) {
-                output[i][j][tgroup_tids[tg][k]] = tgroup_mean_data[i][j][tg];
-            }
-        }
     }
 }
 
@@ -2319,7 +2270,7 @@ void Summarize::condition_feature_expression(FILE* output, double credible_inter
 void Summarize::condition_gene_expression(boost::multi_array<float, 3>& output)
 {
     boost::multi_array<float, 3> transcript_expr_data(boost::extents[num_samples][C][N]);
-    condition_transcript_expression(transcript_expr_data);
+    read_condition_mean(transcript_expr_data);
 
     typedef std::pair<GeneID, GeneName> item_t;
     for (size_t i = 0; i < num_samples; ++i) {
@@ -2753,15 +2704,21 @@ void Summarize::read_gene_features(std::vector<Interval>& feature_intervals,
 }
 
 
+void Summarize::read_condition_mean(boost::multi_array<float, 3>& output)
+{
+    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/mean", H5P_DEFAULT);
+    output.resize(boost::extents[num_samples][C][N]);
+    H5Dread_checked(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL,
+                    H5P_DEFAULT, output.data());
+    H5Dclose(dataset);
+}
+
+
 void Summarize::read_tgroup_mean(boost::multi_array<float, 3>& output)
 {
     // read condition-wise transcript expression data
-    hid_t dataset = H5Dopen2_checked(h5_file, "/condition/mean", H5P_DEFAULT);
     boost::multi_array<float, 3> condition_mean;
-    condition_mean.resize(boost::extents[num_samples][C][N]);
-    H5Dread_checked(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL,
-                    H5P_DEFAULT, condition_mean.data());
-    H5Dclose(dataset);
+    read_condition_mean(condition_mean);
 
     // summarize by tgroup
     output.resize(boost::extents[num_samples][C][T]);
