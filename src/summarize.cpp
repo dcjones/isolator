@@ -63,6 +63,11 @@ Summarize::Summarize(const char* filename)
     H5Dvlen_reclaim(datatype, dataspace, H5P_DEFAULT, string_data);
     H5Dclose(dataset);
 
+    // map transript_id to tid
+    for (unsigned int tid = 0; tid < N; ++tid) {
+        transcript_id_to_tid[transcript_ids[tid]] = tid;
+    }
+
     // read gene_name dataset
     dataset = H5Dopen2_checked(h5_file, "/gene_name", H5P_DEFAULT);
     H5Dread_checked(dataset, datatype, H5S_ALL, H5S_ALL,
@@ -1991,6 +1996,119 @@ void Summarize::differential_transcript_expression(FILE* output, double credible
                         condition_names[condition_a].c_str(),
                         condition_names[condition_b].c_str(),
                         down_pr, up_pr, work[num_samples/2]);
+                if (print_credible_interval) {
+                    fprintf(output, "\t%e\t%e",
+                            work[lround((num_samples - 1) * lower_quantile)],
+                            work[lround((num_samples - 1) * upper_quantile)]);
+                }
+                fputc('\n', output);
+            }
+        }
+    }
+}
+
+
+void Summarize::condition_group_expression(const std::vector<std::vector<std::string> >& groups,
+                                           boost::multi_array<float, 3>& output)
+{
+    boost::multi_array<float, 3> transcript_expr_data(boost::extents[num_samples][C][N]);
+    read_condition_mean(transcript_expr_data);
+
+    for (size_t i = 0; i < num_samples; ++i) {
+        for (size_t j = 0; j < C; ++j) {
+            size_t k = 0;
+            BOOST_FOREACH (const std::vector<std::string>& group, groups) {
+                output[i][j][k] = 0.0;
+                BOOST_FOREACH (const std::string& transcript_id, group) {
+                    unsigned int tid = transcript_id_to_tid[TranscriptID(transcript_id)];
+                    output[i][j][k] += transcript_expr_data[i][j][tid];
+                }
+                ++k;
+            }
+        }
+    }
+}
+
+void Summarize::differential_group_expression(FILE* output, double credible_interval,
+                                              double effect_size,
+                                              const std::vector<std::vector<std::string> >& groups)
+{
+    if (isnan(effect_size)) {
+        effect_size = 1.0;
+    }
+    bool print_credible_interval = !isnan(credible_interval);
+
+    double lower_quantile = 0.5 - credible_interval/2;
+    double upper_quantile = 0.5 + credible_interval/2;
+
+    fprintf(output,
+            "gene_names\tgene_ids\ttranscript_ids\tcondition_a\tcondition_b\t"
+            "down_pr\tup_pr\tmedian_log2_fold_change");
+    if (print_credible_interval) {
+        fprintf(output, "\tlower_log2_fold_change\tupper_log2_fold_change");
+    }
+    fputc('\n', output);
+
+    boost::multi_array<float, 3> expr_data(boost::extents[num_samples][C][groups.size()]);
+    condition_group_expression(groups, expr_data);
+
+    std::vector<double> work(num_samples);
+    for (unsigned int condition_a = 0; condition_a < C - 1; ++condition_a) {
+        for (unsigned int condition_b = condition_a + 1; condition_b < C; ++condition_b) {
+            for (size_t i = 0; i < groups.size(); ++i) {
+                double up_pr = 0.0,
+                       down_pr = 0.0;
+
+                for (unsigned int j = 0; j < num_samples; ++j) {
+                    work[j] = log2(expr_data[j][condition_a][i] /
+                                   expr_data[j][condition_b][i]);
+                    if (work[j] >= effect_size) {
+                        up_pr += 1;
+                    }
+                    else if (work[j] <= -effect_size)  {
+                        down_pr += 1;
+                    }
+                }
+                up_pr /= num_samples;
+                down_pr /= num_samples;
+                std::sort(work.begin(), work.end());
+
+                std::set<GeneID> group_gene_ids;
+                std::set<GeneName> group_gene_names;
+                BOOST_FOREACH (const std::string& transcript_id, groups[i]) {
+                    unsigned int tid = transcript_id_to_tid[TranscriptID(transcript_id)];
+                    group_gene_ids.insert(gene_ids[tid]);
+                    group_gene_names.insert(gene_names[tid]);
+                }
+
+                bool first_item = true;
+                BOOST_FOREACH (GeneName gene_name, group_gene_names) {
+                    if (!first_item) fputc(',', output);
+                    else first_item = false;
+                    fputs(gene_name.get().c_str(), output);
+                }
+
+                fputc('\t', output);
+                first_item = true;
+                BOOST_FOREACH (GeneID gene_id, group_gene_ids) {
+                    if (!first_item) fputc(',', output);
+                    else first_item = false;
+                    fputs(gene_id.get().c_str(), output);
+                }
+
+                fputc('\t', output);
+                first_item = true;
+                BOOST_FOREACH (const std::string& transcript_id, groups[i]) {
+                    if (!first_item) fputc(',', output);
+                    else first_item = false;
+                    fputs(transcript_id.c_str(), output);
+                }
+
+                fprintf(output, "\t%s\t%s\t%0.3f\t%0.3f\t%e",
+                        condition_names[condition_a].c_str(),
+                        condition_names[condition_b].c_str(),
+                        down_pr, up_pr, work[num_samples/2]);
+
                 if (print_credible_interval) {
                     fprintf(output, "\t%e\t%e",
                             work[lround((num_samples - 1) * lower_quantile)],

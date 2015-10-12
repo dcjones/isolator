@@ -190,6 +190,29 @@ static int isolator_describe(int argc, char* argv[])
 }
 
 
+static std::vector<std::vector<std::string> > read_groups_file(const char* filename)
+{
+    char line[1024];
+    FILE* input = fopen(filename, "r");
+    if (!input) {
+        Logger::abort("Unable to open %s for reading.", optarg);
+    }
+
+    std::vector<std::vector<std::string> > groups;
+    while (fgets(line, sizeof(line), input)) {
+        std::vector<std::string> group;
+        for (const char* transcript_id = strtok(line, ",");
+             transcript_id; transcript_id = strtok(NULL, ",")) {
+            group.push_back(std::string(transcript_id));
+        }
+        groups.push_back(group);
+    }
+    fclose(input);
+
+    return groups;
+}
+
+
 static void print_summarize_usage(FILE* fout)
 {
     fprintf(fout, "Usage: isolator summarize strategy [options] isolator-output.h5\n");
@@ -225,6 +248,7 @@ static void print_summarize_strategies(FILE* fout)
            "  differential-transcript-expression\n"
            "  differential-splicing\n"
            "  differential-feature-splicing\n"
+           "  differential-group-expression\n"
            "  condition-splicing\n"
            "  condition-transcription\n"
            "  experiment-splicing-sigma\n"
@@ -246,6 +270,7 @@ static int isolator_summarize(int argc, char* argv[])
         {"normalize",    no_argument,       NULL, 'n'},
         {"credible",     required_argument, NULL, 'c'},
         {"effect-size",  required_argument, NULL, 'e'},
+        {"groups",       required_argument, NULL, 'g'},
         {0, 0, 0, 0}
     };
 
@@ -256,6 +281,7 @@ static int isolator_summarize(int argc, char* argv[])
     double credible_interval = NAN;
     double minimum_effect_size = NAN;
     bool unnormalized = true;
+    std::vector<std::vector<std::string> > groups;
 
     while (true) {
         opt = getopt_long(argc, argv, "ho:s:l", long_options, &opt_idx);
@@ -285,6 +311,10 @@ static int isolator_summarize(int argc, char* argv[])
 
             case 'e':
                 minimum_effect_size = atof(optarg);
+                break;
+
+            case 'g':
+                groups = read_groups_file(optarg);
                 break;
 
             case '?':
@@ -374,6 +404,16 @@ static int isolator_summarize(int argc, char* argv[])
     else if (strcmp(strategy, "differential-transcript-expression") == 0) {
         summarize.differential_transcript_expression(out_file, credible_interval,
                                                      minimum_effect_size);
+    }
+    else if (strcmp(strategy, "differential-group-expression") == 0) {
+        if (groups.empty()) {
+            fprintf(stderr,
+                    "No groups specified. Use the '--groups' option to pass "
+                    "the name of a file containing groups of transcripts.");
+            return EXIT_FAILURE;
+        }
+        summarize.differential_group_expression(out_file, credible_interval,
+                                                 minimum_effect_size, groups);
     }
     else if (strcmp(strategy, "condition-splicing") == 0) {
         summarize.condition_splicing(out_file, credible_interval);

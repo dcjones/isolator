@@ -62,6 +62,10 @@ class Summarize
         void differential_transcript_expression(FILE* output, double credible_interval,
                                                 double effect_size);
 
+        void differential_group_expression(FILE* output, double credible_interval,
+                                           double effect_size,
+                                           const std::vector<std::vector<std::string> >& groups);
+
         //void differential_transcription(FILE* output, double credible_interval,
                                         //double effect_size);
 
@@ -125,6 +129,9 @@ class Summarize
         // output is indexed by: condition, gene, sample
         void condition_gene_expression(boost::multi_array<float, 3>& output);
 
+        void condition_group_expression(const std::vector<std::vector<std::string> >& groups,
+                                        boost::multi_array<float, 3>& output);
+
         //void read_condition_tgroup_mean(unsigned int condition,
                                         //boost::numeric::ublas::matrix<float>& data);
 
@@ -162,6 +169,9 @@ class Summarize
 
         // transcript_id indexed by tid
         std::vector<TranscriptID> transcript_ids;
+
+        // tid indexed by transcript_id
+        std::map<TranscriptID, unsigned int> transcript_id_to_tid;
 
         // gene_name indexed by tid
         std::vector<GeneName> gene_names;
