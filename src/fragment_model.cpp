@@ -640,6 +640,8 @@ void FragmentModel::estimate(TranscriptSet& ts,
         }
 
         frag_len_dist = new EmpDist(frag_len_vals, frag_len_lens, frag_lens.size());
+
+#if 0
         {
             FILE* out = fopen("frag-len-dist.txt", "w");
             for (pos_t fl = 1; fl < 1000; ++fl) {
@@ -650,6 +652,7 @@ void FragmentModel::estimate(TranscriptSet& ts,
 
             fclose(out);
         }
+#endif
 
         delete [] frag_len_vals;
         delete [] frag_len_lens;
