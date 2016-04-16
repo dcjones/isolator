@@ -1208,23 +1208,22 @@ float FragWeightEstimationThread::transcript_weight(
 
         transcript_gc_bias(locus, t, frag_len);
 
-        ws[frag_len] = 0.0;
-
-        ws[frag_len] +=
-            fm.strand_specificity *
-            dot(&seqbias[0][0],
-                &seqbias[1][frag_len - 1],
-                posbias,
-                tpbias,
-                trans_len - frag_len + 1);
-
-        ws[frag_len] +=
-            (1.0 - fm.strand_specificity) *
-            dot(&seqbias[1][0],
-                &seqbias[0][frag_len - 1],
-                posbias,
-                tpbias,
-                trans_len - frag_len + 1);
+        if (t.strand == strand_pos) {
+            ws[frag_len] =
+                dot(&seqbias[0][0],
+                    &seqbias[1][frag_len - 1],
+                    posbias,
+                    tpbias,
+                    trans_len - frag_len + 1);
+        }
+        else {
+            ws[frag_len] =
+                dot(&seqbias[1][0],
+                    &seqbias[0][frag_len - 1],
+                    posbias,
+                    tpbias,
+                    trans_len - frag_len + 1);
+        }
     }
 
     tw = 0.0;
